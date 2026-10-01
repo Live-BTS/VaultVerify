@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// BTS Phase 1 — Digital Reference Collection Platform
+// Multi-tenant: each agency gets its own branding.
+// Statuses (SQLite has no enums — values documented inline):
+//   RequestStatus: SENT | OPENED | IN_PROGRESS | COMPLETED | FLAGGED | EXPIRED
+//   Proficiency:   NEVER | SUPERVISED | INDEPENDENT | CAN_TEACH
+//   Severity:      LOW | MEDIUM | HIGH
+//   Channel:       SMS | EMAIL
+//   IdentityMethod: EMAIL_DOMAIN | CALLBACK_CODE | SKIPPED
+// ─────────────────────────────────────────────────────────────
+
+model Agency {
+  id           String   @id @default(cuid())
+  name         String   // e.g. "MEDS Talent"
+  slug         String   @unique
+  logoText     String   @default("MEDS") // monogram shown in the badge
+  tagline      String   @default("Verified references. Faster placements.")
+  primaryColor String   @default("#0F766E") // teal-700
+  accentColor  String   @default("#B45309") // amber-700
+  createdAt    DateTime @default(now())
+
+  candidates Candidate[]
+}
+
+model Candidate {
+  id               String    @id @default(cuid())
+  agencyId         String
+  agency           Agency    @relation(fields: [agencyId], references: [id])
+  fullName         String
+  email            String
+  phone            String    @default("")
+  role             String    @default("RN") // RN | LPN | CNA | NP
+  specialty        String    @default("")   // MEDSURG | ICU | ER | ...
+  yearsExperience  Int       @default(0)
+  city             String    @default("")
+  state            String    @default("")
+  licenseNumber    String    @default("")
+  consentSignature String?   // typed signature on the release
+  consentSignedAt  DateTime?
+  createdAt        DateTime  @default(now())
+
+  requests ReferenceRequest[]
+  skills   CandidateSkill[]
+}
+
+model ReferenceRequest {
+  id            String    @id @default(cuid())
+  candidateId   String
+  candidate     Candidate @relation(fields: [candidateId], references: [id])
+  refName       String
+  refTitle      String
+  refEmail      String
+  refPhone      String    @default("")
+  facilityName  String
+  facilityCity  String    @default("")
+  facilityState String    @default("")
+  relationship  String    @default("") // Supervisor | Charge Nurse | Peer | Educator
+  workStartDate String    @default("")
+  workEndDate   String    @default("") // empty = currently working
+  // lifecycle
+  token        String    @unique @default(cuid())
+  status       String    @default("SENT")
+  sentAt       DateTime  @default(now())
+  openedAt     DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  expiresAt    DateTime
+  reminderCount Int      @default(0)
+  lastReminderAt DateTime?
+  createdAt    DateTime  @default(now())
+
+  response ReferenceResponse?
+  flags    FraudFlag[]
+}
+
+model ReferenceResponse {
+  id             String          @id @default(cuid())
+  requestId      String          @unique
+  request        ReferenceRequest @relation(fields: [requestId], references: [id])
+  // identity + relationship verification
+  identityMethod String          @default("SKIPPED") // EMAIL_DOMAIN | CALLBACK_CODE | SKIPPED
+  verifiedDomain String?         // matched employer domain
+  confirmedRelationship String  @default("") // reference's own capacity
+  confirmedFacility     String  @default("")
+  confirmedDates        String  @default("")
+  mismatchNotes  String          @default("")
+  // answers: JSON [{ key, question, type, value, anchor? }]
+  answers        String          @default("[]")
+  overallRating  Float?          // computed avg of 1-5 answers
+  q8Discipline   Boolean         @default(false)
+  q8Explanation  String?
+  remarks        String          @default("")
+  // e-signature + audit
+  signatureName  String
+  signedAt       DateTime
+  signerIp       String          @default("")
+  signerUserAgent String         @default("")
+  durationSeconds Int            @default(0)
+  // skills verification (optional in v1)
+  skillsVerified Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+
+  skillChecks SkillVerification[]
+}
+
+model CandidateSkill {
+  id            String   @id @default(cuid())
+  candidateId   String
+  candidate     Candidate @relation(fields: [candidateId], references: [id])
+  skillName     String
+  specialty     String
+  highRisk      Boolean  @default(false)
+  proficiency   String   // NEVER | SUPERVISED | INDEPENDENT | CAN_TEACH
+  recencyMonths Int      @default(0)
+  selfReported  Boolean  @default(true)
+  createdAt     DateTime @default(now())
+}
+
+model SkillVerification {
+  id               String           @id @default(cuid())
+  responseId       String
+  response         ReferenceResponse @relation(fields: [responseId], references: [id])
+  skillName        String
+  nurseProficiency String           // what the nurse self-reported
+  confirmed        Boolean          // reference confirms nurse's level
+  refProficiency   String?          // adjusted level if not confirmed
+  comment          String           @default("")
+  createdAt        DateTime         @default(now())
+}
+
+model FraudFlag {
+  id        String           @id @default(cuid())
+  requestId String
+  request   ReferenceRequest @relation(fields: [requestId], references: [id])
+  type      String // FREE_EMAIL_SURNAME_MATCH | DUPLICATE_IP | RAPID_COMPLETION | DOMAIN_MISMATCH
+  detail    String
+  severity  String @default("LOW") // LOW | MEDIUM | HIGH
+  resolved  Boolean @default(false)
+  createdAt DateTime @default(now())
+}
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  channel   String // SMS | EMAIL
+  kind      String // INVITE | REMINDER | SWAP_NOTICE | COMPLETION
+  to        String
+  subject   String   @default("")
+  body      String
+  requestId String?
+  status    String   @default("SIMULATED") // SENT | SIMULATED | FAILED
+  provider  String   @default("sandbox")
+  createdAt DateTime @default(now())
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  actorType String // CANDIDATE | REFERENCE | RECRUITER | SYSTEM
+  actorId   String   @default("")
+  action    String   // e.g. PROFILE_CREATED, REQUEST_SENT, FORM_OPENED, FORM_SUBMITTED, PDF_DOWNLOADED
+  entity    String   @default("")
+  entityId  String   @default("")
+  detail    String   @default("{}") // JSON
+  ip        String   @default("")
+  createdAt DateTime @default(now())
+}
