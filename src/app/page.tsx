@@ -7,13 +7,17 @@ import { CandidateDashboard } from "@/components/bts/CandidateDashboard";
 import { RecruiterDashboard } from "@/components/bts/RecruiterDashboard";
 import { ReferenceFlow } from "@/components/bts/ReferenceFlow";
 import { SuperAdmin } from "@/components/bts/SuperAdmin";
+import { ChecklistPortal } from "@/components/bts/checklist/ChecklistPortal";
+import { ShareView } from "@/components/bts/checklist/ShareView";
 import { Spinner } from "@/components/bts/brand";
 
-type View = "home" | "wizard" | "candidate" | "recruiter" | "super";
+type View = "home" | "wizard" | "candidate" | "recruiter" | "super" | "checklist" | "share";
 
 export default function Page() {
   const [view, setView] = useState<View>("home");
   const [refToken, setRefToken] = useState<string | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [agency, setAgency] = useState<AgencyInfo | null>(null);
   const [booted, setBooted] = useState(false);
 
@@ -22,6 +26,8 @@ export default function Page() {
     const init = async () => {
       const params = new URLSearchParams(window.location.search);
       const r = params.get("r");
+      const s = params.get("s");
+      const invite = params.get("invite");
       const view = params.get("view");
       try {
         const res = await fetch("/api/bootstrap");
@@ -32,9 +38,14 @@ export default function Page() {
       }
       if (cancelled) return;
       if (r) setRefToken(r);
+      if (s) setShareToken(s);
+      if (invite) setInviteToken(invite);
       if (view === "super") setView("super");
+      if (view === "checklist") setView("checklist");
+      if (view === "recruiter") setView("recruiter");
+      if (s) setView("share");
       setBooted(true);
-      if (r && window.history?.replaceState) {
+      if ((r || s) && window.history?.replaceState) {
         window.history.replaceState({}, "", "/");
       }
     };
@@ -90,11 +101,15 @@ export default function Page() {
       return <RecruiterDashboard onSignOut={goHome} onSuperAdmin={() => setView("super")} />;
     case "super":
       return <SuperAdmin onExit={goHome} />;
+    case "checklist":
+      return <ChecklistPortal inviteToken={inviteToken} onExit={goHome} />;
+    case "share":
+      return <ShareView token={shareToken ?? ""} onExit={goHome} />;
     default:
       return (
         <LandingView
           agency={agency}
-          onRole={(r: Role) => setView(r === "candidate" ? "wizard" : "recruiter")}
+          onRole={(r: Role) => setView(r === "candidate" ? "wizard" : r === "checklist" ? "checklist" : "recruiter")}
           stats={{ completionRate: 86, avgTimeHours: 31 }}
         />
       );

@@ -11,7 +11,7 @@ const MOCK_STEPS = [
   { q: "Would you recommend this nurse for ICU step-down?", done: false, active: true },
 ];
 
-export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "candidate" | "recruiter") => void }) {
+export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "candidate" | "recruiter" | "checklist") => void }) {
   const reduce = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
 
@@ -92,13 +92,19 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
           </motion.p>
 
           <motion.div variants={fadeUp} className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <MagneticButton onClick={() => onRole("candidate")}>
-              <UserRound className="h-4 w-4" /> I&apos;m a nurse — build my profile <ChevronRight className="h-4 w-4" />
+            <MagneticButton onClick={() => onRole("checklist")}>
+              <UserRound className="h-4 w-4" /> I&apos;m a nurse — my skills checklist <ChevronRight className="h-4 w-4" />
             </MagneticButton>
             <GlowButton variant="ghost" onClick={() => onRole("recruiter")}>
               <LayoutDashboard className="h-4 w-4" /> I&apos;m a recruiter — view pipeline
             </GlowButton>
           </motion.div>
+          <motion.p variants={fadeUp} className="mt-4 text-xs text-[#5f807b]">
+            Here for the reference flow?{" "}
+            <button type="button" onClick={() => onRole("candidate")} className="font-semibold text-verify-green underline-offset-2 hover:underline">
+              Build my verified references →
+            </button>
+          </motion.p>
 
           <motion.dl variants={fadeUp} className="mt-12 grid max-w-md grid-cols-3 gap-6">
             {[

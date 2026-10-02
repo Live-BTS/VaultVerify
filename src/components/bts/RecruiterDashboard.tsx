@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { AgencyLogo, StatusBadge, SkillBadge, FlagChip, RatingPips, Spinner } from "./brand";
 import { specialtyLabel, STATUS_META } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
+import { RecruiterChecklists } from "./checklist/RecruiterChecklists";
 import { cn } from "@/lib/utils";
 import { LogIn, RefreshCcw, Download, ShieldAlert, Activity, Inbox, Users, Clock3, Star, Flag, Database } from "lucide-react";
 
@@ -201,9 +202,15 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
         <Tabs defaultValue="pipeline" className="mt-8">
           <TabsList>
             <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
+            <TabsTrigger value="checklists">Checklists</TabsTrigger>
             <TabsTrigger value="notifications">Notifications ({data.notifications.length})</TabsTrigger>
             <TabsTrigger value="audit">Audit trail</TabsTrigger>
           </TabsList>
+
+          {/* ── Checklists (self-assessments — separate from references) ── */}
+          <TabsContent value="checklists" className="mt-4">
+            <RecruiterChecklists code={code} recruiterName={`Recruiter · ${data.agency.name}`} />
+          </TabsContent>
 
           {/* ── Pipeline ── */}
           <TabsContent value="pipeline" className="mt-4">

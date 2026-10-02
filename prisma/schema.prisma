@@ -148,6 +148,114 @@ model FraudFlag {
   createdAt DateTime @default(now())
 }
 
+// ─────────────────────────────────────────────────────────────
+// SKILLS CHECKLIST feature — a self-assessment, separate from references.
+// Candidate owns an account; a checklist is completed ONCE and stays
+// valid for 1 year; any recruiter gets access via expiring share links.
+// Statuses:
+//   Invite.status:   SENT | COMPLETED
+//   Request.status:  PENDING | APPROVED | REJECTED   (superadmin decides)
+//   ShareLink.accessType: ONE_TIME | DURATION
+// ─────────────────────────────────────────────────────────────
+
+model ChecklistAccount {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  title        String   @default("RN")
+  createdAt    DateTime @default(now())
+
+  sessions    ChecklistSession[]
+  invites     ChecklistInvite[]
+  requests    ChecklistRequest[]
+  completions ChecklistCompletion[]
+}
+
+model ChecklistSession {
+  id         String           @id @default(cuid())
+  accountId  String
+  account    ChecklistAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt  DateTime         @default(now())
+  expiresAt  DateTime
+}
+
+// Recruiter → candidate: "please complete this skills checklist"
+model ChecklistInvite {
+  id            String   @id @default(cuid())
+  token         String   @unique @default(cuid()) // claim link /?view=checklist&invite=<token>
+  candidateName String
+  candidateEmail String
+  // recruiter may leave these blank — candidate fills them during completion
+  profession    String   @default("")
+  jobTitle      String   @default("")
+  specialty     String   @default("")
+  recruiterName String
+  facilityName  String   @default("")
+  agencyName    String   @default("MEDS Talent")
+  message       String   @default("")
+  status        String   @default("SENT") // SENT | COMPLETED
+  // linked when a candidate account with a matching email claims it
+  accountId     String?
+  account       ChecklistAccount? @relation(fields: [accountId], references: [id])
+  completionId  String?
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+}
+
+// Candidate → superadmin: "I want this checklist on my profile"
+model ChecklistRequest {
+  id         String           @id @default(cuid())
+  accountId  String
+  account    ChecklistAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profession String
+  jobTitle   String
+  specialty  String // canonical key from the catalog
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  note       String   @default("")
+  requestedAt DateTime @default(now())
+  decidedAt  DateTime?
+  completion ChecklistCompletion?
+}
+
+// The completed self-assessment, saved in the candidate's account for 1 year
+model ChecklistCompletion {
+  id           String           @id @default(cuid())
+  accountId    String
+  account      ChecklistAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profession   String
+  jobTitle     String
+  specialty    String // canonical key
+  specialtyLabel String @default("")
+  // answers snapshot: [{ category, skill, questionType, value, na, highRisk }]
+  answers      String
+  yearsExperience Int @default(0)
+  source       String @default("SELF") // SELF (own request) | RECRUITER (invite)
+  requestId    String?  @unique
+  request      ChecklistRequest? @relation(fields: [requestId], references: [id])
+  inviteId     String?  @unique
+  completedAt  DateTime @default(now())
+  expiresAt    DateTime // completedAt + 365 days
+
+  shareLinks ChecklistShareLink[]
+}
+
+// Candidate shares a completed checklist with a recruiter, with access rules
+model ChecklistShareLink {
+  id           String   @id @default(cuid())
+  token        String   @unique @default(cuid())
+  completionId String
+  completion   ChecklistCompletion @relation(fields: [completionId], references: [id], onDelete: Cascade)
+  accessType   String   @default("DURATION") // ONE_TIME | DURATION
+  durationDays Int?     // null for ONE_TIME
+  label        String   @default("") // optional recipient note, e.g. "For SNF recruiter"
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime? // set for DURATION
+  viewedAt     DateTime? // set on first view for ONE_TIME
+  viewCount    Int      @default(0)
+  revoked      Boolean  @default(false)
+}
+
 // Zipvault-compatible skill checklist templates (MyZipVault import format)
 model SkillTemplate {
   id          String   @id @default(cuid())

@@ -77,6 +77,19 @@ export const BUILTIN_CHECKLISTS = [
       ["Psychosocial & End-of-Life", "Family communication & end-of-life care", false],
     ],
   },
+  {
+    // From the MyZipVault import template example rows (Nursing / RN / General)
+    specialty: "GENERAL",
+    skills: [
+      ["Medication Administration", "Documentation on M.A.R.", false],
+      ["Medication Administration", "Dose Calculation", false],
+      ["Medication Administration", "Generic Equivalents", false],
+      ["Medication Administration", "Usage of PDR", false],
+      ["Medication Administration", "Knowledge of Drug Actions/Interactions", false],
+      ["Medication Administration", "IV push / infusion medications", false],
+      ["Medication Administration", "Diabetic care & insulin management", true],
+    ],
+  },
 ] as const;
 
 export async function seedBuiltinTemplates() {

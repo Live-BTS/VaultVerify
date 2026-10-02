@@ -54,6 +54,22 @@ export const REMINDER_DAYS = [2, 5, 9];
 export const SWAP_PROMPT_DAY = 10;
 export const RAPID_COMPLETION_SECONDS = 60;
 
+// ── Skills Checklist (self-assessment) feature constants ──
+export const CHECKLIST_VALIDITY_DAYS = 365;
+export const SHARE_PRESETS = [
+  { key: "ONE_TIME", label: "One-time view", days: null as number | null },
+  { key: "1", label: "1 day", days: 1 },
+  { key: "7", label: "1 week", days: 7 },
+  { key: "14", label: "14 days", days: 14 },
+  { key: "custom", label: "Custom days", days: -1 },
+] as const;
+
+export function shareAccessLabel(link: { accessType: string; durationDays: number | null }): string {
+  return link.accessType === "ONE_TIME"
+    ? "One-time view"
+    : `${link.durationDays} day${(link.durationDays ?? 0) > 1 ? "s" : ""} access`;
+}
+
 export interface AnswerRecord {
   key: string;
   type: "rating" | "text" | "select" | "boolean";

@@ -1,0 +1,529 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
+import { specialtyLabel } from "@/lib/bts/checklistShared";
+import { VaultMark, Spinner } from "../brand";
+import { ChecklistFill, type CatalogSet, type FillSpec } from "./ChecklistFill";
+import {
+  BadgeCheck, CalendarClock, Check, ClipboardList, Copy, Download, ExternalLink, Hourglass,
+  Inbox, Link2, Plus, ShieldCheck, X,
+} from "lucide-react";
+
+// ── Skills Checklist candidate portal — accounts, requests, invites, shares ──
+
+interface ShareLinkDto { id: string; token: string; accessType: string; durationDays: number | null; label: string; createdAt: string; expiresAt: string | null; viewedAt: string | null; viewCount: number; revoked: boolean }
+interface CompletionDto { id: string; profession: string; jobTitle: string; specialty: string; specialtyLabel: string; source: string; completedAt: string; expiresAt: string; yearsExperience: number; shareLinks: ShareLinkDto[] }
+interface RequestDto { id: string; profession: string; jobTitle: string; specialty: string; status: string; requestedAt: string; completionId: string | null }
+interface InviteDto { id: string; recruiterName: string; facilityName: string; agencyName: string; profession: string; jobTitle: string; specialty: string; status: string; createdAt: string; completionId: string | null; message: string }
+interface MeData { account: { name: string; email: string; title: string } | null; invites?: InviteDto[]; requests?: RequestDto[]; completions?: CompletionDto[] }
+
+const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const monthsLeft = (d: string) => Math.max(0, Math.round((new Date(d).getTime() - Date.now()) / (30.4 * 24 * 3600 * 1000)));
+
+// ── Share dialog ──
+function ShareDialog({ completion, onClose, onCreated }: { completion: CompletionDto; onClose: () => void; onCreated: () => void }) {
+  const [preset, setPreset] = useState<string>("ONE_TIME");
+  const [customDays, setCustomDays] = useState("30");
+  const [label, setLabel] = useState("");
+  const [created, setCreated] = useState<{ token: string; accessType: string; durationDays: number | null; expiresAt: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const chosen = SHARE_PRESETS.find((p) => p.key === preset)!;
+      const accessType = chosen.key === "ONE_TIME" ? "ONE_TIME" : "DURATION";
+      const durationDays = chosen.key === "ONE_TIME" ? null : chosen.key === "custom" ? Number(customDays) : chosen.days;
+      const res = await fetch("/api/checklist/share", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completionId: completion.id, accessType, durationDays, label }),
+      });
+      const d = await res.json();
+      if (d.ok) { setCreated(d.link); onCreated(); } else throw new Error(d.error);
+    } catch { /* toast-less: show inline error state via button re-enable */ } finally { setBusy(false); }
+  };
+
+  const link = created ? `${window.location.origin}/?s=${created.token}` : "";
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-vault-dark/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 24 }}
+        className="w-full max-w-md rounded-2xl border border-vault-border bg-[#062024] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-semibold text-verify-light"><Link2 className="h-4 w-4 text-verify-green" /> Share checklist</h3>
+            <p className="mt-0.5 text-xs text-[#8fb0ab]">{completion.specialtyLabel} · {completion.jobTitle}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-[#8fb0ab] hover:bg-white/5 hover:text-verify-light"><X className="h-4 w-4" /></button>
+        </div>
+
+        {!created ? (
+          <>
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-[#8fb0ab]">Who can open it & for how long</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {SHARE_PRESETS.map((p) => (
+                <button key={p.key} type="button" onClick={() => setPreset(p.key)}
+                  className={cn("rounded-xl border px-3 py-2.5 text-left text-sm transition",
+                    preset === p.key ? "border-verify-green bg-verify-green/15 text-verify-green" : "border-vault-border text-[#8fb0ab] hover:text-verify-light")}>
+                  <span className="block font-semibold">{p.label}</span>
+                  <span className="mt-0.5 block text-[10px] opacity-75">
+                    {p.key === "ONE_TIME" ? "Viewed once, then dead" : p.key === "custom" ? "You pick the days" : p.days === 1 ? "24 hours" : `${p.days} days from now`}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {preset === "custom" && (
+              <div className="mt-3">
+                <Label className="text-verify-light/80">Days the link stays open</Label>
+                <Input type="number" min={1} max={365} value={customDays} onChange={(e) => setCustomDays(e.target.value)}
+                  className="mt-1 border-vault-border bg-vault-dark/60 text-verify-light" />
+              </div>
+            )}
+            <div className="mt-3">
+              <Label className="text-verify-light/80">Note for the recipient (optional)</Label>
+              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. For the SNF recruiter"
+                className="mt-1 border-vault-border bg-vault-dark/60 text-verify-light placeholder:text-[#5c7a76]" />
+            </div>
+            <Button onClick={create} disabled={busy} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+              {busy ? "Creating…" : "Create share link"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="mt-4 rounded-xl border border-verify-green/30 bg-verify-green/10 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold text-verify-green"><BadgeCheck className="h-4 w-4" /> Link ready</p>
+              <p className="mt-1 text-xs text-[#c9ded9]">
+                Access: <span className="font-semibold">{shareAccessLabel(created)}</span>
+                {created.expiresAt && created.accessType === "DURATION" ? ` — expires ${fmt(created.expiresAt)}` : created.accessType === "ONE_TIME" ? " — first view burns the link" : ""}
+              </p>
+            </div>
+            <div className="mt-3 break-all rounded-xl border border-vault-border bg-vault-dark/70 p-3 font-mono text-xs text-verify-light">{link}</div>
+            <div className="mt-4 flex gap-2">
+              <Button onClick={() => { navigator.clipboard.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); }}
+                className="flex-1 bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                {copied ? <><Check className="mr-1.5 h-4 w-4" /> Copied</> : <><Copy className="mr-1.5 h-4 w-4" /> Copy link</>}
+              </Button>
+              <Button variant="ghost" onClick={onClose} className="border border-vault-border text-[#8fb0ab] hover:text-verify-light">Done</Button>
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-[#5c7a76]">
+              Send this to any recruiter. They’ll see the access type and deadline on the page, and can download the PDF.
+            </p>
+          </>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ── Main portal ──
+export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string | null; onExit: () => void }) {
+  const [me, setMe] = useState<MeData | null>(null);
+  const [sets, setSets] = useState<CatalogSet[]>([]);
+  const [booting, setBooting] = useState(true);
+  // auth form
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [form, setForm] = useState({ name: "", email: "", password: "", title: "RN" });
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // dashboard
+  const [tab, setTab] = useState<"mine" | "requests" | "invites">("mine");
+  const [showRequest, setShowRequest] = useState(false);
+  const [fillSpec, setFillSpec] = useState<FillSpec | null>(null);
+  const [shareFor, setShareFor] = useState<CompletionDto | null>(null);
+  const [claimedInvite, setClaimedInvite] = useState<string | null>(null);
+
+  const loadMe = useCallback(async () => {
+    const res = await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
+    const d: MeData & { ok: boolean } = await res.json();
+    setMe({ account: d.account ?? null, invites: d.invites, requests: d.requests, completions: d.completions });
+    return d.account;
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/checklists");
+        const d = await res.json();
+        if (d.ok) setSets(d.checklists);
+        await loadMe();
+      } catch { /* portal still renders */ } finally { setBooting(false); }
+    })();
+  }, [loadMe]);
+
+  // claim an invite link after sign-in
+  useEffect(() => {
+    if (!me?.account || !inviteToken || claimedInvite === inviteToken) return;
+    setClaimedInvite(inviteToken);
+    fetch("/api/checklist/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "claim", token: inviteToken }) })
+      .then(() => loadMe())
+      .catch(() => undefined);
+  }, [me?.account, inviteToken, claimedInvite, loadMe]);
+
+  const auth = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setBusy(true);
+    setAuthError(null);
+    try {
+      const res = await fetch("/api/checklist/account", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: mode, ...form }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error ?? "Something went wrong");
+      await loadMe();
+      if (window.history?.replaceState) window.history.replaceState({}, "", "/");
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Something went wrong");
+    } finally { setBusy(false); }
+  };
+
+  const signOut = async () => {
+    await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) });
+    setMe({ account: null });
+  };
+
+  // ── Fill flow takes over ──
+  if (fillSpec) {
+    return (
+      <ChecklistFill
+        spec={fillSpec}
+        sets={sets}
+        onExit={async () => { setFillSpec(null); await loadMe(); }}
+        onDone={async () => { setFillSpec(null); setTab("mine"); await loadMe(); }}
+      />
+    );
+  }
+
+  // ── Auth gate ──
+  if (booting) {
+    return <div className="flex min-h-screen items-center justify-center bg-vault-dark"><Spinner label="Opening your vault…" /></div>;
+  }
+  if (!me?.account) {
+    return (
+      <div className="vv-dark flex min-h-screen items-center justify-center px-4 py-10">
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-md">
+          <div className="rounded-2xl border border-vault-border bg-vault-teal/20 p-8 backdrop-blur-md">
+            <div className="flex flex-col items-center text-center">
+              <VaultMark size={44} />
+              <h1 className="mt-4 text-xl font-semibold text-verify-light">Skills Checklist</h1>
+              <p className="mt-1 text-sm text-[#8fb0ab]">
+                {mode === "login" ? "Sign in to your self-assessments." : "Create your account — complete a checklist once, reuse it for a year."}
+              </p>
+            </div>
+            {inviteToken && (
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-verify-green/30 bg-verify-green/10 p-3 text-xs text-verify-green">
+                <Inbox className="h-4 w-4 shrink-0" /> A recruiter sent you a checklist — sign in or create an account with the same email to claim it.
+              </div>
+            )}
+            <form onSubmit={auth} className="mt-6 space-y-3.5">
+              {mode === "signup" && (
+                <div>
+                  <Label htmlFor="cp-name" className="text-verify-light/80">Full name</Label>
+                  <Input id="cp-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Emma Chen"
+                    className="mt-1 border-vault-border bg-vault-dark/60 text-verify-light placeholder:text-[#5c7a76]" />
+                </div>
+              )}
+              <div>
+                <Label htmlFor="cp-email" className="text-verify-light/80">Email</Label>
+                <Input id="cp-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@example.com"
+                  className="mt-1 border-vault-border bg-vault-dark/60 text-verify-light placeholder:text-[#5c7a76]" />
+              </div>
+              <div>
+                <Label htmlFor="cp-pass" className="text-verify-light/80">Password</Label>
+                <Input id="cp-pass" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={mode === "signup" ? "At least 8 characters" : "••••••••"}
+                  className="mt-1 border-vault-border bg-vault-dark/60 text-verify-light placeholder:text-[#5c7a76]" />
+              </div>
+              {authError && <p className="text-xs font-medium text-rose-400">{authError}</p>}
+              <Button type="submit" disabled={busy} className="w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                {busy ? "One moment…" : mode === "login" ? "Sign in" : "Create account"} <ShieldCheck className="ml-2 h-4 w-4" />
+              </Button>
+            </form>
+            <button type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setAuthError(null); }}
+              className="mt-4 w-full text-center text-xs text-[#8fb0ab] hover:text-verify-light">
+              {mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
+            </button>
+            <div className="mt-4 rounded-xl bg-vault-dark/50 p-3 text-center text-[11px] text-[#8fb0ab]">
+              Demo account: <button type="button" className="font-mono font-semibold text-verify-green underline" onClick={() => { setMode("login"); setForm({ ...form, email: "emma.chen@example.com", password: "demo1234" }); }}>emma.chen@example.com / demo1234</button>
+            </div>
+            <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-[#5c7a76] hover:text-[#8fb0ab]">← Back to site</button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const acc = me.account;
+  const completions = me.completions ?? [];
+  const requests = me.requests ?? [];
+  const invites = me.invites ?? [];
+  const openInvites = invites.filter((i) => i.status !== "COMPLETED");
+  const pendingRequests = requests.filter((r) => r.status === "PENDING");
+  const approvedRequests = requests.filter((r) => r.status === "APPROVED" && !r.completionId);
+
+  const startFill = (spec: FillSpec) => setFillSpec(spec);
+
+  return (
+    <div className="vv-dark min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-vault-dark/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <VaultMark size={32} />
+            <div className="leading-tight">
+              <p className="text-sm font-semibold text-verify-light">Vault<span className="text-verify-green">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-green">Skills Checklist</span></p>
+              <p className="text-[11px] text-[#8fb0ab]">{acc.name} · {acc.email}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setShowRequest(true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+              <Plus className="mr-1 h-3.5 w-3.5" /> Request checklist
+            </Button>
+            <Button variant="ghost" size="sm" onClick={signOut} className="text-[#8fb0ab] hover:text-verify-light">Sign out</Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-5xl px-4 pb-16 pt-8 sm:px-6">
+        {/* summary strip */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            ["My checklists", completions.length, ClipboardList],
+            ["Awaiting approval", pendingRequests.length, Hourglass],
+            ["Requests from recruiters", openInvites.length, Inbox],
+          ].map(([label, value, Icon]) => {
+            const I = Icon as typeof ClipboardList;
+            return (
+              <div key={label as string} className="rounded-xl border border-vault-border bg-vault-teal/20 p-4 backdrop-blur-md">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-[#8fb0ab]"><I className="h-3.5 w-3.5" /> {label as string}</p>
+                <p className="mt-1 text-2xl font-bold text-verify-light">{value as number}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* tabs */}
+        <div className="mt-8 flex gap-2">
+          {([["mine", "My checklists"], ["requests", "Requests"], ["invites", `Invites${openInvites.length ? ` (${openInvites.length})` : ""}`]] as const).map(([k, lb]) => (
+            <button key={k} type="button" onClick={() => setTab(k)}
+              className={cn("rounded-full border px-4 py-1.5 text-sm font-medium transition",
+                tab === k ? "border-verify-green bg-verify-green/15 text-verify-green" : "border-vault-border text-[#8fb0ab] hover:text-verify-light")}>
+              {lb}
+            </button>
+          ))}
+        </div>
+
+        {/* My checklists */}
+        {tab === "mine" && (
+          <div className="mt-6 space-y-4">
+            {completions.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-vault-border p-10 text-center">
+                <ClipboardList className="mx-auto h-8 w-8 text-verify-green/60" />
+                <p className="mt-3 text-sm text-[#8fb0ab]">No completed checklists yet. Request one from the library, or wait for a recruiter invite.</p>
+                <Button size="sm" onClick={() => setShowRequest(true)} className="mt-4 bg-verify-green text-vault-dark hover:bg-verify-green/90"><Plus className="mr-1 h-3.5 w-3.5" /> Request checklist</Button>
+              </div>
+            )}
+            {completions.map((c) => {
+              const expired = new Date(c.expiresAt) < new Date();
+              return (
+                <motion.div key={c.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}
+                  className="rounded-2xl border border-vault-border bg-vault-teal/20 p-5 backdrop-blur-md">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="flex items-center gap-2 text-base font-semibold text-verify-light">
+                        {c.specialtyLabel} <span className="rounded bg-vault-dark/60 px-2 py-0.5 text-[11px] font-normal text-[#8fb0ab]">{c.jobTitle} · {c.profession}</span>
+                      </p>
+                      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#8fb0ab]">
+                        <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold",
+                          expired ? "border-rose-400/40 text-rose-400" : "border-verify-green/40 text-verify-green")}>
+                          <CalendarClock className="h-3 w-3" />
+                          {expired ? "Expired — retake to share again" : `Valid for ${monthsLeft(c.expiresAt)} more month(s) · until ${fmt(c.expiresAt)}`}
+                        </span>
+                        <span>Completed {fmt(c.completedAt)}</span>
+                        <span>· {c.yearsExperience} yr experience · {c.source === "RECRUITER" ? "via recruiter request" : "self-requested"}</span>
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <a href={`/api/checklist/pdf?completion=${c.id}`} download>
+                        <Button size="sm" variant="ghost" className="border border-vault-border text-[#8fb0ab] hover:text-verify-light"><Download className="mr-1.5 h-3.5 w-3.5" /> PDF</Button>
+                      </a>
+                      <Button size="sm" disabled={expired} onClick={() => setShareFor(c)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                        <Link2 className="mr-1.5 h-3.5 w-3.5" /> Share
+                      </Button>
+                    </div>
+                  </div>
+                  {c.shareLinks.length > 0 && (
+                    <div className="mt-4 border-t border-vault-border/50 pt-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-[#8fb0ab]">Shared links</p>
+                      <div className="mt-2 space-y-1.5">
+                        {c.shareLinks.map((s) => {
+                          const dead = s.revoked || (s.accessType === "ONE_TIME" && s.viewedAt) || (s.expiresAt && new Date(s.expiresAt) < new Date());
+                          return (
+                            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-vault-dark/50 px-3 py-2">
+                              <p className="text-xs text-[#c9ded9]">
+                                <span className="font-mono text-verify-green">/?s={s.token.slice(0, 10)}…</span>
+                                {s.label && <span className="ml-2 italic text-[#8fb0ab]">“{s.label}”</span>}
+                              </p>
+                              <p className="flex items-center gap-2 text-[11px]">
+                                <span className={cn("rounded-full border px-2 py-0.5 font-semibold", dead ? "border-vault-border text-[#5c7a76] line-through" : "border-verify-green/40 text-verify-green")}>
+                                  {shareAccessLabel(s)}
+                                </span>
+                                {s.accessType === "ONE_TIME" ? (s.viewedAt ? "viewed" : "unopened") : s.expiresAt ? `until ${fmt(s.expiresAt)}` : ""}
+                                <button type="button" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/?s=${s.token}`)}
+                                  className="rounded p-1 text-[#8fb0ab] hover:text-verify-light" aria-label="Copy link"><Copy className="h-3 w-3" /></button>
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Requests */}
+        {tab === "requests" && (
+          <div className="mt-6 space-y-4">
+            {approvedRequests.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verify-green/30 bg-verify-green/10 p-5">
+                <div>
+                  <p className="text-sm font-semibold text-verify-light">{specialtyLabel(r.specialty)} · {r.jobTitle}</p>
+                  <p className="text-xs text-verify-green">Approved — ready to complete</p>
+                </div>
+                <Button size="sm" onClick={() => startFill({ requestId: r.id, profession: r.profession, jobTitle: r.jobTitle, specialty: r.specialty })}
+                  className="bg-verify-green text-vault-dark hover:bg-verify-green/90">Complete now</Button>
+              </div>
+            ))}
+            {requests.map((r) => (
+              <div key={r.id + r.status} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-vault-border bg-vault-teal/20 p-5 backdrop-blur-md">
+                <div>
+                  <p className="text-sm font-semibold text-verify-light">{specialtyLabel(r.specialty)} · {r.jobTitle} <span className="ml-1 text-xs font-normal text-[#8fb0ab]">{r.profession}</span></p>
+                  <p className="mt-0.5 text-xs text-[#8fb0ab]">Requested {fmt(r.requestedAt)}{r.decidedAt ? ` · decided ${fmt(r.decidedAt)}` : ""}</p>
+                </div>
+                <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
+                  r.status === "PENDING" ? "border-amber-400/40 text-amber-400" : r.status === "APPROVED" ? "border-verify-green/40 text-verify-green" : "border-rose-400/40 text-rose-400")}>
+                  {r.status === "PENDING" ? "Awaiting superadmin approval" : r.status === "APPROVED" ? "Approved" : "Declined"}
+                </span>
+              </div>
+            ))}
+            {requests.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-vault-border p-10 text-center">
+                <p className="text-sm text-[#8fb0ab]">No requests yet. Browse the library and request the checklist you need — a superadmin approves it, then it lands here.</p>
+                <Button size="sm" onClick={() => setShowRequest(true)} className="mt-4 bg-verify-green text-vault-dark hover:bg-verify-green/90"><Plus className="mr-1 h-3.5 w-3.5" /> Request checklist</Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Invites */}
+        {tab === "invites" && (
+          <div className="mt-6 space-y-4">
+            {openInvites.map((i) => (
+              <div key={i.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verify-green/30 bg-verify-green/10 p-5">
+                <div>
+                  <p className="text-sm font-semibold text-verify-light">
+                    {i.specialty ? specialtyLabel(i.specialty) : "Specialty: your choice"} <span className="text-xs font-normal text-[#8fb0ab]">· {i.jobTitle || "job title TBD"}</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-[#8fb0ab]">From {i.recruiterName}{i.facilityName ? ` · ${i.facilityName}` : ""} · {fmt(i.createdAt)}</p>
+                  {i.message && <p className="mt-1 text-xs italic text-[#8fb0ab]">“{i.message}”</p>}
+                </div>
+                <Button size="sm" onClick={() => startFill({ inviteId: i.id, profession: i.profession || "Nursing", jobTitle: i.jobTitle || "RN", specialty: i.specialty, recruiterName: i.recruiterName, facilityName: i.facilityName, message: i.message })}
+                  className="bg-verify-green text-vault-dark hover:bg-verify-green/90">Complete now</Button>
+              </div>
+            ))}
+            {invites.filter((i) => i.status === "COMPLETED").map((i) => (
+              <div key={i.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-vault-border bg-vault-teal/20 p-5 backdrop-blur-md opacity-80">
+                <div>
+                  <p className="text-sm font-semibold text-verify-light">{i.specialtyLabel || i.specialty.replace(/_/g, " ")}</p>
+                  <p className="mt-0.5 text-xs text-[#8fb0ab]">For {i.recruiterName} · completed {i.completedAt ? fmt(i.completedAt) : ""}</p>
+                </div>
+                <span className="flex items-center gap-1 rounded-full border border-verify-green/40 px-3 py-1 text-xs font-semibold text-verify-green"><Check className="h-3 w-3" /> Done</span>
+              </div>
+            ))}
+            {invites.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-vault-border p-10 text-center">
+                <Inbox className="mx-auto h-8 w-8 text-verify-green/60" />
+                <p className="mt-3 text-sm text-[#8fb0ab]">No recruiter invites yet. When a recruiter sends you a checklist request, it shows up here.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* Request-new panel */}
+      <AnimatePresence>
+        {showRequest && (
+          <RequestPanel sets={sets} onClose={() => setShowRequest(false)} onRequested={async () => { setShowRequest(false); setTab("requests"); await loadMe(); }} />
+        )}
+      </AnimatePresence>
+
+      {/* Share dialog */}
+      <AnimatePresence>
+        {shareFor && <ShareDialog completion={shareFor} onClose={() => setShareFor(null)} onCreated={loadMe} />}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ── Catalog picker (candidate requests a checklist → superadmin approves) ──
+function RequestPanel({ sets, onClose, onRequested }: { sets: CatalogSet[]; onClose: () => void; onRequested: () => void }) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const request = async (s: CatalogSet) => {
+    setBusyId(s.key);
+    setError(null);
+    try {
+      const res = await fetch("/api/checklist/request", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profession: s.profession, jobTitle: s.jobTitle, specialty: s.specialty }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error ?? "Request failed");
+      onRequested();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally { setBusyId(null); }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-vault-dark/80 p-4 backdrop-blur-sm sm:items-center" onClick={onClose}>
+      <motion.div initial={{ y: 24, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 24, opacity: 0 }} transition={{ type: "spring", stiffness: 300, damping: 26 }}
+        className="max-h-[80vh] w-full max-w-lg overflow-auto rounded-2xl border border-vault-border bg-[#062024] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-semibold text-verify-light"><Plus className="h-4 w-4 text-verify-green" /> Request a checklist</h3>
+            <p className="mt-1 text-xs text-[#8fb0ab]">Pick from the library. A superadmin approves your request, then you complete it once — it stays valid for a year.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-[#8fb0ab] hover:bg-white/5 hover:text-verify-light"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="mt-4 space-y-2">
+          {sets.map((s) => (
+            <div key={s.key} className="flex items-center justify-between gap-3 rounded-xl border border-vault-border bg-vault-dark/40 p-4">
+              <div>
+                <p className="text-sm font-semibold text-verify-light">{s.label} <span className="text-xs font-normal text-[#8fb0ab]">· {s.jobTitle} · {s.profession}</span></p>
+                <p className="mt-0.5 text-xs text-[#8fb0ab]">{s.skills.length} skill(s) · {new Set(s.skills.map((k) => k.category)).size} categor{s.skills.length === 1 ? "y" : "ies"}</p>
+              </div>
+              <Button size="sm" disabled={busyId === s.key} onClick={() => request(s)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                {busyId === s.key ? <Spinner size={14} /> : <><ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Request</>}
+              </Button>
+            </div>
+          ))}
+          {sets.length === 0 && <p className="py-6 text-center text-sm text-[#8fb0ab]">The library is empty — a superadmin needs to publish checklists first.</p>}
+        </div>
+        {error && <p className="mt-3 text-xs font-medium text-rose-400">{error}</p>}
+      </motion.div>
+    </motion.div>
+  );
+}

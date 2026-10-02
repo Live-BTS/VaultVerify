@@ -19,7 +19,7 @@ export interface AgencyInfo {
   accentColor: string;
 }
 
-export type Role = "candidate" | "recruiter";
+export type Role = "candidate" | "recruiter" | "checklist";
 
 function Navbar({ name, onRole }: { name: string; onRole: (r: Role) => void }) {
   const { scrollY } = useScroll();
@@ -62,14 +62,30 @@ function Navbar({ name, onRole }: { name: string; onRole: (r: Role) => void }) {
               <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-verify-green transition-all duration-300 group-hover:w-full" />
             </a>
           ))}
+          <button
+            type="button"
+            onClick={() => onRole("candidate")}
+            className="group relative text-[13px] font-medium text-[#8fb0ab] transition-colors hover:text-verify-light"
+          >
+            References
+            <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-verify-green transition-all duration-300 group-hover:w-full" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onRole("checklist")}
+            className="group relative text-[13px] font-medium text-verify-green transition-colors hover:text-verify-mint"
+          >
+            Skills checklist
+            <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-verify-green transition-all duration-300 group-hover:w-full" />
+          </button>
         </nav>
 
         <div className="flex items-center gap-2">
           <GlowButton variant="ghost" onClick={() => onRole("recruiter")} className="px-4 py-2 text-[13px]">
             Recruiter sign in
           </GlowButton>
-          <GlowButton onClick={() => onRole("candidate")} className="px-4 py-2 text-[13px]">
-            <ShieldCheck className="h-3.5 w-3.5" /> Nurse sign up
+          <GlowButton onClick={() => onRole("checklist")} className="px-4 py-2 text-[13px]">
+            <ShieldCheck className="h-3.5 w-3.5" /> Nurse sign in
           </GlowButton>
         </div>
       </div>

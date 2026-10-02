@@ -8,8 +8,9 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { validateRows, type ImportRow, type ValidatedRow } from "@/lib/bts/importValidate";
+import { specialtyLabel } from "@/lib/bts/checklistShared";
 import { AgencyLogo, VaultMark, Spinner } from "./brand";
-import { ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw } from "lucide-react";
+import { ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass, Check, X } from "lucide-react";
 import * as XLSX from "xlsx";
 
 // ── Super Admin — platform-level console (Zipvault skills import lives here) ──
@@ -21,9 +22,16 @@ interface TemplateSet {
   profession: string; jobTitle: string; specialty: string; count: number; sources: string[]; rows: TemplateRow[];
 }
 interface Overview {
-  stats: { agencies: number; candidates: number; requests: number; completed: number; responses: number; templates: number; openFlags: number; notifications: number };
+  stats: { agencies: number; candidates: number; requests: number; completed: number; responses: number; templates: number; openFlags: number; notifications: number; pendingChecklistRequests: number };
   agencies: { id: string; name: string; slug: string; logoText: string; candidates: number; primaryColor: string; accentColor: string }[];
   sets: TemplateSet[];
+}
+
+interface ChecklistRequestRow {
+  id: string;
+  account: { name: string; email: string; title: string };
+  profession: string; jobTitle: string; specialty: string;
+  status: string; requestedAt: string; decidedAt: string | null;
 }
 
 const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skill Name", "Question Type", "Has N/A Option"];
@@ -59,7 +67,8 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const [code, setCode] = useState("");
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<"overview" | "skills">("skills");
+  const [tab, setTab] = useState<"overview" | "skills" | "requests">("skills");
+  const [cqRequests, setCqRequests] = useState<ChecklistRequestRow[] | null>(null);
   const [openSet, setOpenSet] = useState<string | null>(null);
   const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -91,6 +100,18 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
 
   const refresh = async () => {
     try { setData(await call({ action: "auth" })); } catch { /* keep old data */ }
+  };
+
+  const loadRequests = async () => {
+    try { const d = await call({ action: "requests" }); setCqRequests(d.requests); } catch { /* keep old */ }
+  };
+
+  const decide = async (id: string, approve: boolean) => {
+    try {
+      await call({ action: "decide", id, approve });
+      toast({ title: approve ? "Request approved" : "Request declined", description: approve ? "The candidate can now complete the checklist." : "The candidate will see the decision in their portal." });
+      await Promise.all([refresh(), loadRequests()]);
+    } catch { toast({ title: "Decision failed", variant: "destructive" }); }
   };
 
   const onFile = async (f: File | null) => {
@@ -223,18 +244,23 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         </div>
 
         {/* Tabs */}
-        <div className="mt-8 flex gap-2">
-          {([["skills", "Skills & imports", Database], ["overview", "Agencies", Building2]] as const).map(([k, label, Icon]) => (
+        <div className="mt-8 flex flex-wrap gap-2">
+          {([
+            ["skills", "Skills & imports", Database, 0],
+            ["requests", "Requests", Hourglass, s.pendingChecklistRequests],
+            ["overview", "Agencies", Building2, 0],
+          ] as const).map(([k, label, Icon, badge]) => (
             <button
               key={k}
               type="button"
-              onClick={() => setTab(k)}
+              onClick={() => { setTab(k); if (k === "requests" && !cqRequests) loadRequests(); }}
               className={cn(
                 "flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition",
                 tab === k ? "border-verify-green bg-verify-green/15 text-verify-green" : "border-vault-border text-[#8fb0ab] hover:text-verify-light"
               )}
             >
               <Icon className="h-3.5 w-3.5" /> {label}
+              {badge > 0 && <span className="rounded-full bg-amber-400/20 px-1.5 text-[10px] font-bold text-amber-400">{badge}</span>}
             </button>
           ))}
         </div>
@@ -373,6 +399,46 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           </div>
         )}
 
+        {tab === "requests" && (
+          <div className="mt-6 space-y-3">
+            <h2 className="text-base font-semibold text-verify-light">Candidate checklist requests</h2>
+            <p className="-mt-2 text-sm text-[#8fb0ab]">
+              Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year.
+            </p>
+            {!cqRequests && <div className="flex justify-center rounded-xl border border-vault-border bg-vault-teal/20 p-10"><Spinner /></div>}
+            {cqRequests?.length === 0 && (
+              <div className="rounded-xl border border-dashed border-vault-border p-10 text-center text-sm text-[#8fb0ab]">No requests yet.</div>
+            )}
+            {cqRequests?.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-vault-teal/20 p-5 backdrop-blur-md">
+                <div>
+                  <p className="text-sm font-semibold text-verify-light">
+                    {specialtyLabel(r.specialty)} <span className="text-xs font-normal text-[#8fb0ab]">· {r.jobTitle} · {r.profession}</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-[#8fb0ab]">
+                    {r.account.name} · {r.account.email} · requested {new Date(r.requestedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </p>
+                </div>
+                {r.status === "PENDING" ? (
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => decide(r.id, true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                      <Check className="mr-1.5 h-3.5 w-3.5" /> Approve
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => decide(r.id, false)} className="border border-rose-400/40 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300">
+                      <X className="mr-1.5 h-3.5 w-3.5" /> Decline
+                    </Button>
+                  </div>
+                ) : (
+                  <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
+                    r.status === "APPROVED" ? "border-verify-green/40 text-verify-green" : "border-rose-400/40 text-rose-400")}>
+                    {r.status === "APPROVED" ? "Approved" : "Declined"}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {tab === "overview" && (
           <Card className="mt-6 border-vault-border bg-vault-teal/20 backdrop-blur-md">
             <CardContent className="p-6">
@@ -396,9 +462,9 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           </Card>
         )}
 
-        <p className="mt-10 flex items-center gap-2 text-xs text-[#5c7a76]">
+        <div className="mt-10 flex items-center gap-2 text-xs text-[#5c7a76]">
           <AgencyLogo logoText="VV" name="VaultVerify" size="sm" light />
-        </p>
+        </div>
       </main>
     </div>
   );

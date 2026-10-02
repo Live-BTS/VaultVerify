@@ -90,7 +90,7 @@ export function Trust() {
   );
 }
 
-export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter") => void }) {
+export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "checklist") => void }) {
   return (
     <section id="cta" className="relative px-4 pb-24 sm:px-6 sm:pb-32">
       <motion.div
@@ -112,13 +112,19 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter") =>
             Join the VaultVerify pilot — build your profile in minutes, or see the live recruiter pipeline with fraud flags and verified skill badges.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <GlowButton onClick={() => onRole("candidate")} className="px-7 py-3.5 text-base">
-              <UserRound className="h-4 w-4" /> Start as a nurse <ChevronRight className="h-4 w-4" />
+            <GlowButton onClick={() => onRole("checklist")} className="px-7 py-3.5 text-base">
+              <UserRound className="h-4 w-4" /> Start my skills checklist <ChevronRight className="h-4 w-4" />
             </GlowButton>
             <GlowButton variant="ghost" onClick={() => onRole("recruiter")} className="px-7 py-3.5 text-base">
               <LayoutDashboard className="h-4 w-4" /> Open recruiter dashboard
             </GlowButton>
           </div>
+          <p className="mt-5 text-xs text-[#51736f]">
+            Want manager-verified references instead?{" "}
+            <button type="button" onClick={() => onRole("candidate")} className="font-semibold text-verify-green hover:underline">
+              Start the reference flow →
+            </button>
+          </p>
           <p className="mt-6 font-mono text-[10px] uppercase tracking-[0.2em] text-[#51736f]">
             Sandbox build · multi-tenant ready · Zipvault-compatible notifications
           </p>

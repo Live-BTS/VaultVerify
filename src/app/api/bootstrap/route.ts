@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { ensureSeed } from "@/lib/bts/seed";
 import { logAudit } from "@/lib/bts/audit";
 import { seedBuiltinTemplates } from "@/lib/bts/skillTemplates";
+import { seedChecklistDemo } from "@/lib/bts/checklistDemo";
 
 // ── GET /api/bootstrap — idempotent seed + agency branding ──
 export async function GET() {
@@ -11,8 +12,9 @@ export async function GET() {
     if (result.seeded) {
       await logAudit({ actorType: "SYSTEM", action: "SEED_CREATED", entity: "agency", entityId: result.agencyId });
     }
-    // Idempotent: keeps built-in Med-Surg / ICU skill templates fresh.
+    // Idempotent: keeps built-in Med-Surg / ICU / General skill templates fresh.
     await seedBuiltinTemplates();
+    await seedChecklistDemo();
     const agency = await db.agency.findUnique({ where: { slug: "vaultverify" } });
     return NextResponse.json({ ok: true, agency });
   } catch (e) {

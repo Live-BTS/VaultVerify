@@ -9,6 +9,8 @@ import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTe
 //   import     { code, rows: ImportRow[] }           -> upsert validated templates
 //   toggle     { code, id, active }                  -> enable/disable a template row
 //   deleteSet  { code, profession, jobTitle, specialty } -> remove a whole checklist set
+//   requests   { code }                              -> candidate checklist requests queue
+//   decide     { code, id, approve }                 -> approve/reject a checklist request
 // In production, replace the passcode with NextAuth/Supabase role claims.
 
 const SUPERADMIN_CODE = process.env.SUPERADMIN_CODE ?? "zipvault2026";
@@ -28,6 +30,7 @@ async function overview() {
     db.notificationLog.count(),
   ]);
   const completed = await db.referenceRequest.count({ where: { status: "COMPLETED" } });
+  const checklistRequests = await db.checklistRequest.count({ where: { status: "PENDING" } });
 
   const templatesRaw = await db.skillTemplate.findMany({ orderBy: [{ specialty: "asc" }, { sortOrder: "asc" }, { skillName: "asc" }] });
   const sets = new Map<string, { profession: string; jobTitle: string; specialty: string; count: number; sources: Set<string>; rows: typeof templatesRaw }>();
@@ -41,7 +44,7 @@ async function overview() {
   }
 
   return {
-    stats: { agencies: agencies.length, candidates, requests, completed, responses, templates, openFlags: flags, notifications },
+    stats: { agencies: agencies.length, candidates, requests, completed, responses, templates, openFlags: flags, notifications, pendingChecklistRequests: checklistRequests },
     agencies: agencies.map((a) => ({ id: a.id, name: a.name, slug: a.slug, logoText: a.logoText, candidates: a._count.candidates, primaryColor: a.primaryColor, accentColor: a.accentColor })),
     sets: [...sets.values()].map((s) => ({ ...s, sources: [...s.sources], rows: s.rows.map((r) => ({ id: r.id, category: r.category, skillName: r.skillName, questionType: r.questionType, hasNA: r.hasNA, highRisk: r.highRisk, active: r.active, source: r.source })) })),
   };
@@ -76,6 +79,46 @@ export async function POST(req: NextRequest) {
       case "toggle": {
         const t = await db.skillTemplate.update({ where: { id: body.id }, data: { active: !!body.active } });
         return NextResponse.json({ ok: true, template: t });
+      }
+
+      case "requests": {
+        const rows = await db.checklistRequest.findMany({
+          orderBy: [{ status: "asc" }, { requestedAt: "desc" }],
+          take: 100,
+          include: { account: { select: { name: true, email: true, title: true } } },
+        });
+        return NextResponse.json({
+          ok: true,
+          requests: rows.map((r) => ({
+            id: r.id,
+            account: r.account,
+            profession: r.profession,
+            jobTitle: r.jobTitle,
+            specialty: r.specialty,
+            status: r.status,
+            requestedAt: r.requestedAt,
+            decidedAt: r.decidedAt,
+          })),
+        });
+      }
+
+      case "decide": {
+        const request = await db.checklistRequest.findUnique({ where: { id: String(body.id ?? "") }, include: { account: true } });
+        if (!request) return NextResponse.json({ ok: false, error: "Request not found" }, { status: 404 });
+        if (request.status !== "PENDING") return NextResponse.json({ ok: false, error: "Already decided" }, { status: 400 });
+        const updated = await db.checklistRequest.update({
+          where: { id: request.id },
+          data: { status: body.approve ? "APPROVED" : "REJECTED", decidedAt: new Date() },
+        });
+        await logAudit({
+          actorType: "RECRUITER",
+          actorId: "superadmin",
+          action: body.approve ? "CHECKLIST_REQUEST_APPROVED" : "CHECKLIST_REQUEST_REJECTED",
+          entity: "checklistRequest",
+          entityId: request.id,
+          detail: JSON.stringify({ specialty: request.specialty, email: request.account.email }),
+        });
+        return NextResponse.json({ ok: true, request: updated });
       }
 
       case "deleteSet": {
