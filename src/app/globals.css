@@ -120,3 +120,105 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   BTS dark landing — motion & glow layer
+   ───────────────────────────────────────────────────────────── */
+
+::selection {
+  background: rgba(52, 211, 153, 0.28);
+  color: #ecfdf5;
+}
+
+.bts-dark {
+  background-color: #050706;
+  color: #e4e4e7;
+}
+
+/* Faint blueprint grid, faded radially so it never hits the edges hard */
+.bg-grid-dark {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 54px 54px;
+}
+
+.mask-radial-hero {
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 35%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 35%, transparent 78%);
+}
+
+.mask-fade-x {
+  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+}
+
+/* Specialty chip marquee */
+@keyframes bts-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: bts-marquee 42s linear infinite;
+}
+
+/* Gentle floating for the hero mock card */
+@keyframes bts-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-12px); }
+}
+.animate-float {
+  animation: bts-float 7s ease-in-out infinite;
+}
+
+/* Status dot heartbeat */
+@keyframes bts-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.82); }
+}
+.animate-pulse-dot {
+  animation: bts-pulse-dot 1.8s ease-in-out infinite;
+}
+
+/* Shimmer sweep across token chips */
+@keyframes bts-shimmer {
+  from { transform: translateX(-130%) skewX(-18deg); }
+  to   { transform: translateX(230%) skewX(-18deg); }
+}
+.animate-shimmer {
+  animation: bts-shimmer 3.2s ease-in-out infinite;
+}
+
+/* Radar rings expanding from center */
+@keyframes bts-radar {
+  from { transform: scale(0.35); opacity: 0.75; }
+  to   { transform: scale(1.25); opacity: 0; }
+}
+.animate-radar {
+  animation: bts-radar 2.6s ease-out infinite;
+}
+
+/* Soft breathing glow behind CTA panel */
+@keyframes bts-breathe {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50%      { opacity: 0.85; transform: scale(1.06); }
+}
+.animate-breathe {
+  animation: bts-breathe 6s ease-in-out infinite;
+}
+
+/* Thin dark scrollbars inside card visuals */
+.bts-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+.bts-scroll::-webkit-scrollbar-track { background: transparent; }
+.bts-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee,
+  .animate-float,
+  .animate-shimmer,
+  .animate-radar,
+  .animate-breathe,
+  .animate-pulse-dot {
+    animation: none;
+  }
+}
