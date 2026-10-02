@@ -1,37 +1,25 @@
 "use client";
 
-import { useId } from "react";
 import { cn } from "@/lib/utils";
 import { STATUS_META, PROFICIENCY_META } from "@/lib/bts/constants";
 import { ShieldCheck, ShieldAlert, ShieldX } from "lucide-react";
 
-// ── VaultVerify logo mark — abstract V-in-circle from the brand palette ──
+// ── VaultVerify logo mark — official brand asset (trimmed upload, transparent PNG) ──
+// Height-driven: width follows the logo's intrinsic aspect ratio (359x301).
+const LOGO_ASPECT = 359 / 301;
+
 export function VaultMark({ size = 36, className }: { size?: number; className?: string }) {
-  const uid = useId().replace(/[:]/g, "");
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" className={className} aria-hidden="true" role="img">
-      <defs>
-        <linearGradient id={`ring-${uid}`} x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#7cc118" />
-          <stop offset="0.55" stopColor="#1b4e54" />
-          <stop offset="1" stopColor="#03363d" />
-        </linearGradient>
-        <linearGradient id={`vee-${uid}`} x1="20" y1="20" x2="44" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#a4d84a" />
-          <stop offset="1" stopColor="#7cc118" />
-        </linearGradient>
-      </defs>
-      <rect width="64" height="64" rx="15" fill="#081215" />
-      <circle cx="32" cy="32" r="23.5" fill="#03363d" stroke={`url(#ring-${uid})`} strokeWidth="2.5" />
-      <path
-        d="M20.5 22.5 L32 45.5 L43.5 22.5"
-        fill="none"
-        stroke={`url(#vee-${uid})`}
-        strokeWidth="6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <img
+      src="/logo.png"
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      width={Math.round(size * LOGO_ASPECT)}
+      height={size}
+      style={{ height: size, width: "auto" }}
+      className={cn("shrink-0 select-none", className)}
+    />
   );
 }
 

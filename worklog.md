@@ -47,3 +47,25 @@ Stage Summary:
 - Brand tokens are code-native (bg-vault-teal, text-verify-green...), so every future component inherits the palette automatically.
 - Demo entries unchanged: maya.rodriguez@example.com / meds2026 recruiter code / reference links via dashboard or /?r=<token>.
 - Note: hover glow verified via CSS-rule presence + forced end-state preview because sandbox browser emulates touch (hover:false); behaves correctly on real desktops.
+
+---
+Task ID: 3
+Agent: Super Z (main agent)
+Task: Swap the hand-coded V-in-circle SVG placeholder for the user's official uploaded logo (upload/namelogo-removebg-preview.png, 455x329 RGBA transparent) across every brand touchpoint: favicon, apple icon, landing navbar, reference-flow banner, recruiter/candidate/wizard headers, and the PDF packet header.
+
+Work Log:
+- Asset pipeline (scripts/process_logo.py): alpha-trimmed the upload to 359x301; produced public/logo.png (native-res transparent), src/app/icon.png (512x512 square favicon, 8% padding), src/app/apple-icon.png (180x180), public/logo-tile.png (rounded Crisp-Mint-White app-icon tile for teal #03363d backgrounds), plus a dark-bg QA composite (scripts/logo-preview-dark.png). Contrast analysis: darkest wing pixel (1,44,50) is near-identical to #03363d -> tile needed for teal surfaces; reads fine on #081215 and light backgrounds.
+- Removed placeholder src/app/icon.svg + public/logo.svg; deleted now-unused useId import path. Verified <link rel="icon" href="/icon.png" sizes="512x512"> and apple-touch-icon tags auto-served.
+- brand.tsx VaultMark rewritten: renders /logo.png height-driven (LOGO_ASPECT=359/301, width auto) so every consumer (navbar 34px, AgencyLogo 28/36/48px, ReferenceFlow 26px) shows the official mark; aria-hidden since wordmark text is adjacent everywhere.
+- ReferenceFlow banner: VaultMark size 34->26 inside existing h-9 w-9 white/90 tile to fit the wider aspect.
+- pdf.ts: banner now embeds public/logo-tile.png via pdf-lib embedPng for logoText=VV agencies (54pt tile, name 13pt bold + tagline beside it); text-mark fallback preserved for non-VV tenants; reads file from process.cwd()/public (compatible with standalone build which copies public/).
+- FIXED Turbopack "Processing image failed: unexpected end of file" on icon.png (stale cache from mid-write read) and subsequent .sst cache corruption after rm -rf .next with a zombie server holding handles: resolved by killing all next processes, wiping .next, single clean restart. Sandbox quirk: background servers get reaped with their spawning shell — use the (fuser -k; nohup bun run dev &; ...) subshell pattern that survives across tool calls.
+- Browser verification (agent-browser, one session): console errors 0 after rebuild; screenshots of landing navbar on Midnight Steel, reference-flow banner (logo on white tile over #03363d), recruiter dashboard (light header) all show the official mark; /icon.png, /apple-icon.png, /logo.png, /logo-tile.png all 200; branded PDF downloaded and page 1 rendered via pypdfium2 — tile logo + "VaultVerify / References, verified. Skills, proven." aligned against right-side "Verified Reference Packet" text.
+- Screenshots: download/screens/vv2-final-hero.png, vv2-recruiter-logo.png, vv2-reference-banner.png, vv2-navbar-logo.png; PDF QA at scripts/pdf-page1.png.
+- Lint clean; dev.log clean (no errors/warnings).
+
+Stage Summary:
+- Every VaultVerify brand touchpoint now uses the official uploaded logo: favicon (512), apple icon (180), all in-app headers/banners, and the PDF packet header with light tile for contrast on teal.
+- VaultMark is the single source of truth (public/logo.png); logo-tile.png is the teal-background variant; future pages inherit branding automatically via VaultMark/AgencyLogo.
+- Demo entries unchanged: maya.rodriguez@example.com / meds2026 / reference links via dashboard or /?r=<token>.
+- Ops note: dev server must be started with the subshell background pattern or it gets killed by the sandbox between tool calls.

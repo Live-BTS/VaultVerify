@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from "pdf-lib";
 
 // ── Branded reference packet PDF (VaultVerify style) ──────────
@@ -140,8 +142,29 @@ export async function buildReferencePacket(data: PacketData): Promise<Uint8Array
   const bannerH = 92;
   page.drawRectangle({ x: 0, y: PAGE_H - bannerH, width: PAGE_W, height: bannerH, color: primary });
   page.drawRectangle({ x: 0, y: PAGE_H - bannerH - 6, width: PAGE_W, height: 6, color: accent });
-  page.drawText(sanitize(data.agency.logoText).slice(0, 14), { x: M, y: PAGE_H - 46, size: 24, font: bold, color: rgb(1, 1, 1) });
-  page.drawText(sanitize(data.agency.name), { x: M, y: PAGE_H - 64, size: 11, font, color: rgb(0.9, 0.98, 0.97) });
+
+  // Brand mark: official logo tile for VaultVerify; text mark fallback otherwise.
+  let logoDrawn = false;
+  if (data.agency.logoText === "VV") {
+    try {
+      const tileBytes = await readFile(path.join(process.cwd(), "public", "logo-tile.png"));
+      const tile = await pdf.embedPng(tileBytes);
+      const side = 54;
+      page.drawImage(tile, { x: M, y: PAGE_H - bannerH + (bannerH - side) / 2, width: side, height: side });
+      const nx = M + side + 14;
+      page.drawText(sanitize(data.agency.name), { x: nx, y: PAGE_H - 42, size: 13, font: bold, color: rgb(1, 1, 1) });
+      if (data.agency.tagline) {
+        page.drawText(sanitize(data.agency.tagline).slice(0, 64), { x: nx, y: PAGE_H - 58, size: 8.5, font, color: rgb(0.9, 0.98, 0.97) });
+      }
+      logoDrawn = true;
+    } catch {
+      // tile asset unavailable — fall through to text mark below
+    }
+  }
+  if (!logoDrawn) {
+    page.drawText(sanitize(data.agency.logoText).slice(0, 14), { x: M, y: PAGE_H - 46, size: 24, font: bold, color: rgb(1, 1, 1) });
+    page.drawText(sanitize(data.agency.name), { x: M, y: PAGE_H - 64, size: 11, font, color: rgb(0.9, 0.98, 0.97) });
+  }
   const rt = "Verified Reference Packet";
   page.drawText(rt, { x: PAGE_W - M - bold.widthOfTextAtSize(rt, 12), y: PAGE_H - 44, size: 12, font: bold, color: rgb(1, 1, 1) });
   const rs = "Generated " + new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });

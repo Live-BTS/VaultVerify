@@ -231,7 +231,7 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
           <div className="flex items-center gap-2.5">
             {ctx.agency.logoText === "VV" ? (
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90">
-                <VaultMark size={34} />
+                <VaultMark size={26} />
               </div>
             ) : (
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-xs font-bold text-white">{ctx.agency.logoText.slice(0, 4)}</div>
