@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
+import { sendNotification } from "@/lib/bts/notifications";
 
 // ── POST /api/checklist/invite — recruiter sends a checklist to a candidate ──
-// send  : { code, candidateName, candidateEmail, profession?, jobTitle?, specialty?, recruiterName, facilityName?, message? }
-// list  : { code }
-// claim : { token }  (candidate session) — attach an invite link to the signed-in account
+// send    : { code, candidateName, candidateEmail, candidatePhone, profession, jobTitle, specialty, recruiterName, facilityName?, message? }
+// list    : { code }
+// lookup  : { code, email }        -> auto-fetch candidate details if they already have an account
+// preview : { token }              -> public invite info so the signup form can pre-fill
+// claim   : { token }  (candidate session) — attach an invite link to the signed-in account
 
 const RECRUITER_CODE = process.env.RECRUITER_CODE ?? "meds2026";
 
@@ -33,7 +36,56 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (body.action === "preview") {
+    try {
+      const invite = await db.checklistInvite.findUnique({ where: { token: String(body.token ?? "") } });
+      if (!invite) return NextResponse.json({ ok: false, error: "Invite link not found" }, { status: 404 });
+      return NextResponse.json({
+        ok: true,
+        invite: {
+          candidateName: invite.candidateName,
+          candidateEmail: invite.candidateEmail,
+          candidatePhone: invite.candidatePhone,
+          profession: invite.profession,
+          jobTitle: invite.jobTitle,
+          specialty: invite.specialty,
+          recruiterName: invite.recruiterName,
+          facilityName: invite.facilityName,
+          agencyName: invite.agencyName,
+          message: invite.message,
+          status: invite.status,
+        },
+      });
+    } catch (e) {
+      console.error("[checklist/invite/preview]", e);
+      return NextResponse.json({ ok: false, error: "Preview failed" }, { status: 500 });
+    }
+  }
+
   if (body.code !== RECRUITER_CODE) return NextResponse.json({ ok: false, error: "Invalid recruiter code" }, { status: 401 });
+
+  // recruiter asks: does this candidate already have an account? auto-fetch their details
+  if (body.action === "lookup") {
+    try {
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const acc = await db.checklistAccount.findUnique({ where: { email } });
+      if (!acc) return NextResponse.json({ ok: true, exists: false });
+      return NextResponse.json({
+        ok: true,
+        exists: true,
+        profile: {
+          name: acc.name,
+          phone: acc.phone,
+          profession: acc.profession,
+          jobTitle: acc.discipline || acc.title,
+          specialty: acc.specialty,
+        },
+      });
+    } catch (e) {
+      console.error("[checklist/invite/lookup]", e);
+      return NextResponse.json({ ok: false, error: "Lookup failed" }, { status: 500 });
+    }
+  }
 
   try {
     if (body.action === "list") {
@@ -52,6 +104,7 @@ export async function POST(req: NextRequest) {
             id: i.id,
             candidateName: i.candidateName,
             candidateEmail: i.candidateEmail,
+            candidatePhone: i.candidatePhone,
             profession: i.profession,
             jobTitle: i.jobTitle,
             specialty: i.specialty,
@@ -81,13 +134,16 @@ export async function POST(req: NextRequest) {
     // ── send ──
     const candidateName = String(body.candidateName ?? "").trim();
     const candidateEmail = String(body.candidateEmail ?? "").trim().toLowerCase();
+    const candidatePhone = String(body.candidatePhone ?? "").trim();
     if (candidateName.length < 2) return NextResponse.json({ ok: false, error: "Candidate name is required" }, { status: 400 });
     if (!emailOk(candidateEmail)) return NextResponse.json({ ok: false, error: "A valid candidate email is required" }, { status: 400 });
+    if (candidatePhone.replace(/\D/g, "").length < 7) return NextResponse.json({ ok: false, error: "A valid candidate phone number is required" }, { status: 400 });
 
     const invite = await db.checklistInvite.create({
       data: {
         candidateName,
         candidateEmail,
+        candidatePhone,
         profession: String(body.profession ?? "").trim(),
         jobTitle: String(body.jobTitle ?? "").trim(),
         specialty: String(body.specialty ?? "").trim(),
@@ -101,6 +157,18 @@ export async function POST(req: NextRequest) {
     if (existing) {
       await db.checklistInvite.update({ where: { id: invite.id }, data: { accountId: existing.id } });
     }
+    // sandbox email delivery (simulated → NotificationLog): the candidate gets a
+    // setup link — email is pre-filled, they only set a password + onboarding form
+    const setupLink = `/?view=checklist&invite=${invite.token}`;
+    await sendNotification({
+      channel: "EMAIL",
+      kind: "INVITE",
+      to: candidateEmail,
+      subject: `${invite.recruiterName} requested your skills checklist`,
+      body: existing
+        ? `You have a new skills checklist request from ${invite.recruiterName} (${invite.facilityName || invite.agencyName}). Sign in at ${setupLink} — it's waiting in your Invites tab.`
+        : `${invite.recruiterName} (${invite.facilityName || invite.agencyName}) requested your skills checklist. Your email is already set — open ${setupLink} to set your password, confirm your details, and complete it once (valid 1 year).`,
+    }).catch(() => undefined);
     await logAudit({
       actorType: "RECRUITER", actorId: invite.recruiterName, action: "CHECKLIST_INVITE_SENT",
       entity: "checklistInvite", entityId: invite.id,

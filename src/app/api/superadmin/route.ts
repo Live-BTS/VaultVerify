@@ -5,7 +5,7 @@ import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTe
 
 // ── POST /api/superadmin — platform administration (sandbox: passcode) ──
 // Actions:
-//   auth       { code }                              -> overview payload
+//   auth       { code }                              -> overview payload (+users, candidateProfiles, companies w/ credits)
 //   import     { code, rows: ImportRow[] }           -> upsert validated templates
 //   toggle     { code, id, active }                  -> enable/disable a template row
 //   deleteSet  { code, profession, jobTitle, specialty } -> remove a whole checklist set
@@ -19,8 +19,16 @@ function unauthorized() {
   return NextResponse.json({ ok: false, error: "Invalid superadmin code" }, { status: 401 });
 }
 
+function yearsFrom(manual: number, start: Date | null): number {
+  if (start) {
+    const months = (Date.now() - new Date(start).getTime()) / (30.44 * 24 * 3600 * 1000);
+    return Math.max(0, Math.floor(months / 12));
+  }
+  return manual;
+}
+
 async function overview() {
-  const [agencies, candidates, requests, responses, templates, flags, notifications] = await Promise.all([
+  const [agencies, candidates, requests, responses, templates, flags, notifications, accounts, invites, refRequests] = await Promise.all([
     db.agency.findMany({ include: { _count: { select: { candidates: true } } }, orderBy: { createdAt: "asc" } }),
     db.candidate.count(),
     db.referenceRequest.count(),
@@ -28,6 +36,12 @@ async function overview() {
     db.skillTemplate.count(),
     db.fraudFlag.count({ where: { resolved: false } }),
     db.notificationLog.count(),
+    db.checklistAccount.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { _count: { select: { completions: true, requests: true, invites: true } } },
+    }),
+    db.checklistInvite.count(),
+    db.referenceRequest.count(),
   ]);
   const completed = await db.referenceRequest.count({ where: { status: "COMPLETED" } });
   const checklistRequests = await db.checklistRequest.count({ where: { status: "PENDING" } });
@@ -43,10 +57,41 @@ async function overview() {
     s.rows.push(t);
   }
 
+  // ── Data Center + user management payloads (from checklist accounts) ──
+  const users = accounts.map((a) => ({
+    id: a.id, name: a.name, email: a.email, title: a.discipline || a.title,
+    onboardingComplete: a.onboardingComplete,
+    completions: a._count.completions, requests: a._count.requests, invites: a._count.invites,
+    joinedAt: a.createdAt,
+  }));
+  const candidateProfiles = accounts.map((a) => ({
+    id: a.id, name: a.name, phone: a.phone, email: a.email,
+    city: a.city, state: a.state, zip: a.zip,
+    profession: a.profession, discipline: a.discipline || a.title, specialty: a.specialty,
+    yrsOverall: yearsFrom(a.yrsOverall, a.yrsOverallStart),
+    yrsSpecialty: yearsFrom(a.yrsSpecialty, a.yrsSpecialtyStart),
+    yrsOverallStart: a.yrsOverallStart ? a.yrsOverallStart.toISOString().slice(0, 10) : "",
+    yrsSpecialtyStart: a.yrsSpecialtyStart ? a.yrsSpecialtyStart.toISOString().slice(0, 10) : "",
+  }));
+
+  // ── Company management + credit management ──
+  // Sandbox metering: 1 credit per outbound verification (reference request or checklist invite).
+  const companies = agencies.map((a) => {
+    const used = refRequests + invites; // sandbox-level metering (per-platform until per-tenant counters ship)
+    return {
+      id: a.id, name: a.name, slug: a.slug, logoText: a.logoText,
+      candidates: a._count.candidates, primaryColor: a.primaryColor, accentColor: a.accentColor,
+      creditsGranted: a.creditsGranted, creditsUsed: used, creditsRemaining: Math.max(0, a.creditsGranted - used),
+    };
+  });
+
   return {
     stats: { agencies: agencies.length, candidates, requests, completed, responses, templates, openFlags: flags, notifications, pendingChecklistRequests: checklistRequests },
     agencies: agencies.map((a) => ({ id: a.id, name: a.name, slug: a.slug, logoText: a.logoText, candidates: a._count.candidates, primaryColor: a.primaryColor, accentColor: a.accentColor })),
     sets: [...sets.values()].map((s) => ({ ...s, sources: [...s.sources], rows: s.rows.map((r) => ({ id: r.id, category: r.category, skillName: r.skillName, questionType: r.questionType, hasNA: r.hasNA, highRisk: r.highRisk, active: r.active, source: r.source })) })),
+    users,
+    candidateProfiles,
+    companies,
   };
 }
 

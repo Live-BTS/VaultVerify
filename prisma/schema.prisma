@@ -26,6 +26,7 @@ model Agency {
   tagline      String   @default("Verified references. Faster placements.")
   primaryColor String   @default("#0F766E") // teal-700
   accentColor  String   @default("#B45309") // amber-700
+  creditsGranted Int    @default(500) // Credit management: sandbox grant per company
   createdAt    DateTime @default(now())
 
   candidates Candidate[]
@@ -164,6 +165,19 @@ model ChecklistAccount {
   name         String
   passwordHash String
   title        String   @default("RN")
+  // ── onboarding / Data Center profile (superadmin → Candidate management) ──
+  phone        String   @default("")
+  city         String   @default("")
+  state        String   @default("")
+  zip          String   @default("")
+  profession   String   @default("")   // Nursing | Allied | Pharmacy | Locums
+  discipline   String   @default("")   // RN | LPN | PT | ... (the job title)
+  specialty    String   @default("")   // canonical key (MEDSURG, ICU, ...)
+  yrsOverall   Int      @default(0)    // manual entry — overall years of experience
+  yrsOverallStart  DateTime?           // calendar entry — platform derives years continuously
+  yrsSpecialty Int      @default(0)    // manual entry — experience in current specialty
+  yrsSpecialtyStart DateTime?          // calendar entry
+  onboardingComplete Boolean @default(false)
   createdAt    DateTime @default(now())
 
   sessions    ChecklistSession[]
@@ -186,7 +200,9 @@ model ChecklistInvite {
   token         String   @unique @default(cuid()) // claim link /?view=checklist&invite=<token>
   candidateName String
   candidateEmail String
-  // recruiter may leave these blank — candidate fills them during completion
+  candidatePhone String  @default("")     // required on the recruiter send form
+  // recruiter picks Profession → Discipline → Specialty from the cascade;
+  // candidate can still correct these during their onboarding/fill
   profession    String   @default("")
   jobTitle      String   @default("")
   specialty     String   @default("")

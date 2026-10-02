@@ -71,7 +71,7 @@ export default function Page() {
 
   if (!booted) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-vault-dark">
+      <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]">
         <Spinner label="Preparing the workspace…" />
       </div>
     );

@@ -55,11 +55,11 @@ export function Trust() {
         >
           {TRUST.map((c) => (
             <GlowCard key={c.t} glow={c.glow}>
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-vault-border bg-vault-teal/30 text-verify-mint">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-vault-border bg-[#f0f6f2] text-verify-ink">
                 <c.icon className="h-5 w-5" />
               </div>
-              <h3 className="mt-5 text-base font-semibold text-verify-light">{c.t}</h3>
-              <p className="mt-2.5 text-sm leading-relaxed text-[#8fb0ab]">{c.d}</p>
+              <h3 className="mt-5 text-base font-semibold text-jade-ink">{c.t}</h3>
+              <p className="mt-2.5 text-sm leading-relaxed text-jade-muted">{c.d}</p>
             </GlowCard>
           ))}
         </motion.div>
@@ -70,17 +70,17 @@ export function Trust() {
           initial="hidden"
           whileInView="show"
           viewport={{ once: true, margin: "-80px" }}
-          className="relative mt-6 overflow-hidden rounded-2xl border border-vault-border bg-gradient-to-br from-verify-green/[0.07] via-vault-teal/10 to-[#2f8d99]/[0.08] p-8 backdrop-blur-md sm:p-10"
+          className="relative mt-6 overflow-hidden rounded-2xl border border-vault-border bg-gradient-to-br from-verify-green/[0.08] via-white to-[#2f8d99]/[0.06] p-8 vv-card-shadow sm:p-10"
         >
-          <div aria-hidden className="bg-grid-dark absolute inset-0 opacity-40" />
+          <div aria-hidden className="bg-grid-light absolute inset-0 opacity-40" />
           <dl className="relative grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             {METRICS.map((m) => (
               <div key={m.label}>
-                <dd className="bg-gradient-to-r from-verify-light to-[#7fa39d] bg-clip-text text-4xl font-bold tracking-tight text-transparent">
+                <dd className="bg-gradient-to-r from-[#03363d] to-verify-deep bg-clip-text text-4xl font-bold tracking-tight text-transparent">
                   <AnimatedCounter to={m.to} prefix={m.prefix ?? ""} suffix={m.suffix ?? ""} />
                 </dd>
-                <dt className="mt-2 text-sm font-medium text-[#d7e6e2]">{m.label}</dt>
-                <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-[#6d8f8a]">{m.note}</p>
+                <dt className="mt-2 text-sm font-medium text-[#33565b]">{m.label}</dt>
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-[#7d938e]">{m.note}</p>
               </div>
             ))}
           </dl>
@@ -98,17 +98,17 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
         initial="hidden"
         whileInView="show"
         viewport={{ once: true, margin: "-80px" }}
-        className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-verify-green/20 bg-gradient-to-b from-[#062024] to-[#041518] px-6 py-16 text-center sm:px-12 sm:py-20"
+        className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-vault-teal-deep bg-gradient-to-b from-[#03363d] to-[#02272c] px-6 py-16 text-center shadow-[0_40px_90px_-30px_rgba(3,54,61,0.5)] sm:px-12 sm:py-20"
       >
-        <div aria-hidden className="animate-breathe absolute -top-24 left-1/2 h-72 w-[480px] -translate-x-1/2 rounded-full bg-verify-green/15 blur-[100px]" />
+        <div aria-hidden className="animate-breathe absolute -top-24 left-1/2 h-72 w-[480px] -translate-x-1/2 rounded-full bg-verify-green/20 blur-[100px]" />
         <div aria-hidden className="bg-grid-dark absolute inset-0 opacity-30" />
 
         <div className="relative">
           <p className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-verify-green">Phase 1 · pilot open</p>
-          <h2 className="mx-auto mt-4 max-w-2xl text-3xl font-semibold tracking-tight text-verify-light sm:text-5xl sm:leading-[1.1]">
-            Ready to retire the <span className="animate-gradient-text bg-gradient-to-r from-[#0d6b77] via-verify-green to-verify-mint bg-clip-text text-transparent">paper reference form?</span>
+          <h2 className="mx-auto mt-4 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-5xl sm:leading-[1.1]">
+            Ready to retire the <span className="animate-gradient-text bg-gradient-to-r from-[#7fd4de] via-verify-green to-verify-mint bg-clip-text text-transparent">paper reference form?</span>
           </h2>
-          <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-[#8fb0ab]">
+          <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-[#9fc4bd]">
             Join the VaultVerify pilot — build your profile in minutes, or see the live recruiter pipeline with fraud flags and verified skill badges.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -119,13 +119,13 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
               <LayoutDashboard className="h-4 w-4" /> Open recruiter dashboard
             </GlowButton>
           </div>
-          <p className="mt-5 text-xs text-[#51736f]">
+          <p className="mt-5 text-xs text-[#7fa39d]">
             Want manager-verified references instead?{" "}
             <button type="button" onClick={() => onRole("candidate")} className="font-semibold text-verify-green hover:underline">
               Start the reference flow →
             </button>
           </p>
-          <p className="mt-6 font-mono text-[10px] uppercase tracking-[0.2em] text-[#51736f]">
+          <p className="mt-6 font-mono text-[10px] uppercase tracking-[0.2em] text-[#7fa39d]">
             Sandbox build · multi-tenant ready · Zipvault-compatible notifications
           </p>
         </div>
@@ -136,8 +136,8 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
 
 export function Footer({ agencyName }: { agencyName: string }) {
   return (
-    <footer className="mt-auto border-t border-vault-border/60 bg-vault-dark/60">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-[#6d8f8a] sm:flex-row sm:px-6">
+    <footer className="mt-auto border-t border-vault-border bg-white/70">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-[#7d938e] sm:flex-row sm:px-6">
         <span>
           © {new Date().getFullYear()} {agencyName} · Healthcare Skill Checklist — sandbox build
         </span>

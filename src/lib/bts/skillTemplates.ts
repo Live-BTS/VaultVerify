@@ -78,6 +78,37 @@ export const BUILTIN_CHECKLISTS = [
     ],
   },
   {
+    specialty: "ER",
+    skills: [
+      ["Triage & Assessment", "ESI triage categorization & rapid assessment", false],
+      ["Medication Administration", "Documentation on M.A.R.", false],
+      ["Medication Administration", "Dose Calculation", false],
+      ["Emergency Response", "Code Blue / ACLS response", false],
+      ["Trauma Care", "Trauma bay primary & secondary survey", true],
+      ["Cardiac Monitoring", "12-lead ECG acquisition & rhythm interpretation", false],
+      ["Respiratory Care", "Oxygen therapy & airway management", false],
+      ["Wound Care & Skin", "Laceration care & splinting", false],
+      ["Transfusion Medicine", "Emergency blood transfusion administration", true],
+      ["Safety & Compliance", "De-escalation & behavioral emergencies", false],
+      ["IV Therapy & Access", "IV insertion & phlebotomy", false],
+    ],
+  },
+  {
+    specialty: "TELE",
+    skills: [
+      ["Cardiac Monitoring", "Telemetry — basic rhythm interpretation", false],
+      ["Cardiac Monitoring", "Arrhythmia recognition & escalation protocol", true],
+      ["Cardiac Monitoring", "Cardiac drip titration (amiodarone, diltiazem)", true],
+      ["Medication Administration", "Documentation on M.A.R.", false],
+      ["Medication Administration", "Diabetic care & insulin management", true],
+      ["IV Therapy & Access", "IV insertion & site care", false],
+      ["Symptom & Pain Management", "Chest pain assessment & protocol", false],
+      ["Safety & Compliance", "Fall risk & safety protocols", false],
+      ["Care Planning & Education", "Patient & family heart-failure education", false],
+      ["Wound Care & Skin", "Wound care & dressing changes", false],
+    ],
+  },
+  {
     // From the MyZipVault import template example rows (Nursing / RN / General)
     specialty: "GENERAL",
     skills: [

@@ -28,7 +28,7 @@ export function HowItWorks() {
 
         <div className="relative mt-16">
           {/* connector — draws itself on scroll into view */}
-          <div aria-hidden className="absolute left-[27px] top-0 h-full w-px bg-white/[0.06] lg:left-0 lg:top-[27px] lg:h-px lg:w-full" />
+          <div aria-hidden className="absolute left-[27px] top-0 h-full w-px bg-[#d7e3df] lg:left-0 lg:top-[27px] lg:h-px lg:w-full" />
           <motion.div
             aria-hidden
             initial={{ scaleY: 0, scaleX: 0 }}
@@ -47,16 +47,16 @@ export function HowItWorks() {
           >
             {STEPS.map((s, i) => (
               <motion.li key={s.t} variants={fadeUp} className="relative flex gap-5 lg:block">
-                <div className="relative z-10 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-verify-green/25 bg-vault-teal/30 text-verify-mint shadow-[0_0_24px_-6px_rgba(124,193,24,0.4)] backdrop-blur-md">
+                <div className="relative z-10 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-verify-green/30 bg-white text-verify-ink vv-card-shadow">
                   <s.icon className="h-6 w-6" />
                   <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-verify-green font-mono text-[10px] font-bold text-vault-teal-deep">
                     {i + 1}
                   </span>
                 </div>
                 <div className="lg:mt-5">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-verify-mint/80">{s.days}</p>
-                  <h3 className="mt-1.5 text-sm font-semibold text-verify-light lg:text-base">{s.t}</h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-[#6d8f8a] lg:text-[13px]">{s.d}</p>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-verify-ink/80">{s.days}</p>
+                  <h3 className="mt-1.5 text-sm font-semibold text-jade-ink lg:text-base">{s.t}</h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-[#7d938e] lg:text-[13px]">{s.d}</p>
                 </div>
               </motion.li>
             ))}
@@ -74,15 +74,15 @@ const MARQUEE_ITEMS = ["Med-Surg", "ICU", "ER", "Telemetry", "Labor & Delivery",
 export function SpecialtyMarquee() {
   const row = [...MARQUEE_ITEMS, ...MARQUEE_ITEMS];
   return (
-    <section aria-label="Supported specialties" className="relative overflow-hidden border-y border-white/[0.05] py-6">
+    <section aria-label="Supported specialties" className="relative overflow-hidden border-y border-vault-border py-6">
       <div className="mask-fade-x">
         <div className="animate-marquee flex w-max items-center gap-3">
           {row.map((s, i) => (
             <span
               key={`${s}-${i}`}
-              className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-vault-border bg-vault-teal/20 px-4 py-1.5 text-xs text-[#8fb0ab]"
+              className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-vault-border bg-white vv-card-shadow px-4 py-1.5 text-xs text-jade-muted"
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${i % 2 === 0 ? "bg-verify-green/80" : "bg-[#5cc0cb]/80"}`} />
+              <span className={`h-1.5 w-1.5 rounded-full ${i % 2 === 0 ? "bg-verify-green/80" : "bg-[#2f8d99]/80"}`} />
               {s}
             </span>
           ))}

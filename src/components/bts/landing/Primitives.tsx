@@ -52,14 +52,14 @@ export function SectionHeading({
       viewport={{ once: true, margin: "-80px" }}
       className={cn("max-w-3xl", align === "center" ? "mx-auto text-center" : "text-left")}
     >
-      <motion.p variants={fadeUp} className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-verify-green">
+      <motion.p variants={fadeUp} className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-verify-ink">
         {eyebrow}
       </motion.p>
-      <motion.h2 variants={fadeUp} className="mt-4 text-3xl font-semibold tracking-tight text-verify-light sm:text-4xl lg:text-[2.75rem] lg:leading-[1.12]">
+      <motion.h2 variants={fadeUp} className="mt-4 text-3xl font-semibold tracking-tight text-jade-ink sm:text-4xl lg:text-[2.75rem] lg:leading-[1.12]">
         {title}
       </motion.h2>
       {sub && (
-        <motion.p variants={fadeUp} className="mt-4 text-base leading-relaxed text-[#8fb0ab]">
+        <motion.p variants={fadeUp} className="mt-4 text-base leading-relaxed text-jade-muted">
           {sub}
         </motion.p>
       )}
@@ -80,7 +80,7 @@ const GLOW_RING: Record<GlowTone, string> = {
 const GLOW_SPOT: Record<GlowTone, string> = {
   green: "rgba(124, 193, 24, 0.10)",
   jade: "rgba(47, 141, 153, 0.13)",
-  mint: "rgba(244, 249, 245, 0.08)",
+  mint: "rgba(124, 193, 24, 0.07)",
 };
 
 export function GlowCard({
@@ -136,8 +136,8 @@ export function GlowCard({
           background: `radial-gradient(300px circle at var(--mx, 50%) var(--my, 0%), ${GLOW_SPOT[glow]}, transparent 65%)`,
         }}
       />
-      {/* glassmorphism surface — Deep Vault Teal @ ~78% over Midnight Steel */}
-      <div className="relative m-px h-[calc(100%-2px)] rounded-[15px] border border-vault-border bg-vault-teal/20 p-6 backdrop-blur-md transition-colors duration-500 group-hover:border-verify-green/25">
+      {/* white card surface with soft brand shadow (light theme) */}
+      <div className="relative m-px h-[calc(100%-2px)] rounded-[15px] border border-vault-border bg-white vv-card-shadow p-6 transition-colors duration-500 group-hover:border-verify-green/40">
         {children}
       </div>
     </motion.div>
@@ -168,7 +168,7 @@ export function GlowButton({
         "relative inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-verify-green/60",
         variant === "primary"
           ? "bg-verify-green text-vault-teal-deep shadow-[0_0_28px_-6px_rgba(124,193,24,0.65)] hover:bg-verify-mint hover:shadow-[0_0_36px_-4px_rgba(124,193,24,0.85)]"
-          : "border border-vault-border bg-vault-teal/20 text-verify-light backdrop-blur-md hover:border-verify-green/35 hover:bg-vault-teal/40",
+          : "border border-slate-300 bg-white text-jade-ink hover:border-verify-green/50 hover:bg-verify-green/10",
         className
       )}
     >

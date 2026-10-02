@@ -12,7 +12,14 @@ export async function seedChecklistDemo() {
   let account = await db.checklistAccount.findUnique({ where: { email } });
   if (!account) {
     account = await db.checklistAccount.create({
-      data: { email, name: "Emma Chen", title: "RN", passwordHash: hashPassword("demo1234") },
+      data: {
+        email, name: "Emma Chen", title: "RN", passwordHash: hashPassword("demo1234"),
+        // onboarding / Data Center profile
+        phone: "(555) 214-8890", city: "Denver", state: "CO", zip: "80203",
+        profession: "Nursing", discipline: "RN", specialty: "ICU",
+        yrsOverall: 6, yrsOverallStart: null, yrsSpecialty: 4, yrsSpecialtyStart: null,
+        onboardingComplete: true,
+      },
     });
   }
 

@@ -9,14 +9,18 @@
    Midnight Steel #081215 · Crisp Mint White #f4f9f5 · Jade Mist #1b4e54
    ───────────────────────────────────────────────────────────── */
 @theme {
-  --color-vault-dark: #081215;   /* Midnight Steel — main dashboard background */
+  --color-vault-dark: #081215;   /* Midnight Steel — reserved for PDF/brand blocks */
   --color-vault-teal: #03363d;   /* Deep Vault Teal — brand base */
   --color-vault-teal-deep: #02272c;
-  --color-vault-border: #1b4e54; /* Jade Mist — glassmorphism card borders */
+  --color-vault-border: #d7e3df; /* light jade — card borders on light surfaces */
   --color-verify-green: #7cc118; /* Verify Bright Green — dynamic highlights */
-  --color-verify-light: #f4f9f5; /* Crisp Mint White — light text / sub-cards */
+  --color-verify-light: #f4f9f5; /* Crisp Mint White */
   --color-verify-mint: #a4d84a;  /* lighter tint of the accent for gradients */
   --color-verify-deep: #5a8f0e;  /* darker shade for hovers on the accent */
+  --color-verify-ink: #4e7d0d;   /* accent-green readable as text on white */
+  --color-jade-ink: #0e2f34;     /* primary ink on light surfaces */
+  --color-jade-muted: #52706c;   /* secondary ink on light surfaces */
+  --color-cream: #f7f4ec;        /* warm off-white for the page gradient */
 }
 
 @theme inline {
@@ -142,13 +146,32 @@
    ───────────────────────────────────────────────────────────── */
 
 ::selection {
-  background: rgba(124, 193, 24, 0.3);
-  color: #f4f9f5;
+  background: rgba(124, 193, 24, 0.35);
+  color: #0e2f34;
 }
 
+/* Legacy dark surface (kept for the referee document banner) */
 .vv-dark {
-  background-color: #081215; /* Midnight Steel */
+  background-color: #081215;
   color: #dbe7e4;
+}
+
+/* ── VaultVerify light page: off-white cream → mint white → white gradient ── */
+.vv-page {
+  background:
+    radial-gradient(1100px 520px at 85% -8%, rgba(124, 193, 24, 0.10), transparent 62%),
+    radial-gradient(900px 480px at -10% 12%, rgba(3, 54, 61, 0.07), transparent 58%),
+    linear-gradient(180deg, #f7f4ec 0%, #f4f9f5 46%, #ffffff 100%);
+  background-color: #f4f9f5;
+  color: #0e2f34;
+}
+
+/* Light blueprint grid for hero sections on the light theme */
+.bg-grid-light {
+  background-image:
+    linear-gradient(to right, rgba(3, 54, 61, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(3, 54, 61, 0.05) 1px, transparent 1px);
+  background-size: 54px 54px;
 }
 
 /* Headline gradient that drifts from Vault Teal into Verify Bright Green */
@@ -176,6 +199,11 @@
     linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
   background-size: 54px 54px;
+}
+
+/* Soft card shadow used across the light app + landing */
+.vv-card-shadow {
+  box-shadow: 0 1px 2px rgba(3, 54, 61, 0.05), 0 8px 24px -12px rgba(3, 54, 61, 0.12);
 }
 
 .mask-radial-hero {
@@ -242,10 +270,10 @@
   animation: bts-breathe 6s ease-in-out infinite;
 }
 
-/* Thin dark scrollbars inside card visuals */
+/* Thin scrollbars inside card visuals */
 .vv-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
 .vv-scroll::-webkit-scrollbar-track { background: transparent; }
-.vv-scroll::-webkit-scrollbar-thumb { background: rgba(244, 249, 245, 0.12); border-radius: 999px; }
+.vv-scroll::-webkit-scrollbar-thumb { background: rgba(3, 54, 61, 0.18); border-radius: 999px; }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-marquee,

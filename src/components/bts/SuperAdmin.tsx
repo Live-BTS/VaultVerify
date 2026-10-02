@@ -2,18 +2,23 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { validateRows, type ImportRow, type ValidatedRow } from "@/lib/bts/importValidate";
 import { specialtyLabel } from "@/lib/bts/checklistShared";
+import { professionLabel, disciplineLabel } from "@/lib/bts/catalog";
 import { AgencyLogo, VaultMark, Spinner } from "./brand";
-import { ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass, Check, X } from "lucide-react";
+import {
+  ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
+  Check, X, Users, BookUser, Wallet, LayoutDashboard,
+} from "lucide-react";
 import * as XLSX from "xlsx";
 
-// ── Super Admin — platform-level console (Zipvault skills import lives here) ──
+// ── Super Admin — platform console with sidebar navigation ─────────
+// Sections: Requests (approval queue) · User management · Company management ·
+// Candidate management (Data Center) · Credit management · Skills & imports.
 
 interface TemplateRow {
   id: string; category: string; skillName: string; questionType: string; hasNA: boolean; highRisk: boolean; active: boolean; source: string;
@@ -21,10 +26,27 @@ interface TemplateRow {
 interface TemplateSet {
   profession: string; jobTitle: string; specialty: string; count: number; sources: string[]; rows: TemplateRow[];
 }
+interface UserRow {
+  id: string; name: string; email: string; title: string; onboardingComplete: boolean;
+  completions: number; requests: number; invites: number; joinedAt: string;
+}
+interface CandidateProfileRow {
+  id: string; name: string; phone: string; email: string;
+  city: string; state: string; zip: string;
+  profession: string; discipline: string; specialty: string;
+  yrsOverall: number; yrsSpecialty: number; yrsOverallStart: string; yrsSpecialtyStart: string;
+}
+interface CompanyRow {
+  id: string; name: string; slug: string; logoText: string; candidates: number;
+  primaryColor: string; accentColor: string; creditsGranted: number; creditsUsed: number; creditsRemaining: number;
+}
 interface Overview {
   stats: { agencies: number; candidates: number; requests: number; completed: number; responses: number; templates: number; openFlags: number; notifications: number; pendingChecklistRequests: number };
   agencies: { id: string; name: string; slug: string; logoText: string; candidates: number; primaryColor: string; accentColor: string }[];
   sets: TemplateSet[];
+  users: UserRow[];
+  candidateProfiles: CandidateProfileRow[];
+  companies: CompanyRow[];
 }
 
 interface ChecklistRequestRow {
@@ -33,6 +55,8 @@ interface ChecklistRequestRow {
   profession: string; jobTitle: string; specialty: string;
   status: string; requestedAt: string; decidedAt: string | null;
 }
+
+type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "skills";
 
 const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skill Name", "Question Type", "Has N/A Option"];
 
@@ -62,12 +86,24 @@ async function parseWorkbook(file: File): Promise<{ rows: ImportRow[]; sheetName
   return { rows, sheetName, headerFound: true };
 }
 
+const NAV: [Section, string, typeof Users][] = [
+  ["requests", "Requests", Hourglass],
+  ["users", "User management", Users],
+  ["companies", "Company management", Building2],
+  ["candidates", "Candidate management", BookUser],
+  ["credits", "Credit management", Wallet],
+  ["skills", "Skills & imports", Database],
+];
+
+const th = "px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-jade-muted";
+const td = "px-3 py-2.5 text-sm text-jade-ink border-t border-vault-border/60";
+
 export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const { toast } = useToast();
   const [code, setCode] = useState("");
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<"overview" | "skills" | "requests">("skills");
+  const [section, setSection] = useState<Section>("requests");
   const [cqRequests, setCqRequests] = useState<ChecklistRequestRow[] | null>(null);
   const [openSet, setOpenSet] = useState<string | null>(null);
   const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string } | null>(null);
@@ -160,154 +196,358 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   // ── Gate ──
   if (!data) {
     return (
-      <div className="vv-dark flex min-h-screen items-center justify-center px-4">
-        <Card className="w-full max-w-md border-vault-border bg-vault-teal/20 backdrop-blur-md">
-          <CardContent className="p-8">
-            <div className="flex flex-col items-center text-center">
-              <VaultMark size={44} />
-              <h1 className="mt-4 text-xl font-semibold text-verify-light">Super Admin</h1>
-              <p className="mt-1 text-sm text-[#8fb0ab]">Platform-level control: agencies, Zipvault skill templates, imports.</p>
-            </div>
-            <div className="mt-6">
-              <Label htmlFor="sa-code" className="text-verify-light/80">Access code</Label>
-              <Input
-                id="sa-code"
-                type="password"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && auth()}
-                placeholder="Superadmin code"
-                className="mt-1.5 border-vault-border bg-vault-dark/60 text-verify-light placeholder:text-[#5c7a76]"
-              />
-              <p className="mt-2 text-xs text-[#8fb0ab]">
-                Sandbox demo code:{" "}
-                <button type="button" className="font-mono font-semibold text-verify-green underline" onClick={() => auth("zipvault2026")}>
-                  zipvault2026
-                </button>
-              </p>
-            </div>
-            <Button onClick={() => auth()} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
-              {loading ? "Checking…" : "Unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
-            </Button>
-            <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-[#8fb0ab] hover:text-verify-light">
-              ← Back to site
-            </button>
-          </CardContent>
-        </Card>
+      <div className="vv-page flex min-h-screen items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl border border-vault-border bg-white vv-card-shadow p-8">
+          <div className="flex flex-col items-center text-center">
+            <VaultMark size={44} />
+            <h1 className="mt-4 text-xl font-semibold text-jade-ink">Super Admin</h1>
+            <p className="mt-1 text-sm text-jade-muted">Platform control: users, companies, candidate data, credits, skills.</p>
+          </div>
+          <div className="mt-6">
+            <Label htmlFor="sa-code" className="text-jade-ink/80">Access code</Label>
+            <Input
+              id="sa-code"
+              type="password"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && auth()}
+              placeholder="Superadmin code"
+              className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
+            />
+            <p className="mt-2 text-xs text-jade-muted">
+              Sandbox demo code:{" "}
+              <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => auth("zipvault2026")}>
+                zipvault2026
+              </button>
+            </p>
+          </div>
+          <Button onClick={() => auth()} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+            {loading ? "Checking…" : "Unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
+          </Button>
+          <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
+            ← Back to site
+          </button>
+        </div>
       </div>
     );
   }
 
   const s = data.stats;
   const stats: [string, string | number, string?][] = [
-    ["Agencies", s.agencies],
-    ["Candidates", s.candidates],
-    ["Requests", s.requests],
-    ["Completed", s.completed],
+    ["Companies", s.agencies],
+    ["Users", data.users.length],
+    ["Ref requests", s.requests],
+    ["Completed refs", s.completed],
     ["Skill templates", s.templates],
-    ["Open flags", s.openFlags, s.openFlags > 0 ? "text-rose-400" : undefined],
+    ["Open flags", s.openFlags, s.openFlags > 0 ? "text-rose-600" : undefined],
     ["Notifications", s.notifications],
   ];
 
+  const badgeFor = (sec: Section): number =>
+    sec === "requests" ? s.pendingChecklistRequests : 0;
+
+  const navList = (
+    <nav className="space-y-1">
+      {NAV.map(([sec, label, Icon]) => {
+        const active = section === sec;
+        const badge = badgeFor(sec);
+        return (
+          <button key={sec} type="button"
+            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); }}
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
+              active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
+            )}>
+            <Icon className={cn("h-4 w-4 shrink-0", active && "text-verify-ink")} />
+            <span className="flex-1 text-left">{label}</span>
+            {badge > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{badge}</span>}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
   return (
-    <div className="vv-dark min-h-screen">
+    <div className="vv-page min-h-screen">
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-vault-dark/85 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-white/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">
             <VaultMark size={32} />
             <div className="leading-tight">
-              <p className="text-sm font-semibold text-verify-light">
-                Vault<span className="text-verify-green">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-green">Super Admin</span>
+              <p className="text-sm font-semibold text-jade-ink">
+                Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Super Admin</span>
               </p>
-              <p className="text-[11px] text-[#8fb0ab]">Zipvault skills platform console</p>
+              <p className="text-[11px] text-jade-muted">Zipvault skills platform console</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={refresh} className="px-3 text-[13px] text-[#8fb0ab] hover:text-verify-light">
+            <Button variant="ghost" onClick={refresh} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
-            <Button variant="ghost" onClick={onExit} className="px-3 text-[13px] text-[#8fb0ab] hover:text-verify-light">Sign out</Button>
+            <Button variant="ghost" onClick={onExit} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">Sign out</Button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-8 sm:px-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          {stats.map(([label, value, tone]) => (
-            <div key={label} className="rounded-xl border border-vault-border bg-vault-teal/20 p-4 backdrop-blur-md">
-              <p className="text-[11px] font-medium uppercase tracking-wider text-[#8fb0ab]">{label}</p>
-              <p className={cn("mt-1 text-2xl font-bold text-verify-light", tone)}>{value}</p>
-            </div>
-          ))}
-        </div>
+      <div className="mx-auto flex max-w-7xl gap-6 px-4 pb-16 pt-8 sm:px-6">
+        {/* Sidebar (desktop) */}
+        <aside className="hidden w-60 shrink-0 lg:block">
+          <div className="sticky top-24 rounded-2xl border border-vault-border bg-white vv-card-shadow p-3">
+            <p className="flex items-center gap-1.5 px-3 pb-2 pt-1 text-[10px] font-bold uppercase tracking-widest text-[#8aa29c]">
+              <LayoutDashboard className="h-3 w-3" /> Console
+            </p>
+            {navList}
+          </div>
+        </aside>
 
-        {/* Tabs */}
-        <div className="mt-8 flex flex-wrap gap-2">
-          {([
-            ["skills", "Skills & imports", Database, 0],
-            ["requests", "Requests", Hourglass, s.pendingChecklistRequests],
-            ["overview", "Agencies", Building2, 0],
-          ] as const).map(([k, label, Icon, badge]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => { setTab(k); if (k === "requests" && !cqRequests) loadRequests(); }}
-              className={cn(
-                "flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition",
-                tab === k ? "border-verify-green bg-verify-green/15 text-verify-green" : "border-vault-border text-[#8fb0ab] hover:text-verify-light"
+        {/* Main column */}
+        <main className="min-w-0 flex-1">
+          {/* Section switcher (mobile) */}
+          <div className="mb-6 flex gap-2 overflow-x-auto pb-1 lg:hidden">{navList}</div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+            {stats.map(([label, value, tone]) => (
+              <div key={label} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-jade-muted">{label}</p>
+                <p className={cn("mt-1 text-2xl font-bold text-jade-ink", tone)}>{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Requests ── */}
+          {section === "requests" && (
+            <div className="mt-8 space-y-3">
+              <div>
+                <h2 className="text-base font-semibold text-jade-ink">Candidate checklist requests</h2>
+                <p className="mt-1 text-sm text-jade-muted">
+                  Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year.
+                </p>
+              </div>
+              {!cqRequests && <div className="flex justify-center rounded-xl border border-vault-border bg-white vv-card-shadow p-10"><Spinner /></div>}
+              {cqRequests?.length === 0 && (
+                <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-10 text-center text-sm text-jade-muted">No requests yet.</div>
               )}
-            >
-              <Icon className="h-3.5 w-3.5" /> {label}
-              {badge > 0 && <span className="rounded-full bg-amber-400/20 px-1.5 text-[10px] font-bold text-amber-400">{badge}</span>}
-            </button>
-          ))}
-        </div>
+              {cqRequests?.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+                  <div>
+                    <p className="text-sm font-semibold text-jade-ink">
+                      {specialtyLabel(r.specialty)} <span className="text-xs font-normal text-jade-muted">· {r.jobTitle} · {r.profession}</span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-jade-muted">
+                      {r.account.name} · {r.account.email} · requested {new Date(r.requestedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </p>
+                  </div>
+                  {r.status === "PENDING" ? (
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => decide(r.id, true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                        <Check className="mr-1.5 h-3.5 w-3.5" /> Approve
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => decide(r.id, false)} className="border border-rose-300 text-rose-600 hover:bg-rose-50">
+                        <X className="mr-1.5 h-3.5 w-3.5" /> Decline
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
+                      r.status === "APPROVED" ? "border-verify-green/40 text-verify-ink" : "border-rose-300 text-rose-600")}>
+                      {r.status === "APPROVED" ? "Approved" : "Declined"}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
-        {tab === "skills" && (
-          <div className="mt-6 space-y-6">
-            {/* Import panel */}
-            <Card className="border-vault-border bg-vault-teal/20 backdrop-blur-md">
-              <CardContent className="p-6">
+          {/* ── User management ── */}
+          {section === "users" && (
+            <div className="mt-8 space-y-3">
+              <div>
+                <h2 className="text-base font-semibold text-jade-ink">User management</h2>
+                <p className="mt-1 text-sm text-jade-muted">Everyone with a platform login — candidate accounts, onboarding status and activity.</p>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
+                <table className="min-w-full text-left">
+                  <thead>
+                    <tr>
+                      {["Name", "Email", "Discipline", "Onboarding", "Checklists", "Requests", "Invites", "Joined"].map((h) => (
+                        <th key={h} className={th}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.users.map((u) => (
+                      <tr key={u.id}>
+                        <td className={cn(td, "font-medium")}>{u.name}</td>
+                        <td className={cn(td, "text-jade-muted")}>{u.email}</td>
+                        <td className={td}>{u.title}</td>
+                        <td className={td}>
+                          <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                            u.onboardingComplete ? "border-verify-green/40 text-verify-ink" : "border-amber-300 text-amber-600")}>
+                            {u.onboardingComplete ? "Complete" : "Pending"}
+                          </span>
+                        </td>
+                        <td className={td}>{u.completions}</td>
+                        <td className={td}>{u.requests}</td>
+                        <td className={td}>{u.invites}</td>
+                        <td className={cn(td, "text-jade-muted")}>{new Date(u.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
+                      </tr>
+                    ))}
+                    {data.users.length === 0 && (
+                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={8}>No users yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Company management ── */}
+          {section === "companies" && (
+            <div className="mt-8 space-y-3">
+              <div>
+                <h2 className="text-base font-semibold text-jade-ink">Company management</h2>
+                <p className="mt-1 text-sm text-jade-muted">Agencies on the platform. Creation & white-label editing ship with the multi-tenant admin phase.</p>
+              </div>
+              {data.companies.map((a) => (
+                <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="h-3 w-3 rounded-full" style={{ background: a.accentColor }} />
+                    <div>
+                      <p className="text-sm font-medium text-jade-ink">{a.name}</p>
+                      <p className="text-xs text-jade-muted">slug: {a.slug} · {a.candidates} candidate(s)</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-jade-muted">{a.creditsRemaining} of {a.creditsGranted} credits remaining</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Candidate management — Data Center ── */}
+          {section === "candidates" && (
+            <div className="mt-8 space-y-3">
+              <div>
+                <h2 className="text-base font-semibold text-jade-ink">Candidate management — Data Center</h2>
+                <p className="mt-1 text-sm text-jade-muted">
+                  Every candidate detail collected at onboarding, in one uniform table. Experience fields are entered once (years or calendar start date) and the platform keeps the years-of-experience columns current automatically.
+                </p>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
+                <table className="min-w-full text-left">
+                  <thead>
+                    <tr>
+                      {["Name", "Number", "Email", "City", "State", "ZIP", "Profession", "Discipline", "Specialty", "Overall YOE", "Specialty YOE"].map((h) => (
+                        <th key={h} className={cn(th, "whitespace-nowrap")}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.candidateProfiles.map((c) => (
+                      <tr key={c.id}>
+                        <td className={cn(td, "whitespace-nowrap font-medium")}>{c.name}</td>
+                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{c.phone || "—"}</td>
+                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{c.email}</td>
+                        <td className={td}>{c.city || "—"}</td>
+                        <td className={td}>{c.state || "—"}</td>
+                        <td className={td}>{c.zip || "—"}</td>
+                        <td className={cn(td, "whitespace-nowrap")}>{c.profession ? professionLabel(c.profession) : "—"}</td>
+                        <td className={cn(td, "whitespace-nowrap")}>{c.discipline ? disciplineLabel(c.discipline) : "—"}</td>
+                        <td className={cn(td, "whitespace-nowrap")}>{c.specialty ? specialtyLabel(c.specialty) : "—"}</td>
+                        <td className={cn(td, "whitespace-nowrap")}>
+                          {c.yrsOverall} yr{c.yrsOverallStart && <span className="ml-1 text-[10px] text-[#8aa29c]">auto</span>}
+                        </td>
+                        <td className={cn(td, "whitespace-nowrap")}>
+                          {c.yrsSpecialty} yr{c.yrsSpecialtyStart && <span className="ml-1 text-[10px] text-[#8aa29c]">auto</span>}
+                        </td>
+                      </tr>
+                    ))}
+                    {data.candidateProfiles.length === 0 && (
+                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={11}>No candidate profiles yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Credit management ── */}
+          {section === "credits" && (
+            <div className="mt-8 space-y-3">
+              <div>
+                <h2 className="text-base font-semibold text-jade-ink">Credit management</h2>
+                <p className="mt-1 text-sm text-jade-muted">
+                  Sandbox metering: 1 credit per outbound verification (reference requests + checklist invites). Swap in the billing provider of choice at launch.
+                </p>
+              </div>
+              {data.companies.map((a) => {
+                const pct = a.creditsGranted ? Math.min(100, Math.round((a.creditsUsed / a.creditsGranted) * 100)) : 0;
+                return (
+                  <div key={a.id} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-jade-ink">{a.name}</p>
+                        <p className="text-xs text-jade-muted">{a.creditsUsed} used of {a.creditsGranted} granted</p>
+                      </div>
+                      <p className={cn("text-sm font-bold", a.creditsRemaining <= 0 ? "text-rose-600" : "text-verify-ink")}>
+                        {a.creditsRemaining} remaining
+                      </p>
+                    </div>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#eef4f1]">
+                      <div className={cn("h-full rounded-full transition-all", pct > 85 ? "bg-rose-500" : "bg-verify-green")} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+              {data.companies.length === 0 && (
+                <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-10 text-center text-sm text-jade-muted">No companies yet.</div>
+              )}
+            </div>
+          )}
+
+          {/* ── Skills & imports ── */}
+          {section === "skills" && (
+            <div className="mt-8 space-y-6">
+              {/* Import panel */}
+              <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-base font-semibold text-verify-light">Import skills checklist</h2>
-                    <p className="mt-1 text-sm text-[#8fb0ab]">Upload a MyZipVault import workbook (.xlsx). Rows upsert by Profession + Job Title + Specialty + Skill Name — re-uploading is safe.</p>
+                    <h2 className="text-base font-semibold text-jade-ink">Import skills checklist</h2>
+                    <p className="mt-1 text-sm text-jade-muted">Upload a MyZipVault import workbook (.xlsx). Rows upsert by Profession + Job Title + Specialty + Skill Name — re-uploading is safe.</p>
                   </div>
                   <a href="/MyZipVault-Skills-Checklist-Import-Template.xlsx" download>
-                    <Button variant="ghost" className="border border-vault-border text-verify-green hover:bg-verify-green/10 hover:text-verify-green">
+                    <Button variant="ghost" className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
                       <FileDown className="h-4 w-4" /> Download template
                     </Button>
                   </a>
                 </div>
 
-                <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-vault-border bg-vault-dark/40 px-6 py-8 text-center transition hover:border-verify-green/50">
-                  <Upload className="h-6 w-6 text-verify-green" />
-                  <p className="mt-2 text-sm font-medium text-verify-light">{pending ? pending.fileName : "Choose .xlsx workbook"}</p>
-                  <p className="mt-0.5 text-xs text-[#8fb0ab]">Sheets scanned automatically for the 7-column Skills Data header</p>
+                <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-vault-border bg-[#f2f7f4] px-6 py-8 text-center transition hover:border-verify-green/60">
+                  <Upload className="h-6 w-6 text-verify-ink" />
+                  <p className="mt-2 text-sm font-medium text-jade-ink">{pending ? pending.fileName : "Choose .xlsx workbook"}</p>
+                  <p className="mt-0.5 text-xs text-jade-muted">Sheets scanned automatically for the 7-column Skills Data header</p>
                   <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                 </label>
 
                 {pending && (
-                  <div className="mt-4 rounded-xl border border-vault-border bg-vault-dark/50 p-4">
+                  <div className="mt-4 rounded-xl border border-vault-border bg-[#f2f7f4] p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-sm text-verify-light">
-                        <span className="font-semibold text-verify-green">{pending.clean.length}</span> valid row(s)
-                        {pending.errors.length > 0 && <span className="ml-2 font-semibold text-rose-400">{pending.errors.length} problem(s)</span>}
+                      <p className="text-sm text-jade-ink">
+                        <span className="font-semibold text-verify-ink">{pending.clean.length}</span> valid row(s)
+                        {pending.errors.length > 0 && <span className="ml-2 font-semibold text-rose-600">{pending.errors.length} problem(s)</span>}
                       </p>
                       <Button onClick={runImport} disabled={importing || !pending.clean.length} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
                         {importing ? "Importing…" : `Import ${pending.clean.length} rows`} <Database className="ml-2 h-4 w-4" />
                       </Button>
                     </div>
                     {pending.errors.length > 0 && (
-                      <ul className="mt-3 max-h-40 space-y-1 overflow-auto rounded-lg bg-rose-950/30 p-3 text-xs text-rose-300">
+                      <ul className="mt-3 max-h-40 space-y-1 overflow-auto rounded-lg bg-rose-50 p-3 text-xs text-rose-700">
                         {pending.errors.slice(0, 50).map((e, i) => <li key={i}>• {e}</li>)}
                       </ul>
                     )}
-                    <div className="mt-3 max-h-40 overflow-auto rounded-lg">
-                      <table className="w-full text-left text-xs text-[#8fb0ab]">
-                        <thead className="text-verify-light/70">
+                    <div className="mt-3 max-h-40 overflow-auto rounded-lg bg-white">
+                      <table className="w-full text-left text-xs text-jade-muted">
+                        <thead className="text-jade-ink/70">
                           <tr>{REQUIRED_COLS.map((h) => <th key={h} className="py-1 pr-3 font-medium">{h}</th>)}</tr>
                         </thead>
                         <tbody>
@@ -317,155 +557,92 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                               <td className="py-1 pr-3">{r.jobTitle}</td>
                               <td className="py-1 pr-3">{r.specialty}</td>
                               <td className="py-1 pr-3">{r.category}</td>
-                              <td className="py-1 pr-3 text-verify-light">{r.skillName}</td>
+                              <td className="py-1 pr-3 text-jade-ink">{r.skillName}</td>
                               <td className="py-1 pr-3">{r.questionType}</td>
                               <td className="py-1 pr-3">{r.hasNA ? "Yes" : "No"}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
-                      {pending.clean.length > 12 && <p className="py-1 text-xs text-[#5c7a76]">+ {pending.clean.length - 12} more…</p>}
+                      {pending.clean.length > 12 && <p className="py-1 text-xs text-[#8aa29c]">+ {pending.clean.length - 12} more…</p>}
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Template sets */}
-            <div className="space-y-3">
-              <h2 className="text-base font-semibold text-verify-light">Checklist library ({data.sets.length} sets)</h2>
-              {data.sets.map((set) => {
-                const k = `${set.profession}|${set.jobTitle}|${set.specialty}`;
-                const open = openSet === k;
-                return (
-                  <div key={k} className="overflow-hidden rounded-xl border border-vault-border bg-vault-teal/20 backdrop-blur-md">
-                    <button type="button" onClick={() => setOpenSet(open ? null : k)} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left">
-                      <div className="flex items-center gap-3">
-                        <ChevronDown className={cn("h-4 w-4 text-verify-green transition-transform", !open && "-rotate-90")} />
-                        <div>
-                          <p className="text-sm font-semibold text-verify-light">
-                            {set.specialty.replace(/_/g, " ")} <span className="ml-1 text-xs font-normal text-[#8fb0ab]">· {set.jobTitle} · {set.profession}</span>
-                          </p>
-                          <p className="text-xs text-[#8fb0ab]">
-                            {set.count} active skill(s) · {set.sources.map((src) => (src === "BUILTIN" ? "built-in" : "imported")).join(" + ")}
-                          </p>
-                        </div>
-                      </div>
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => { e.stopPropagation(); if (confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`)) deleteSet(set); }}
-                        onKeyDown={(e) => e.key === "Enter" && confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`) && deleteSet(set)}
-                        className="rounded-lg border border-transparent p-2 text-[#8fb0ab] transition hover:border-rose-400/40 hover:bg-rose-500/10 hover:text-rose-400"
-                        aria-label={`Delete ${set.specialty} set`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </span>
-                    </button>
-                    {open && (
-                      <div className="border-t border-vault-border/60 px-5 py-3">
-                        {Object.entries(set.rows.reduce<Record<string, TemplateRow[]>>((acc, r) => { (acc[r.category] ??= []).push(r); return acc; }, {})).map(([cat, rows]) => (
-                          <div key={cat} className="py-2">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-verify-green/80">{cat}</p>
-                            <div className="mt-1 divide-y divide-vault-border/40">
-                              {rows.map((r) => (
-                                <div key={r.id} className="flex items-center justify-between gap-3 py-1.5">
-                                  <p className={cn("text-sm", r.active ? "text-verify-light" : "text-[#5c7a76] line-through")}>
-                                    {r.skillName}
-                                    {r.highRisk && <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-400">High-risk</span>}
-                                  </p>
-                                  <div className="flex items-center gap-2 text-[11px] text-[#8fb0ab]">
-                                    <span className="rounded bg-vault-dark/60 px-1.5 py-0.5 font-mono">{r.questionType}</span>
-                                    <span>N/A: {r.hasNA ? "Y" : "N"}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleRow(r)}
-                                      className={cn("rounded-full border px-2 py-0.5 font-semibold transition", r.active ? "border-verify-green/50 text-verify-green hover:bg-verify-green/10" : "border-vault-border text-[#8fb0ab] hover:bg-white/5")}
-                                    >
-                                      {r.active ? "Active" : "Off"}
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+              {/* Template sets */}
+              <div className="space-y-3">
+                <h2 className="text-base font-semibold text-jade-ink">Checklist library ({data.sets.length} sets)</h2>
+                {data.sets.map((set) => {
+                  const k = `${set.profession}|${set.jobTitle}|${set.specialty}`;
+                  const open = openSet === k;
+                  return (
+                    <div key={k} className="overflow-hidden rounded-xl border border-vault-border bg-white vv-card-shadow">
+                      <button type="button" onClick={() => setOpenSet(open ? null : k)} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left">
+                        <div className="flex items-center gap-3">
+                          <ChevronDown className={cn("h-4 w-4 text-verify-ink transition-transform", !open && "-rotate-90")} />
+                          <div>
+                            <p className="text-sm font-semibold text-jade-ink">
+                              {specialtyLabel(set.specialty)} <span className="ml-1 text-xs font-normal text-jade-muted">· {set.jobTitle} · {set.profession}</span>
+                            </p>
+                            <p className="text-xs text-jade-muted">
+                              {set.count} active skill(s) · {set.sources.map((src) => (src === "BUILTIN" ? "built-in" : "imported")).join(" + ")}
+                            </p>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {tab === "requests" && (
-          <div className="mt-6 space-y-3">
-            <h2 className="text-base font-semibold text-verify-light">Candidate checklist requests</h2>
-            <p className="-mt-2 text-sm text-[#8fb0ab]">
-              Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year.
-            </p>
-            {!cqRequests && <div className="flex justify-center rounded-xl border border-vault-border bg-vault-teal/20 p-10"><Spinner /></div>}
-            {cqRequests?.length === 0 && (
-              <div className="rounded-xl border border-dashed border-vault-border p-10 text-center text-sm text-[#8fb0ab]">No requests yet.</div>
-            )}
-            {cqRequests?.map((r) => (
-              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-vault-teal/20 p-5 backdrop-blur-md">
-                <div>
-                  <p className="text-sm font-semibold text-verify-light">
-                    {specialtyLabel(r.specialty)} <span className="text-xs font-normal text-[#8fb0ab]">· {r.jobTitle} · {r.profession}</span>
-                  </p>
-                  <p className="mt-0.5 text-xs text-[#8fb0ab]">
-                    {r.account.name} · {r.account.email} · requested {new Date(r.requestedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                  </p>
-                </div>
-                {r.status === "PENDING" ? (
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => decide(r.id, true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
-                      <Check className="mr-1.5 h-3.5 w-3.5" /> Approve
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => decide(r.id, false)} className="border border-rose-400/40 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300">
-                      <X className="mr-1.5 h-3.5 w-3.5" /> Decline
-                    </Button>
-                  </div>
-                ) : (
-                  <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
-                    r.status === "APPROVED" ? "border-verify-green/40 text-verify-green" : "border-rose-400/40 text-rose-400")}>
-                    {r.status === "APPROVED" ? "Approved" : "Declined"}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {tab === "overview" && (
-          <Card className="mt-6 border-vault-border bg-vault-teal/20 backdrop-blur-md">
-            <CardContent className="p-6">
-              <h2 className="text-base font-semibold text-verify-light">Agencies on platform</h2>
-              <div className="mt-4 divide-y divide-vault-border/50">
-                {data.agencies.map((a) => (
-                  <div key={a.id} className="flex items-center justify-between py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="h-3 w-3 rounded-full" style={{ background: a.accentColor }} />
-                      <div>
-                        <p className="text-sm font-medium text-verify-light">{a.name}</p>
-                        <p className="text-xs text-[#8fb0ab]">slug: {a.slug}</p>
-                      </div>
+                        </div>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`)) deleteSet(set); }}
+                          onKeyDown={(e) => e.key === "Enter" && confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`) && deleteSet(set)}
+                          className="rounded-lg border border-transparent p-2 text-jade-muted transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
+                          aria-label={`Delete ${set.specialty} set`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </span>
+                      </button>
+                      {open && (
+                        <div className="border-t border-vault-border/60 px-5 py-3">
+                          {Object.entries(set.rows.reduce<Record<string, TemplateRow[]>>((acc, r) => { (acc[r.category] ??= []).push(r); return acc; }, {})).map(([cat, rows]) => (
+                            <div key={cat} className="py-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-verify-ink/80">{cat}</p>
+                              <div className="mt-1 divide-y divide-vault-border/40">
+                                {rows.map((r) => (
+                                  <div key={r.id} className="flex items-center justify-between gap-3 py-1.5">
+                                    <p className={cn("text-sm", r.active ? "text-jade-ink" : "text-[#8aa29c] line-through")}>
+                                      {r.skillName}
+                                      {r.highRisk && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-700">High-risk</span>}
+                                    </p>
+                                    <div className="flex items-center gap-2 text-[11px] text-jade-muted">
+                                      <span className="rounded bg-[#f0f6f2] px-1.5 py-0.5 font-mono">{r.questionType}</span>
+                                      <span>N/A: {r.hasNA ? "Y" : "N"}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleRow(r)}
+                                        className={cn("rounded-full border px-2 py-0.5 font-semibold transition", r.active ? "border-verify-green/50 text-verify-ink hover:bg-verify-green/10" : "border-vault-border text-jade-muted hover:bg-jade-ink/5")}
+                                      >
+                                        {r.active ? "Active" : "Off"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <p className="text-sm text-[#8fb0ab]">{a.candidates} candidate(s)</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <p className="mt-4 text-xs text-[#5c7a76]">Agency creation & white-label editing ship with the multi-tenant admin phase.</p>
-            </CardContent>
-          </Card>
-        )}
+            </div>
+          )}
 
-        <div className="mt-10 flex items-center gap-2 text-xs text-[#5c7a76]">
-          <AgencyLogo logoText="VV" name="VaultVerify" size="sm" light />
-        </div>
-      </main>
+          <div className="mt-10 flex items-center gap-2 text-xs text-[#8aa29c]">
+            <AgencyLogo logoText="VV" name="VaultVerify" size="sm" light />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

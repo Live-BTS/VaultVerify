@@ -44,11 +44,11 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
   return (
     <section ref={sectionRef} className="relative overflow-hidden pt-28 pb-20 sm:pt-36">
       {/* backdrop: Midnight Steel depth — grid + brand orbs + top glow line */}
-      <div aria-hidden className="bg-grid-dark mask-radial-hero absolute inset-0" />
+      <div aria-hidden className="bg-grid-light mask-radial-hero absolute inset-0" />
       <motion.div
         aria-hidden
         style={{ y: orbY1 }}
-        className="absolute -top-32 left-[8%] h-[440px] w-[440px] rounded-full bg-[#2f8d99]/20 blur-[130px]"
+        className="absolute -top-32 left-[8%] h-[440px] w-[440px] rounded-full bg-[#2f8d99]/15 blur-[130px]"
       />
       <motion.div
         aria-hidden
@@ -65,7 +65,7 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
         <motion.div variants={staggerParent(0.11)} initial="hidden" animate="show">
           <motion.div
             variants={fadeUp}
-            className="inline-flex items-center gap-2 rounded-full border border-verify-green/25 bg-verify-green/[0.08] px-3.5 py-1.5 text-xs font-medium text-verify-mint"
+            className="inline-flex items-center gap-2 rounded-full border border-verify-green/40 bg-verify-green/10 px-3.5 py-1.5 text-xs font-medium text-verify-ink"
           >
             <span className="relative flex h-2 w-2">
               <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full bg-verify-green" />
@@ -75,20 +75,20 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
 
           <motion.h1
             variants={fadeUp}
-            className="mt-6 text-4xl font-semibold leading-[1.08] tracking-tight text-verify-light sm:text-5xl lg:text-[3.4rem]"
+            className="mt-6 text-4xl font-semibold leading-[1.08] tracking-tight text-jade-ink sm:text-5xl lg:text-[3.4rem]"
           >
             Reference checks that finish in{" "}
-            <span className="animate-gradient-text bg-gradient-to-r from-[#0d6b77] via-verify-green to-verify-mint bg-clip-text text-transparent">
+            <span className="animate-gradient-text bg-gradient-to-r from-[#0d6b77] via-verify-deep to-verify-green bg-clip-text text-transparent">
               48 hours
             </span>
             , not weeks.
           </motion.h1>
 
-          <motion.p variants={fadeUp} className="mt-6 max-w-xl text-base leading-relaxed text-[#8fb0ab] sm:text-lg">
+          <motion.p variants={fadeUp} className="mt-6 max-w-xl text-base leading-relaxed text-jade-muted sm:text-lg">
             {agencyName} replaces the paper reference form with a secure two-party flow: the nurse builds a portable profile once, managers
             answer ten anchored questions on any phone in 3–5 minutes, and every skill comes back stamped{" "}
-            <span className="font-semibold text-verify-green">Manager-verified</span> or{" "}
-            <span className="font-semibold text-verify-light">Self-reported</span>.
+            <span className="font-semibold text-verify-ink">Manager-verified</span> or{" "}
+            <span className="font-semibold text-jade-ink">Self-reported</span>.
           </motion.p>
 
           <motion.div variants={fadeUp} className="mt-9 flex flex-col gap-3 sm:flex-row">
@@ -99,9 +99,9 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
               <LayoutDashboard className="h-4 w-4" /> I&apos;m a recruiter — view pipeline
             </GlowButton>
           </motion.div>
-          <motion.p variants={fadeUp} className="mt-4 text-xs text-[#5f807b]">
+          <motion.p variants={fadeUp} className="mt-4 text-xs text-[#7d938e]">
             Here for the reference flow?{" "}
-            <button type="button" onClick={() => onRole("candidate")} className="font-semibold text-verify-green underline-offset-2 hover:underline">
+            <button type="button" onClick={() => onRole("candidate")} className="font-semibold text-verify-ink underline-offset-2 hover:underline">
               Build my verified references →
             </button>
           </motion.p>
@@ -113,8 +113,8 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
               ["3–5 min", "Per reference"],
             ].map(([v, l]) => (
               <div key={l}>
-                <dd className="bg-gradient-to-r from-verify-light to-[#7fa39d] bg-clip-text text-2xl font-bold text-transparent">{v}</dd>
-                <dt className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[#5f807b]">{l}</dt>
+                <dd className="bg-gradient-to-r from-[#03363d] to-verify-deep bg-clip-text text-2xl font-bold text-transparent">{v}</dd>
+                <dt className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[#7d938e]">{l}</dt>
               </div>
             ))}
           </motion.dl>
@@ -134,7 +134,7 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
             style={reduce ? undefined : { rotateX: springX, rotateY: springY, transformStyle: "preserve-3d" }}
             className={reduce ? "animate-float relative" : "relative"}
           >
-            <div className="relative rounded-3xl border border-vault-border bg-vault-teal/25 p-5 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.85)] backdrop-blur-md">
+            <div className="relative rounded-3xl border border-vault-border bg-white p-5 shadow-[0_30px_80px_-20px_rgba(3,54,61,0.25)] vv-card-shadow">
               {/* header */}
               <div className="flex items-center justify-between border-b border-vault-border/60 pb-4">
                 <div className="flex items-center gap-2.5">
@@ -142,18 +142,18 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
                     <span className="bg-gradient-to-br from-verify-mint to-verify-green bg-clip-text text-[11px] font-bold text-transparent">VV</span>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-verify-light">Reference request</p>
-                    <p className="font-mono text-[10px] text-[#6d8f8a]">for Maya Chen, RN · ICU</p>
+                    <p className="text-xs font-semibold text-jade-ink">Reference request</p>
+                    <p className="font-mono text-[10px] text-[#7d938e]">for Maya Chen, RN · ICU</p>
                   </div>
                 </div>
-                <span className="inline-flex items-center gap-1 rounded-full border border-verify-green/25 bg-verify-green/[0.08] px-2 py-0.5 font-mono text-[10px] text-verify-mint">
+                <span className="inline-flex items-center gap-1 rounded-full border border-verify-green/30 bg-verify-green/10 px-2 py-0.5 font-mono text-[10px] text-verify-ink">
                   <Lock className="h-2.5 w-2.5" /> secure link
                 </span>
               </div>
 
               {/* progress */}
               <div className="mt-4 flex items-center gap-3">
-                <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/[0.07]">
+                <div className="h-1 flex-1 overflow-hidden rounded-full bg-[#eef4f1]">
                   <motion.div
                     initial={{ width: "0%" }}
                     animate={{ width: reduce ? "40%" : ["0%", "40%"] }}
@@ -161,7 +161,7 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
                     className="h-full rounded-full bg-gradient-to-r from-verify-green to-verify-mint"
                   />
                 </div>
-                <span className="font-mono text-[10px] text-[#6d8f8a]">Q3 of 10</span>
+                <span className="font-mono text-[10px] text-[#7d938e]">Q3 of 10</span>
               </div>
 
               {/* questions */}
@@ -175,10 +175,10 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
                     className={
                       s.active
                         ? "rounded-xl border border-verify-green/30 bg-verify-green/[0.07] p-3.5"
-                        : "rounded-xl border border-vault-border/50 bg-white/[0.02] p-3.5 opacity-70"
+                        : "rounded-xl border border-vault-border/70 bg-[#f7faf8] p-3.5 opacity-70"
                     }
                   >
-                    <p className="text-xs leading-snug text-[#d7e6e2]">{s.q}</p>
+                    <p className="text-xs leading-snug text-[#33565b]">{s.q}</p>
                     <div className="mt-2.5 flex items-center gap-1.5">
                       {[1, 2, 3, 4, 5].map((p) => (
                         <span
@@ -188,12 +188,12 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
                               ? "h-2.5 w-2.5 rounded-full bg-verify-green shadow-[0_0_10px_rgba(124,193,24,0.9)]"
                               : p <= 4 && s.done
                                 ? "h-2 w-2 rounded-full bg-verify-green/70"
-                                : "h-2 w-2 rounded-full bg-white/10"
+                                : "h-2 w-2 rounded-full bg-[#d7e3df]"
                           }
                         />
                       ))}
                       {s.active && (
-                        <span className="animate-pulse-dot ml-2 font-mono text-[9px] uppercase tracking-widest text-verify-mint">awaiting</span>
+                        <span className="animate-pulse-dot ml-2 font-mono text-[9px] uppercase tracking-widest text-verify-ink">awaiting</span>
                       )}
                     </div>
                   </motion.div>
@@ -205,13 +205,13 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 2.2, duration: 0.7 }}
-                className="mt-5 flex items-center justify-between rounded-xl border border-vault-border/50 bg-white/[0.02] px-3.5 py-3"
+                className="mt-5 flex items-center justify-between rounded-xl border border-vault-border/70 bg-[#f7faf8] px-3.5 py-3"
               >
-                <div className="flex items-center gap-2 text-[#8fb0ab]">
+                <div className="flex items-center gap-2 text-jade-muted">
                   <Signature className="h-3.5 w-3.5" />
                   <span className="font-mono text-[10px]">J. Rivera · signed 14:09</span>
                 </div>
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-verify-green">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-verify-ink">
                   <ShieldCheck className="h-3 w-3" /> Verified
                 </span>
               </motion.div>
@@ -222,9 +222,9 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
               initial={{ opacity: 0, scale: 0.6 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 1.9, type: "spring", stiffness: 260, damping: 16 }}
-              className="absolute -right-2 -top-5 flex items-center gap-1.5 rounded-full border border-verify-green/30 bg-[#062024]/95 px-3 py-1.5 text-xs font-semibold text-verify-mint shadow-lg backdrop-blur sm:-right-4"
+              className="absolute -right-2 -top-5 flex items-center gap-1.5 rounded-full border border-vault-border bg-white px-3 py-1.5 text-xs font-semibold text-verify-ink vv-card-shadow sm:-right-4"
             >
-              <Star className="h-3.5 w-3.5 fill-verify-mint" /> 4.6 overall
+              <Star className="h-3.5 w-3.5 fill-verify-green text-verify-green" /> 4.6 overall
             </motion.div>
           </motion.div>
         </motion.div>

@@ -56,7 +56,7 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
   }, [token]);
 
   if (state === "loading") {
-    return <div className="flex min-h-screen items-center justify-center bg-vault-dark"><Spinner label="Opening the shared checklist…" /></div>;
+    return <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]"><Spinner label="Opening the shared checklist…" /></div>;
   }
 
   if (state !== "ok" || !payload) {
@@ -68,13 +68,13 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
     };
     const m = msg[state] ?? msg.invalid;
     return (
-      <div className="vv-dark flex min-h-screen items-center justify-center px-4">
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md rounded-2xl border border-vault-border bg-vault-teal/20 p-8 text-center backdrop-blur-md">
+      <div className="vv-page flex min-h-screen items-center justify-center px-4">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md rounded-2xl border border-vault-border bg-white vv-card-shadow p-8 text-center">
           <VaultMark size={44} />
-          <XCircle className="mx-auto mt-4 h-8 w-8 text-rose-400" />
-          <h1 className="mt-3 text-lg font-semibold text-verify-light">{m.title}</h1>
-          <p className="mt-2 text-sm text-[#8fb0ab]">{m.body}</p>
-          <Button variant="ghost" onClick={onExit} className="mt-6 border border-vault-border text-[#8fb0ab] hover:text-verify-light">← Back to site</Button>
+          <XCircle className="mx-auto mt-4 h-8 w-8 text-rose-600" />
+          <h1 className="mt-3 text-lg font-semibold text-jade-ink">{m.title}</h1>
+          <p className="mt-2 text-sm text-jade-muted">{m.body}</p>
+          <Button variant="ghost" onClick={onExit} className="mt-6 border border-vault-border text-jade-muted hover:text-jade-ink">← Back to site</Button>
         </motion.div>
       </div>
     );
@@ -84,14 +84,14 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
   const categories = answers.reduce<Record<string, Answer[]>>((acc, a) => { (acc[a.category] ??= []).push(a); return acc; }, {});
 
   return (
-    <div className="vv-dark min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-vault-dark/85 backdrop-blur-xl">
+    <div className="vv-page min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-white/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">
             <VaultMark size={30} />
             <div className="leading-tight">
-              <p className="text-sm font-semibold text-verify-light">Vault<span className="text-verify-green">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-green">Shared checklist</span></p>
-              <p className="text-[11px] text-[#8fb0ab]">Self-assessment · completed by the candidate</p>
+              <p className="text-sm font-semibold text-jade-ink">Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Shared checklist</span></p>
+              <p className="text-[11px] text-jade-muted">Self-assessment · completed by the candidate</p>
             </div>
           </div>
           <a href={`/api/checklist/pdf?share=${encodeURIComponent(token)}`} download>
@@ -107,13 +107,13 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
             link.accessType === "ONE_TIME" ? "border-amber-400/40 bg-amber-400/10" : "border-verify-green/30 bg-verify-green/10")}>
           <div className="flex items-center gap-3">
             {link.accessType === "ONE_TIME"
-              ? <Eye className="h-5 w-5 text-amber-400" />
-              : <Timer className="h-5 w-5 text-verify-green" />}
+              ? <Eye className="h-5 w-5 text-amber-600" />
+              : <Timer className="h-5 w-5 text-verify-ink" />}
             <div>
-              <p className="text-sm font-semibold text-verify-light">
+              <p className="text-sm font-semibold text-jade-ink">
                 {link.accessType === "ONE_TIME" ? "One-time access — this view is the only one" : `${link.durationDays}-day access`}
               </p>
-              <p className="text-xs text-[#8fb0ab]">
+              <p className="text-xs text-jade-muted">
                 {link.accessType === "ONE_TIME"
                   ? (link.justConsumed ? "This link is now burned — save the PDF if you need it." : "Opening this page consumes the link. Download the PDF to keep a copy.")
                   : `Valid until ${link.expiresAt ? fmt(link.expiresAt) : "—"}`}
@@ -121,44 +121,44 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
               </p>
             </div>
           </div>
-          <span className="flex items-center gap-1.5 rounded-full border border-vault-border px-3 py-1 text-[11px] text-[#8fb0ab]">
+          <span className="flex items-center gap-1.5 rounded-full border border-vault-border px-3 py-1 text-[11px] text-jade-muted">
             <CalendarClock className="h-3 w-3" /> Checklist valid until {fmt(completion.expiresAt)}
           </span>
         </motion.div>
 
         {/* candidate card */}
-        <div className="mt-6 rounded-2xl border border-vault-border bg-vault-teal/20 p-6 backdrop-blur-md">
-          <p className="text-xl font-semibold text-verify-light">{completion.candidateName}</p>
-          <p className="mt-1 text-sm text-[#8fb0ab]">
+        <div className="mt-6 rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
+          <p className="text-xl font-semibold text-jade-ink">{completion.candidateName}</p>
+          <p className="mt-1 text-sm text-jade-muted">
             {completion.candidateTitle} · {completion.specialtyLabel || specialtyLabel(completion.specialty)} · {completion.profession} · {completion.yearsExperience} yr experience
           </p>
-          <p className="mt-1 text-xs text-[#5c7a76]">Completed {fmt(completion.completedAt)} · Self-reported assessment verified against the {completion.jobTitle} skill template</p>
+          <p className="mt-1 text-xs text-[#8aa29c]">Completed {fmt(completion.completedAt)} · Self-reported assessment verified against the {completion.jobTitle} skill template</p>
         </div>
 
         {/* answers */}
         {Object.entries(categories).map(([cat, items], ci) => (
           <motion.section key={cat} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 * ci, duration: 0.4 }}
             className="mt-6">
-            <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-verify-green/90">{cat}</h2>
-            <div className="overflow-hidden rounded-xl border border-vault-border bg-vault-teal/20 backdrop-blur-md">
+            <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-verify-ink/90">{cat}</h2>
+            <div className="overflow-hidden rounded-xl border border-vault-border bg-white vv-card-shadow">
               {items.map((a, i) => (
                 <div key={a.skill} className={cn("flex items-center justify-between gap-4 px-4 py-3 sm:px-5", i > 0 && "border-t border-vault-border/50")}>
-                  <p className="text-sm text-verify-light">
-                    {a.highRisk && <Flame className="mr-1.5 inline h-3.5 w-3.5 text-amber-400" />}
+                  <p className="text-sm text-jade-ink">
+                    {a.highRisk && <Flame className="mr-1.5 inline h-3.5 w-3.5 text-amber-600" />}
                     {a.skill}
                   </p>
                   {a.na ? (
-                    <span className="rounded-full border border-vault-border px-2.5 py-0.5 text-xs font-semibold text-[#8fb0ab]">N/A</span>
+                    <span className="rounded-full border border-vault-border px-2.5 py-0.5 text-xs font-semibold text-jade-muted">N/A</span>
                   ) : a.questionType === "rating_1_4" ? (
                     <span className="flex items-center gap-2">
                       <span className={cn("flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold",
-                        Number(a.value) >= 4 ? "bg-verify-green/20 text-verify-green" : Number(a.value) === 3 ? "bg-teal-500/20 text-teal-300" : "bg-amber-500/15 text-amber-400")}>
+                        Number(a.value) >= 4 ? "bg-verify-green/20 text-verify-ink" : Number(a.value) === 3 ? "bg-teal-500/20 text-teal-700" : "bg-amber-500/15 text-amber-600")}>
                         {String(a.value)}
                       </span>
-                      <span className="hidden max-w-40 text-right text-[11px] text-[#8fb0ab] sm:block">{RATING_4.find((r) => r.value === Number(a.value))?.label}</span>
+                      <span className="hidden max-w-40 text-right text-[11px] text-jade-muted sm:block">{RATING_4.find((r) => r.value === Number(a.value))?.label}</span>
                     </span>
                   ) : (
-                    <span className="text-sm font-semibold capitalize text-verify-light">{String(a.value ?? "-")}</span>
+                    <span className="text-sm font-semibold capitalize text-jade-ink">{String(a.value ?? "-")}</span>
                   )}
                 </div>
               ))}
@@ -166,7 +166,7 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
           </motion.section>
         ))}
 
-        <p className="mt-8 flex items-center justify-center gap-2 text-[11px] text-[#5c7a76]">
+        <p className="mt-8 flex items-center justify-center gap-2 text-[11px] text-[#8aa29c]">
           <ShieldCheck className="h-3.5 w-3.5" /> Shared through VaultVerify — access rules and views are logged for the candidate.
         </p>
       </main>
