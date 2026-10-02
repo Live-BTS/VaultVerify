@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { QUESTIONS, Q8_EXPLANATION_PROMPT, RECENCY_OPTIONS } from "@/lib/bts/questions";
 import { RATING_SCALE, UNABLE_TO_OBSERVE, PROFICIENCY_META } from "@/lib/bts/constants";
-import { AgencyLogo } from "./brand";
+import { AgencyLogo, VaultMark } from "./brand";
 import { Lock, ShieldCheck, ArrowRight, ArrowLeft, CheckCircle2, PhoneCall, MailCheck, CircleAlert, PartyPopper } from "lucide-react";
 
 interface FlowContext {
@@ -229,7 +229,13 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
       <div className="bg-teal-700" style={{ backgroundColor: ctx.agency.primaryColor }}>
         <div className="mx-auto flex max-w-md items-center justify-between px-4 py-4 sm:px-0">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-xs font-bold text-white">{ctx.agency.logoText.slice(0, 4)}</div>
+            {ctx.agency.logoText === "VV" ? (
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90">
+                <VaultMark size={34} />
+              </div>
+            ) : (
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-xs font-bold text-white">{ctx.agency.logoText.slice(0, 4)}</div>
+            )}
             <div className="leading-tight text-white">
               <p className="text-sm font-semibold">{ctx.agency.name}</p>
               <p className="text-[11px] text-white/80">Reference request</p>

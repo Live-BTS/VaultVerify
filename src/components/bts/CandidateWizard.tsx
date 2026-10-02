@@ -196,7 +196,7 @@ export function CandidateWizard({ agency, onDone, onBack }: { agency: AgencyLike
             <div>
               <div className="flex items-start justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Your BTS profile</h2>
+                  <h2 className="text-lg font-semibold text-slate-900">Your VaultVerify profile</h2>
                   <p className="mt-1 text-sm text-slate-600">This information is pulled into every reference packet — never retyped by anyone.</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={demoFill}>

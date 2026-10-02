@@ -57,7 +57,7 @@ export default function Page() {
 
   if (!booted) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#050706]">
+      <div className="flex min-h-screen items-center justify-center bg-vault-dark">
         <Spinner label="Preparing the workspace…" />
       </div>
     );
@@ -65,7 +65,7 @@ export default function Page() {
 
   const goHome = () => setView("home");
 
-  const fallbackAgency: AgencyInfo = agency ?? { id: "demo", name: "MEDS Talent", logoText: "MEDS", tagline: "Verified references. Faster placements.", primaryColor: "#0F766E", accentColor: "#B45309" };
+  const fallbackAgency: AgencyInfo = agency ?? { id: "demo", name: "VaultVerify", logoText: "VV", tagline: "References, verified. Skills, proven.", primaryColor: "#03363d", accentColor: "#7cc118" };
 
   switch (view) {
     case "wizard":

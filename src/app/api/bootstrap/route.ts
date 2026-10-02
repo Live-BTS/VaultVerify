@@ -10,7 +10,7 @@ export async function GET() {
     if (result.seeded) {
       await logAudit({ actorType: "SYSTEM", action: "SEED_CREATED", entity: "agency", entityId: result.agencyId });
     }
-    const agency = await db.agency.findUnique({ where: { slug: "meds-talent" } });
+    const agency = await db.agency.findUnique({ where: { slug: "vaultverify" } });
     return NextResponse.json({ ok: true, agency });
   } catch (e) {
     console.error("[bootstrap]", e);

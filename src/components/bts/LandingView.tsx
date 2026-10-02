@@ -8,6 +8,7 @@ import { Features } from "./landing/Features";
 import { HowItWorks, SpecialtyMarquee } from "./landing/HowItWorks";
 import { Trust, FinalCta, Footer } from "./landing/Closing";
 import { GlowButton } from "./landing/Primitives";
+import { VaultMark } from "./brand";
 
 export interface AgencyInfo {
   id: string;
@@ -20,7 +21,7 @@ export interface AgencyInfo {
 
 export type Role = "candidate" | "recruiter";
 
-function Navbar({ logoText, name, onRole }: { logoText: string; name: string; onRole: (r: Role) => void }) {
+function Navbar({ name, onRole }: { name: string; onRole: (r: Role) => void }) {
   const { scrollY } = useScroll();
   const [scrolled, setScrolled] = useState(false);
   const reduce = useReducedMotion();
@@ -33,15 +34,17 @@ function Navbar({ logoText, name, onRole }: { logoText: string; name: string; on
       transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       className={
         "fixed inset-x-0 top-0 z-50 transition-colors duration-500 " +
-        (scrolled ? "border-b border-white/[0.06] bg-[#050706]/85 backdrop-blur-xl" : "border-b border-transparent")
+        (scrolled ? "border-b border-vault-border/70 bg-vault-dark/85 backdrop-blur-xl" : "border-b border-transparent")
       }
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <a href="#top" className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-400 text-xs font-bold tracking-tight text-emerald-950 shadow-[0_0_18px_-4px_rgba(52,211,153,0.7)]">
-            {logoText.slice(0, 4)}
-          </div>
-          <span className="text-sm font-semibold text-zinc-100">{name}</span>
+          <motion.div whileHover={{ scale: 1.06, rotate: -2 }} transition={{ type: "spring", stiffness: 300, damping: 18 }}>
+            <VaultMark size={34} />
+          </motion.div>
+          <span className="text-sm font-semibold tracking-tight text-verify-light">
+            Vault<span className="text-verify-green">Verify</span>
+          </span>
         </a>
 
         <nav aria-label="Primary" className="hidden items-center gap-7 md:flex">
@@ -53,10 +56,10 @@ function Navbar({ logoText, name, onRole }: { logoText: string; name: string; on
             <a
               key={href}
               href={href}
-              className="group relative text-[13px] font-medium text-zinc-400 transition-colors hover:text-zinc-100"
+              className="group relative text-[13px] font-medium text-[#8fb0ab] transition-colors hover:text-verify-light"
             >
               {label}
-              <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-emerald-400 transition-all duration-300 group-hover:w-full" />
+              <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-verify-green transition-all duration-300 group-hover:w-full" />
             </a>
           ))}
         </nav>
@@ -82,10 +85,10 @@ export function LandingView({
   onRole: (r: Role) => void;
   stats?: { completionRate: number; avgTimeHours: number } | null;
 }) {
-  const name = agency?.name ?? "MEDS Talent";
+  const name = agency?.name ?? "VaultVerify";
   return (
-    <div id="top" className="bts-dark flex min-h-screen flex-col">
-      <Navbar logoText={agency?.logoText ?? "MEDS"} name={name} onRole={onRole} />
+    <div id="top" className="vv-dark flex min-h-screen flex-col">
+      <Navbar name={name} onRole={onRole} />
       <main className="flex-1">
         <Hero agencyName={name} onRole={onRole} />
         <SpecialtyMarquee />

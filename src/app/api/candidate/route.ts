@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A profile with this email already exists — sign in instead." }, { status: 409 });
   }
 
-  const agency = (await db.agency.findUnique({ where: { slug: "meds-talent" } })) ?? (await db.agency.findFirst());
+  const agency = (await db.agency.findUnique({ where: { slug: "vaultverify" } })) ?? (await db.agency.findFirst());
   if (!agency) return NextResponse.json({ error: "Agency not configured" }, { status: 500 });
 
   const candidate = await db.candidate.create({

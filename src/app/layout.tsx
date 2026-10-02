@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
@@ -14,20 +14,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BTS — Verified Reference Collection | MEDS Talent",
+  title: "VaultVerify — Healthcare Skill Checklist & Verified References",
   description:
-    "Digital reference collection for nursing talent: mobile-first reference forms, anchored rating scales, skills verification badges, fraud flags, and branded PDF packets.",
-  keywords: ["nurse references", "healthcare staffing", "reference verification", "skills checklist", "MEDS Talent"],
-  authors: [{ name: "BTS Platform" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+    "VaultVerify turns paper reference forms into a secure two-party digital flow: mobile-first reference forms, anchored rating scales, manager-verified skill badges, fraud flags, and branded PDF packets.",
+  keywords: ["VaultVerify", "nurse references", "healthcare staffing", "reference verification", "skills checklist", "healthcare compliance"],
+  authors: [{ name: "VaultVerify" }],
   openGraph: {
-    title: "BTS — Verified Reference Collection",
-    description: "Reference checks that finish in 48 hours, not weeks.",
-    siteName: "BTS Platform",
+    title: "VaultVerify — Healthcare Skill Checklist",
+    description: "References, verified. Skills, proven. Reference checks that finish in 48 hours, not weeks.",
+    siteName: "VaultVerify",
     type: "website",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#081215",
 };
 
 export default function RootLayout({

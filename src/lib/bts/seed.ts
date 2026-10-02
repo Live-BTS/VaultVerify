@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { CHECKLISTS } from "./questions";
 import { LINK_EXPIRY_DAYS } from "./constants";
 
-// ── Idempotent seed: MEDS Talent agency + demo candidates ─────
+// ── Idempotent seed: VaultVerify agency + demo candidates ─────
 // Creates a demo dataset that exercises every recruiter state:
 // completed, sent, in-progress, flagged, plus self-reported skills.
 
@@ -25,17 +25,17 @@ export function deriveCallbackCode(token: string): string {
 }
 
 export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string }> {
-  const existing = await db.agency.findUnique({ where: { slug: "meds-talent" } });
+  const existing = await db.agency.findUnique({ where: { slug: "vaultverify" } });
   if (existing) return { seeded: false, agencyId: existing.id };
 
   const agency = await db.agency.create({
     data: {
-      name: "MEDS Talent",
-      slug: "meds-talent",
-      logoText: "MEDS",
-      tagline: "Verified references. Faster placements.",
-      primaryColor: "#0F766E",
-      accentColor: "#B45309",
+      name: "VaultVerify",
+      slug: "vaultverify",
+      logoText: "VV",
+      tagline: "References, verified. Skills, proven.",
+      primaryColor: "#03363d",
+      accentColor: "#7cc118",
     },
   });
 
@@ -260,11 +260,11 @@ export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string 
 
   await db.notificationLog.createMany({
     data: [
-      { channel: "SMS", kind: "INVITE", to: "(312) 555-0177", body: "MEDS Talent reference request: Maya Rodriguez has listed you as a professional reference...", status: "SIMULATED" },
-      { channel: "EMAIL", kind: "INVITE", to: "d.okafor@stmaryschicago.org", body: "MEDS Talent reference request: Maya Rodriguez has listed you as a professional reference...", status: "SIMULATED" },
-      { channel: "SMS", kind: "INVITE", to: "(206) 555-0188", body: "MEDS Talent reference request: James Chen has listed you as a professional reference...", status: "SIMULATED" },
-      { channel: "SMS", kind: "REMINDER", to: "(206) 555-0188", body: "Friendly reminder (5 days open): James Chen's MEDS Talent reference form is still waiting for you...", status: "SIMULATED" },
-      { channel: "SMS", kind: "REMINDER", to: "(206) 555-0188", body: "Friendly reminder (9 days open): James Chen's MEDS Talent reference form is still waiting for you...", status: "SIMULATED" },
+      { channel: "SMS", kind: "INVITE", to: "(312) 555-0177", body: "VaultVerify reference request: Maya Rodriguez has listed you as a professional reference...", status: "SIMULATED" },
+      { channel: "EMAIL", kind: "INVITE", to: "d.okafor@stmaryschicago.org", body: "VaultVerify reference request: Maya Rodriguez has listed you as a professional reference...", status: "SIMULATED" },
+      { channel: "SMS", kind: "INVITE", to: "(206) 555-0188", body: "VaultVerify reference request: James Chen has listed you as a professional reference...", status: "SIMULATED" },
+      { channel: "SMS", kind: "REMINDER", to: "(206) 555-0188", body: "Friendly reminder (5 days open): James Chen's VaultVerify reference form is still waiting for you...", status: "SIMULATED" },
+      { channel: "SMS", kind: "REMINDER", to: "(206) 555-0188", body: "Friendly reminder (9 days open): James Chen's VaultVerify reference form is still waiting for you...", status: "SIMULATED" },
     ],
   });
 

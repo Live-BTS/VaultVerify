@@ -20,7 +20,7 @@ export function HowItWorks() {
           eyebrow="How it works"
           title={
             <>
-              Five steps between <span className="bg-gradient-to-r from-emerald-300 to-amber-300 bg-clip-text text-transparent">paper and packet</span>
+              Five steps between <span className="animate-gradient-text bg-gradient-to-r from-[#0d6b77] via-verify-green to-verify-mint bg-clip-text text-transparent">paper and packet</span>
             </>
           }
           sub="The whole loop a reference used to take three weeks to crawl — compressed into two days."
@@ -35,7 +35,7 @@ export function HowItWorks() {
             whileInView={{ scaleY: 1, scaleX: 1 }}
             viewport={{ once: true, margin: "-120px" }}
             transition={{ duration: 1.6, ease: EASE_OUT }}
-            className="absolute left-[27px] top-0 h-full w-px origin-top bg-gradient-to-b from-emerald-400/70 via-emerald-400/30 to-amber-300/50 lg:left-0 lg:top-[27px] lg:h-px lg:w-full lg:origin-left lg:bg-gradient-to-r"
+            className="absolute left-[27px] top-0 h-full w-px origin-top bg-gradient-to-b from-verify-green/70 via-[#2f8d99]/40 to-verify-mint/50 lg:left-0 lg:top-[27px] lg:h-px lg:w-full lg:origin-left lg:bg-gradient-to-r"
           />
 
           <motion.ol
@@ -47,16 +47,16 @@ export function HowItWorks() {
           >
             {STEPS.map((s, i) => (
               <motion.li key={s.t} variants={fadeUp} className="relative flex gap-5 lg:block">
-                <div className="relative z-10 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-emerald-400/25 bg-[#0A0D0B] text-emerald-300 shadow-[0_0_24px_-6px_rgba(52,211,153,0.4)]">
+                <div className="relative z-10 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-verify-green/25 bg-vault-teal/30 text-verify-mint shadow-[0_0_24px_-6px_rgba(124,193,24,0.4)] backdrop-blur-md">
                   <s.icon className="h-6 w-6" />
-                  <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400 font-mono text-[10px] font-bold text-emerald-950">
+                  <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-verify-green font-mono text-[10px] font-bold text-vault-teal-deep">
                     {i + 1}
                   </span>
                 </div>
                 <div className="lg:mt-5">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-300/80">{s.days}</p>
-                  <h3 className="mt-1.5 text-sm font-semibold text-zinc-50 lg:text-base">{s.t}</h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-zinc-500 lg:text-[13px]">{s.d}</p>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-verify-mint/80">{s.days}</p>
+                  <h3 className="mt-1.5 text-sm font-semibold text-verify-light lg:text-base">{s.t}</h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-[#6d8f8a] lg:text-[13px]">{s.d}</p>
                 </div>
               </motion.li>
             ))}
@@ -80,9 +80,9 @@ export function SpecialtyMarquee() {
           {row.map((s, i) => (
             <span
               key={`${s}-${i}`}
-              className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-white/[0.07] bg-white/[0.02] px-4 py-1.5 text-xs text-zinc-400"
+              className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-vault-border bg-vault-teal/20 px-4 py-1.5 text-xs text-[#8fb0ab]"
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${i % 2 === 0 ? "bg-emerald-400/70" : "bg-amber-300/70"}`} />
+              <span className={`h-1.5 w-1.5 rounded-full ${i % 2 === 0 ? "bg-verify-green/80" : "bg-[#5cc0cb]/80"}`} />
               {s}
             </span>
           ))}

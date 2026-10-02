@@ -20,3 +20,30 @@ Stage Summary:
 - Seed data: MEDS Talent agency; Maya Rodriguez (ICU, completed+pending refs), James Chen (Med-Surg, flagged+in-progress refs).
 - Key demo entries: nurse demo email maya.rodriguez@example.com; recruiter code meds2026; reference links via candidate dashboard or /?r=<token>.
 - Production handoff notes: swap sandbox providers for Twilio/Sendgrid in notifications.ts, NextAuth/Supabase Auth for the demo passcodes, Postgres + encryption at rest, standalone notification service ready for Zipvault reuse.
+
+---
+Task ID: 2
+Agent: Super Z (main agent)
+Task: VaultVerify brand takeover + landing rebuild per user's design system: VaultVerify palette (#03363d Deep Vault Teal, #7cc118 Verify Bright Green, #081215 Midnight Steel, #f4f9f5 Crisp Mint White, #1b4e54 Jade Mist), V-in-circle favicon, Tailwind brand tokens, Hero with animated teal-to-green gradient headline + magnetic spring CTA, 3-column Bento Features grid with glow borders on hover.
+
+Work Log:
+- globals.css: registered @theme tokens (vault-dark/teal/teal-deep/border, verify-green/light/mint/deep) -> bg-vault-teal/20, text-verify-green etc.; .bts-dark renamed .vv-dark on #081215; added vv-gradient-drift (animated headline gradient) + vv-spin-slow keyframes; selection + scrollbar recolored; reduced-motion extended.
+- src/app/icon.svg created (V-in-circle: Midnight Steel rounded square, gradient ring teal->jade->green, bright-green V) + copied to public/logo.svg; Next.js auto-favicon confirmed served at /icon.svg.
+- layout.tsx: VaultVerify title/description/OG + viewport themeColor #081215.
+- Primitives.tsx: GlowCard glow variants green/jade/mint (brand gradient rings + per-tone cursor spotlight), glass surface bg-vault-teal/20 + border-vault-border + backdrop-blur-md; GlowButton primary = verify-green with glow shadow; NEW MagneticButton (cursor-tracking spring translate via useMotionValue+useSpring, reduced-motion safe).
+- Hero.tsx: animated gradient span on "48 hours" (teal -> verify-green -> mint drift), MagneticButton nurse CTA, brand orbs (#2f8d99 teal + verify-green), mock card re-skinned (VV chip, Jade borders, verify-green progress/awaiting/verified).
+- Features.tsx: 3-col Bento kept (2+1 / 1+2 / 3 rows), all visuals rebranded, fraud card keeps semantic rose/amber flags inside a jade-glow card; token URL vaultverify.link.
+- HowItWorks/Closing: connector + step chips + marquee rebranded; Trust glows green/jade/mint; FinalCta #062024->#041518 panel; footer "Healthcare Skill Checklist".
+- LandingView navbar: VaultMark logo component (useId-safe gradients) + Vault|Verify wordmark, scrolled bar bg-vault-dark/85.
+- Brand data: seed agency -> VaultVerify (slug vaultverify, VV, #03363d/#7cc118, tagline "References, verified. Skills, proven."); APIs (bootstrap/recruiter/candidate) slug refs updated; AgencyLogo + ReferenceFlow banner render VaultMark when logoText=VV; page.tsx fallback agency + loading bg; PDF header is data-driven.
+- DB repaired: hot-reload reseed had created a 2nd agency; purged old meds-talent tree in FK order via sqlite (SkillVerification->Response->FraudFlag->NotificationLog->Request->CandidateSkill->Candidate->Agency), single VaultVerify agency remains with 2 demo candidates.
+- FIXED real crash found by browser test: recruiter API returned agency:null (stale slug) -> dashboard threw on data.agency.logoText; root-caused via /api/recruiter payload, fixed slug, re-verified.
+- Also fixed Turbopack stale-CSS quirk: forced recompile (append comment) after .bts-dark->.vv-dark rename; verified compiled CSS contains vv-dark + animate-gradient-text.
+- Browser verification (agent-browser): desktop hero + bento screenshots; hover measured (whileHover matrix 1.022/-5 active, group-hover CSS gated behind (hover:hover) which the sandbox headless reports false -> validated rule presence + forced inline preview screenshot of glow end-state); full golden path: wizard demo-fill 4 steps -> submit -> reference flow banner (VaultMark on #03363d) -> recruiter dashboard (stats 6/33%/1 flagged, flagged dialog FREE_EMAIL_SURNAME_MATCH + RAPID_COMPLETION) -> candidate dashboard (skill badges, nudge/swap/copy, callback codes); PDF downloaded + hex-decoded "VaultVerify"+"Maya" present; mobile 390px hero + features verified; lint clean; dev.log clean (only pre-existing EADDRINUSE from init).
+- Screenshots: download/screens/vv-*.png (hero, features, glow preview, wizard, reference flow, recruiter, flagged, candidate dash, mobile x2).
+
+Stage Summary:
+- Deliverable: fully VaultVerify-branded BTS platform — dark "Secure Tech" landing with animated gradient headline, magnetic CTA, glassmorphism bento grid + all four app views on brand.
+- Brand tokens are code-native (bg-vault-teal, text-verify-green...), so every future component inherits the palette automatically.
+- Demo entries unchanged: maya.rodriguez@example.com / meds2026 recruiter code / reference links via dashboard or /?r=<token>.
+- Note: hover glow verified via CSS-rule presence + forced end-state preview because sandbox browser emulates touch (hover:false); behaves correctly on real desktops.

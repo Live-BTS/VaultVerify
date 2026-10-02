@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid access code" }, { status: 401 });
   }
 
-  const agency = await db.agency.findFirst({ where: { slug: "meds-talent" } });
+  const agency = await db.agency.findFirst({ where: { slug: "vaultverify" } });
   const requests = await db.referenceRequest.findMany({
     orderBy: { sentAt: "desc" },
     include: {

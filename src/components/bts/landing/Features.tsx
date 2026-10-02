@@ -38,9 +38,15 @@ function PipelineVisual() {
             transition={{ delay: 0.35 + i * 0.22, duration: 0.5, ease: EASE_OUT }}
             className="relative flex items-center"
           >
-            <div className={i === 3 ? "rounded-full border border-emerald-400/40 bg-emerald-400/10 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-emerald-300" : "rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-zinc-400"}>
-              {i === 2 && <span className="animate-pulse-dot mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-300 align-middle" />}
-              {i === 3 && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 align-middle" />}
+            <div
+              className={
+                i === 3
+                  ? "rounded-full border border-verify-green/40 bg-verify-green/10 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-verify-mint"
+                  : "rounded-full border border-vault-border bg-white/[0.03] px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-[#8fb0ab]"
+              }
+            >
+              {i === 2 && <span className="animate-pulse-dot mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-verify-mint align-middle" />}
+              {i === 3 && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-verify-green align-middle" />}
               {s}
             </div>
             {i < PIPELINE.length - 1 && (
@@ -50,7 +56,7 @@ function PipelineVisual() {
                   whileInView={{ scaleX: 1 }}
                   viewport={{ once: true }}
                   transition={{ delay: 0.55 + i * 0.22, duration: 0.45, ease: EASE_OUT }}
-                  className="h-full w-full origin-left bg-gradient-to-r from-emerald-400/70 to-emerald-400"
+                  className="h-full w-full origin-left bg-gradient-to-r from-verify-green/70 to-verify-green"
                 />
               </div>
             )}
@@ -69,18 +75,18 @@ function PipelineVisual() {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.9 + i * 0.25, duration: 0.5, ease: EASE_OUT }}
-            className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-3.5 py-3"
+            className="flex items-center justify-between rounded-xl border border-vault-border/60 bg-white/[0.02] px-3.5 py-3"
           >
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.05] text-zinc-300">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-vault-teal/40 text-[#c4d8d3]">
                 {i === 0 ? <UserRound className="h-4 w-4" /> : <Smartphone className="h-4 w-4" />}
               </div>
               <div>
-                <p className="text-xs font-medium text-zinc-200">{r.name}</p>
-                <p className="font-mono text-[10px] text-zinc-500">{r.role}</p>
+                <p className="text-xs font-medium text-[#d7e6e2]">{r.name}</p>
+                <p className="font-mono text-[10px] text-[#6d8f8a]">{r.role}</p>
               </div>
             </div>
-            <span className={r.ok ? "font-mono text-[10px] text-emerald-300" : "font-mono text-[10px] text-amber-300"}>{r.status}</span>
+            <span className={r.ok ? "font-mono text-[10px] text-verify-green" : "font-mono text-[10px] text-verify-mint"}>{r.status}</span>
           </motion.div>
         ))}
       </div>
@@ -91,13 +97,13 @@ function PipelineVisual() {
 function TokenVisual() {
   return (
     <div className="mt-6">
-      <div className="relative overflow-hidden rounded-xl border border-white/10 bg-black/40 px-3.5 py-3">
+      <div className="relative overflow-hidden rounded-xl border border-vault-border bg-vault-dark/70 px-3.5 py-3">
         <div className="flex items-center gap-2">
-          <Link2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-          <span className="truncate font-mono text-xs text-zinc-300">bts.link/r/9fK3xQ7v</span>
-          <Lock className="ml-auto h-3 w-3 shrink-0 text-zinc-500" />
+          <Link2 className="h-3.5 w-3.5 shrink-0 text-verify-green" />
+          <span className="truncate font-mono text-xs text-[#d7e6e2]">vaultverify.link/r/9fK3xQ7v</span>
+          <Lock className="ml-auto h-3 w-3 shrink-0 text-[#6d8f8a]" />
         </div>
-        <div aria-hidden className="animate-shimmer pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-emerald-300/10 to-transparent" />
+        <div aria-hidden className="animate-shimmer pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-verify-green/10 to-transparent" />
       </div>
       <ul className="mt-4 space-y-2.5">
         {[
@@ -107,8 +113,8 @@ function TokenVisual() {
         ].map(([Icon, label], i) => {
           const I = Icon as typeof Timer;
           return (
-            <li key={i} className="flex items-center gap-2.5 text-xs text-zinc-400">
-              <I className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
+            <li key={i} className="flex items-center gap-2.5 text-xs text-[#8fb0ab]">
+              <I className="h-3.5 w-3.5 shrink-0 text-verify-green/85" />
               {label as string}
             </li>
           );
@@ -136,19 +142,19 @@ function SkillsVisual() {
           transition={{ delay: 0.4 + i * 0.28, duration: 0.5, ease: EASE_OUT }}
           className={
             s.verified
-              ? "flex items-center justify-between rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] px-3.5 py-3"
-              : "flex items-center justify-between rounded-xl border border-dashed border-white/12 bg-white/[0.02] px-3.5 py-3"
+              ? "flex items-center justify-between rounded-xl border border-verify-green/25 bg-verify-green/[0.06] px-3.5 py-3"
+              : "flex items-center justify-between rounded-xl border border-dashed border-vault-border bg-white/[0.02] px-3.5 py-3"
           }
         >
           <div>
-            <p className="text-xs font-medium text-zinc-200">{s.name}</p>
-            <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">{s.level}</p>
+            <p className="text-xs font-medium text-[#d7e6e2]">{s.name}</p>
+            <p className="font-mono text-[10px] uppercase tracking-wider text-[#6d8f8a]">{s.level}</p>
           </div>
           <span
             className={
               s.verified
-                ? "inline-flex items-center gap-1 rounded-md bg-emerald-400/15 px-2 py-1 text-[10px] font-semibold text-emerald-300"
-                : "inline-flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-[10px] font-semibold text-zinc-400"
+                ? "inline-flex items-center gap-1 rounded-md bg-verify-green/15 px-2 py-1 text-[10px] font-semibold text-verify-mint"
+                : "inline-flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-[10px] font-semibold text-[#8fb0ab]"
             }
           >
             {s.verified ? <BadgeCheck className="h-3 w-3" /> : <CircleDot className="h-3 w-3" />}
@@ -189,11 +195,11 @@ function FraudVisual() {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.45 + i * 0.3, duration: 0.5, ease: EASE_OUT }}
-            className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-3.5 py-2.5"
+            className="flex items-center justify-between rounded-xl border border-vault-border/60 bg-white/[0.02] px-3.5 py-2.5"
           >
             <div className="flex items-center gap-2.5">
               <AlertTriangle className={f.sev === "HIGH" ? "h-3.5 w-3.5 text-rose-300" : "h-3.5 w-3.5 text-amber-300"} />
-              <span className="text-xs text-zinc-300">{f.t}</span>
+              <span className="text-xs text-[#c4d8d3]">{f.t}</span>
             </div>
             <span
               className={
@@ -225,8 +231,8 @@ function SpecialtiesVisual() {
           transition={{ delay: 0.3 + i * 0.06, duration: 0.4, ease: EASE_OUT }}
           className={
             i < 2
-              ? "rounded-lg border border-emerald-400/35 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300"
-              : "rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-zinc-500"
+              ? "rounded-lg border border-verify-green/35 bg-verify-green/10 px-2.5 py-1 text-[11px] font-medium text-verify-mint"
+              : "rounded-lg border border-vault-border bg-white/[0.03] px-2.5 py-1 text-[11px] text-[#8fb0ab]"
           }
         >
           {s}
@@ -243,21 +249,21 @@ function PacketVisual() {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ delay: 0.4, duration: 0.55, ease: EASE_OUT }}
-      className="mt-6 overflow-hidden rounded-xl border border-white/10"
+      className="mt-6 overflow-hidden rounded-xl border border-vault-border"
     >
-      <div className="flex items-center gap-2 bg-gradient-to-r from-emerald-500/15 to-amber-500/10 px-3.5 py-2.5">
-        <div className="flex h-5 w-5 items-center justify-center rounded bg-emerald-400 text-[7px] font-bold text-emerald-950">MEDS</div>
-        <span className="font-mono text-[10px] text-zinc-300">reference-packet.pdf</span>
-        <FileCheck2 className="ml-auto h-3.5 w-3.5 text-emerald-300" />
+      <div className="flex items-center gap-2 bg-gradient-to-r from-verify-green/15 to-[#2f8d99]/15 px-3.5 py-2.5">
+        <div className="flex h-5 w-5 items-center justify-center rounded bg-vault-teal-deep ring-1 ring-verify-green/40 text-[7px] font-bold text-verify-mint">VV</div>
+        <span className="font-mono text-[10px] text-[#d7e6e2]">reference-packet.pdf</span>
+        <FileCheck2 className="ml-auto h-3.5 w-3.5 text-verify-green" />
       </div>
-      <div className="space-y-2 bg-black/30 px-3.5 py-3">
+      <div className="space-y-2 bg-vault-dark/60 px-3.5 py-3">
         <div className="h-1.5 w-3/4 rounded-full bg-white/10" />
         <div className="h-1.5 w-1/2 rounded-full bg-white/[0.07]" />
         <div className="flex items-center gap-1.5 pt-1">
           {[1, 2, 3, 4, 5].map((p) => (
-            <span key={p} className={p <= 5 ? "h-1.5 w-1.5 rounded-full bg-emerald-400/80" : "h-1.5 w-1.5 rounded-full bg-white/10"} />
+            <span key={p} className={p <= 5 ? "h-1.5 w-1.5 rounded-full bg-verify-green/85" : "h-1.5 w-1.5 rounded-full bg-white/10"} />
           ))}
-          <span className="ml-1 font-mono text-[10px] text-emerald-300">4.6</span>
+          <span className="ml-1 font-mono text-[10px] text-verify-mint">4.6</span>
         </div>
         <div className="h-1.5 w-2/3 rounded-full bg-white/[0.07]" />
       </div>
@@ -274,7 +280,7 @@ const AUDIT_LINES = [
 
 function AuditVisual() {
   return (
-    <div className="bts-scroll mt-6 overflow-hidden rounded-xl border border-white/10 bg-black/40 px-3.5 py-3">
+    <div className="vv-scroll mt-6 overflow-hidden rounded-xl border border-vault-border bg-vault-dark/70 px-3.5 py-3">
       {AUDIT_LINES.map((l, i) => (
         <motion.p
           key={l}
@@ -282,18 +288,18 @@ function AuditVisual() {
           whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true }}
           transition={{ delay: 0.35 + i * 0.3, duration: 0.45, ease: EASE_OUT }}
-          className="truncate font-mono text-[10px] leading-relaxed text-zinc-400 [&_span]:text-emerald-400"
+          className="truncate font-mono text-[10px] leading-relaxed text-[#8fb0ab] [&_span]:text-verify-green"
         >
           {i === 1 ? (
             <>
-              14:07 · IDENTITY_EMAIL_DOMAIN <span className="text-emerald-400">✓</span>
+              14:07 · IDENTITY_EMAIL_DOMAIN <span className="text-verify-green">✓</span>
             </>
           ) : (
             l.replace(" ✓", "")
           )}
         </motion.p>
       ))}
-      <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-zinc-600">immutable · exportable</p>
+      <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-[#51736f]">immutable · exportable</p>
     </div>
   );
 }
@@ -303,14 +309,14 @@ function AuditVisual() {
 export function Features() {
   return (
     <section id="features" className="relative py-24 sm:py-32">
-      <div aria-hidden className="absolute left-1/2 top-0 h-[300px] w-[600px] -translate-x-1/2 rounded-full bg-emerald-500/[0.06] blur-[120px]" />
+      <div aria-hidden className="absolute left-1/2 top-0 h-[300px] w-[600px] -translate-x-1/2 rounded-full bg-verify-green/[0.05] blur-[120px]" />
       <div className="relative mx-auto max-w-6xl px-4 sm:px-6">
         <SectionHeading
-          eyebrow="Why BTS"
+          eyebrow="Why VaultVerify"
           title={
             <>
               Everything the paper form{" "}
-              <span className="bg-gradient-to-r from-emerald-300 to-amber-300 bg-clip-text text-transparent">never had</span>
+              <span className="animate-gradient-text bg-gradient-to-r from-[#0d6b77] via-verify-green to-verify-mint bg-clip-text text-transparent">never had</span>
             </>
           }
           sub="Seven upgrades, shipped as one flow — each one attacks a defect of the PDF it replaces."
@@ -326,25 +332,25 @@ export function Features() {
           {/* Row 1 */}
           <GlowCard className="md:col-span-2">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-emerald-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-verify-green/25 bg-verify-green/10 text-verify-mint">
                 <Smartphone className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-50">The two-party flow, finally digital</h3>
+              <h3 className="text-lg font-semibold text-verify-light">The two-party flow, finally digital</h3>
             </div>
-            <p className="mt-3 max-w-lg text-sm leading-relaxed text-zinc-400">
+            <p className="mt-3 max-w-lg text-sm leading-relaxed text-[#8fb0ab]">
               The nurse builds a portable profile; managers answer ten anchored questions — one per screen — on any phone. No logins, no fax, no chasing signatures.
             </p>
             <PipelineVisual />
           </GlowCard>
 
-          <GlowCard glow="amber">
+          <GlowCard glow="mint">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/10 text-amber-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-verify-light/20 bg-verify-light/[0.07] text-verify-light">
                 <Link2 className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-50">Single-use secure links</h3>
+              <h3 className="text-lg font-semibold text-verify-light">Single-use secure links</h3>
             </div>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+            <p className="mt-3 text-sm leading-relaxed text-[#8fb0ab]">
               Every invite is a signed token tied to one reference — nothing to forward, nothing to leak.
             </p>
             <TokenVisual />
@@ -353,25 +359,25 @@ export function Features() {
           {/* Row 2 */}
           <GlowCard>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-emerald-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-verify-green/25 bg-verify-green/10 text-verify-mint">
                 <ListChecks className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-50">Skills, proven — not claimed</h3>
+              <h3 className="text-lg font-semibold text-verify-light">Skills, proven — not claimed</h3>
             </div>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+            <p className="mt-3 text-sm leading-relaxed text-[#8fb0ab]">
               Self-rated levels become Manager-verified badges when a reference confirms them. Recruiters filter on truth.
             </p>
             <SkillsVisual />
           </GlowCard>
 
-          <GlowCard glow="rose" className="md:col-span-2">
+          <GlowCard glow="jade" className="md:col-span-2">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-400/25 bg-rose-400/10 text-rose-300">
                 <Radar className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-50">A fraud radar on every submission</h3>
+              <h3 className="text-lg font-semibold text-verify-light">A fraud radar on every submission</h3>
             </div>
-            <p className="mt-3 max-w-lg text-sm leading-relaxed text-zinc-400">
+            <p className="mt-3 max-w-lg text-sm leading-relaxed text-[#8fb0ab]">
               Identity checks and pattern detection run before a packet ever reaches a recruiter — suspicious pairs are surfaced automatically.
             </p>
             <FraudVisual />
@@ -380,38 +386,38 @@ export function Features() {
           {/* Row 3 */}
           <GlowCard>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-emerald-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-verify-green/25 bg-verify-green/10 text-verify-mint">
                 <BadgeCheck className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-50">10 specialty templates</h3>
+              <h3 className="text-lg font-semibold text-verify-light">10 specialty templates</h3>
             </div>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+            <p className="mt-3 text-sm leading-relaxed text-[#8fb0ab]">
               Med-Surg and ICU are live today — eight more ship with the pilot, each with high-risk skills flagged for confirmation.
             </p>
             <SpecialtiesVisual />
           </GlowCard>
 
-          <GlowCard glow="amber">
+          <GlowCard glow="jade">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/10 text-amber-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#2f8d99]/30 bg-[#2f8d99]/10 text-[#5cc0cb]">
                 <FileText className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-50">Branded packets, zero assembly</h3>
+              <h3 className="text-lg font-semibold text-verify-light">Branded packets, zero assembly</h3>
             </div>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-              Every completion auto-generates a MEDS-branded PDF — ratings, remarks, skills badges and e-signature included.
+            <p className="mt-3 text-sm leading-relaxed text-[#8fb0ab]">
+              Every completion auto-generates a VaultVerify-branded PDF — ratings, remarks, skills badges and e-signature included.
             </p>
             <PacketVisual />
           </GlowCard>
 
           <GlowCard>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-emerald-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-verify-green/25 bg-verify-green/10 text-verify-mint">
                 <History className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-50">Immutable audit trail</h3>
+              <h3 className="text-lg font-semibold text-verify-light">Immutable audit trail</h3>
             </div>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+            <p className="mt-3 text-sm leading-relaxed text-[#8fb0ab]">
               Opens, identity checks, edits and signatures — timestamped, exportable, subpoena-friendly.
             </p>
             <AuditVisual />

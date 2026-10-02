@@ -3,6 +3,22 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ─────────────────────────────────────────────────────────────
+   VaultVerify brand palette — extracted from the logo gradients
+   Deep Vault Teal #03363d · Verify Bright Green #7cc118
+   Midnight Steel #081215 · Crisp Mint White #f4f9f5 · Jade Mist #1b4e54
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --color-vault-dark: #081215;   /* Midnight Steel — main dashboard background */
+  --color-vault-teal: #03363d;   /* Deep Vault Teal — brand base */
+  --color-vault-teal-deep: #02272c;
+  --color-vault-border: #1b4e54; /* Jade Mist — glassmorphism card borders */
+  --color-verify-green: #7cc118; /* Verify Bright Green — dynamic highlights */
+  --color-verify-light: #f4f9f5; /* Crisp Mint White — light text / sub-cards */
+  --color-verify-mint: #a4d84a;  /* lighter tint of the accent for gradients */
+  --color-verify-deep: #5a8f0e;  /* darker shade for hovers on the accent */
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -126,13 +142,32 @@
    ───────────────────────────────────────────────────────────── */
 
 ::selection {
-  background: rgba(52, 211, 153, 0.28);
-  color: #ecfdf5;
+  background: rgba(124, 193, 24, 0.3);
+  color: #f4f9f5;
 }
 
-.bts-dark {
-  background-color: #050706;
-  color: #e4e4e7;
+.vv-dark {
+  background-color: #081215; /* Midnight Steel */
+  color: #dbe7e4;
+}
+
+/* Headline gradient that drifts from Vault Teal into Verify Bright Green */
+@keyframes vv-gradient-drift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.animate-gradient-text {
+  background-size: 220% 220%;
+  animation: vv-gradient-drift 6s ease-in-out infinite;
+}
+
+/* Slow conic rotation for the logo ring + verified seals */
+@keyframes vv-spin-slow {
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: vv-spin-slow 14s linear infinite;
 }
 
 /* Faint blueprint grid, faded radially so it never hits the edges hard */
@@ -208,9 +243,9 @@
 }
 
 /* Thin dark scrollbars inside card visuals */
-.bts-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
-.bts-scroll::-webkit-scrollbar-track { background: transparent; }
-.bts-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
+.vv-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+.vv-scroll::-webkit-scrollbar-track { background: transparent; }
+.vv-scroll::-webkit-scrollbar-thumb { background: rgba(244, 249, 245, 0.12); border-radius: 999px; }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-marquee,
@@ -218,7 +253,11 @@
   .animate-shimmer,
   .animate-radar,
   .animate-breathe,
-  .animate-pulse-dot {
+  .animate-pulse-dot,
+  .animate-gradient-text,
+  .animate-spin-slow {
     animation: none;
   }
 }
+
+/* VaultVerify theme layer v2 */

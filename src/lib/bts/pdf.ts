@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from "pdf-lib";
 
-// ── Branded reference packet PDF (MEDS Talent style) ───────────
+// ── Branded reference packet PDF (VaultVerify style) ──────────
 // One PDF per completed submission: agency banner, candidate block,
 // reference + employment confirmation, all 10 answers with the anchored
 // scale, remarks, skills verification, signature block with timestamp +

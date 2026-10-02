@@ -117,7 +117,7 @@ export function CandidateDashboard({ initialEmail, onSignOut, onOpenReference }:
             </div>
             <h1 className="mt-3 text-2xl font-bold text-slate-900">Welcome back</h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              Enter the email you used when creating your BTS profile. (Sandbox: sign-in is a simple email lookup — production uses Supabase Auth.)
+              Enter the email you used when creating your VaultVerify profile. (Sandbox: sign-in is a simple email lookup — production uses Supabase Auth.)
               Try the demo account: <button className="font-medium text-teal-700 underline" onClick={() => { setEmail("maya.rodriguez@example.com"); load("maya.rodriguez@example.com"); }}>maya.rodriguez@example.com</button>
             </p>
             <form
