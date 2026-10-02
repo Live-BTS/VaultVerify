@@ -148,6 +148,26 @@ model FraudFlag {
   createdAt DateTime @default(now())
 }
 
+// Zipvault-compatible skill checklist templates (MyZipVault import format)
+model SkillTemplate {
+  id          String   @id @default(cuid())
+  profession  String   @default("Nursing") // Nursing | Allied | Pharmacy | Locums
+  jobTitle    String   @default("RN")
+  specialty   String   // canonical key (MEDSURG, ICU, ...) when known, else normalized label
+  category    String   @default("General")
+  skillName   String
+  questionType String  @default("rating_1_4") // rating_1_4 | yes_no | text
+  hasNA       Boolean  @default(true)
+  highRisk    Boolean  @default(false)
+  active      Boolean  @default(true)
+  source      String   @default("BUILTIN") // BUILTIN | IMPORT
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([profession, jobTitle, specialty, skillName])
+}
+
 model NotificationLog {
   id        String   @id @default(cuid())
   channel   String // SMS | EMAIL

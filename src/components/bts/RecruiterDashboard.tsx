@@ -59,7 +59,7 @@ interface RecruiterData {
   audit: { id: string; actorType: string; action: string; entity: string; entityId: string; ip: string; createdAt: string }[];
 }
 
-export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
+export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () => void; onSuperAdmin?: () => void }) {
   const { toast } = useToast();
   const [code, setCode] = useState("");
   const [data, setData] = useState<RecruiterData | null>(null);
@@ -148,6 +148,11 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                 Enter dashboard
               </Button>
             </form>
+            {onSuperAdmin && (
+              <button type="button" onClick={onSuperAdmin} className="mt-4 w-full text-center text-xs text-slate-500 underline hover:text-teal-700">
+                Platform admin? Open Super Admin console
+              </button>
+            )}
           </CardContent>
         </Card>
       </div>

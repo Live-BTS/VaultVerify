@@ -6,9 +6,10 @@ import { CandidateWizard, type CreatedCandidate } from "@/components/bts/Candida
 import { CandidateDashboard } from "@/components/bts/CandidateDashboard";
 import { RecruiterDashboard } from "@/components/bts/RecruiterDashboard";
 import { ReferenceFlow } from "@/components/bts/ReferenceFlow";
+import { SuperAdmin } from "@/components/bts/SuperAdmin";
 import { Spinner } from "@/components/bts/brand";
 
-type View = "home" | "wizard" | "candidate" | "recruiter";
+type View = "home" | "wizard" | "candidate" | "recruiter" | "super";
 
 export default function Page() {
   const [view, setView] = useState<View>("home");
@@ -21,6 +22,7 @@ export default function Page() {
     const init = async () => {
       const params = new URLSearchParams(window.location.search);
       const r = params.get("r");
+      const view = params.get("view");
       try {
         const res = await fetch("/api/bootstrap");
         const d = await res.json();
@@ -30,6 +32,7 @@ export default function Page() {
       }
       if (cancelled) return;
       if (r) setRefToken(r);
+      if (view === "super") setView("super");
       setBooted(true);
       if (r && window.history?.replaceState) {
         window.history.replaceState({}, "", "/");
@@ -84,7 +87,9 @@ export default function Page() {
     case "candidate":
       return <CandidateDashboard onSignOut={goHome} onOpenReference={openReference} />;
     case "recruiter":
-      return <RecruiterDashboard onSignOut={goHome} />;
+      return <RecruiterDashboard onSignOut={goHome} onSuperAdmin={() => setView("super")} />;
+    case "super":
+      return <SuperAdmin onExit={goHome} />;
     default:
       return (
         <LandingView
