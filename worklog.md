@@ -145,3 +145,20 @@ Stage Summary:
 - Additional questions are superadmin-managed (seeded with the PDF's 6 defaults, CRUD + audit, per-specialty scoping) and snapshots are stored per completion so old reports stay immutable.
 - Backward compatible with pre-upgrade completions (missing recency/extras/attestation render gracefully).
 - Known environment note: the sandbox rollback also reverted earlier-session features (CollectedRef UI, ControlledSharingPanel, ChecklistReference model and the candidate-dashboard Collect-reference section are currently absent from the tree); the checklist-upgrade task itself is fully rebuilt and verified. Demo logins: emma.chen@example.com/demo1234, priya.n@example.com/start1234, tara.o@example.com/start1234, superadmin code zipvault2026.
+
+---
+Task ID: PDF-CHECK-1
+Agent: Super Z (main)
+Task: Cross-check generated Skills Checklist PDF against the uploaded reference (VaultVerify-Skills-Checklist-Sam-Full-Colors (3).pdf) and rewrite the export to match it exactly.
+
+Work Log:
+- Rendered the reference PDF (Letter 612x792pt) at 120/300dpi; pixel-sampled exact colors (#03363d header, #0b2e33 table band, #0f5257 headings/avatar, #12a150/#2f80ed/#f2a20c/#e5484d rating rings, #1e3a5f/#6f8fb0/#c3ccd5 recency donut, #4daa57 bars/accents, #eef6f1 sage, #ddede3 pills, #8be39a column headers, #2f8a3e toggles) and measured geometry.
+- Discovered old checklistPdf.ts output did NOT match the reference at all; rewrote buildChecklistPdf from scratch in a 1020x1320 design space scaled x0.6 onto Letter, matching the ref structure: teal header + candidate card (avatar, pills, 3-col details), Summary at a glance (dual proportional donuts + side legends), sage Category overview (green bars + "X of Y Proficient/recent"), Rating scale + Last performed legends (quartered progress rings, clock-icon pills), navy Skill/Rating/Last performed band, per-category rows (quarter rings + label pills + recency pills + dotted leaders), Additional questions band (Yes/No toggle pills + accent-bar note boxes), sage Candidate attestation card (accent bar, checkboxes, statements, e-signature, printed name, date).
+- Downloaded and embedded Poppins Regular/Medium/SemiBold/Bold via @pdf-lib/fontkit (subset:true) to match the reference typography; TimesRomanItalic kept for typed signatures.
+- Fixed during iteration: black stroke defaults on fill-only rounded rects, category card overlapping summary card, legend row clipping, truncated names without ellipsis (added fitText helper), navy table band repeating per category (now once per page), summary legend short labels ("No theory"), valid-until value shrink-to-fit.
+- Verified via pdftotext -bbox that pill text metrics are correct; 4-page output reviewed page by page against reference pages 1-5.
+- bun run lint clean. Final PDF copied to download/Skills-Checklist-Priya-Natarajan-ICU.pdf; renders + side-by-side comparison in download/pdfcheck/.
+
+Stage Summary:
+- checklistPdf.ts now reproduces the approved reference layout 1:1 (fonts, colors, geometry, all sections) for any completion; new fonts at public/fonts/Poppins-*.ttf.
+- Deliverables: download/Skills-Checklist-Priya-Natarajan-ICU.pdf (sample generated from Priya's real ICU completion), download/pdfcheck/side-by-side-p1.png (proof), scripts/pdfref_analyze*.py + scripts/fontmetrics.ts (analysis tools).
