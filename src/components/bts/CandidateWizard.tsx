@@ -36,14 +36,15 @@ export interface CreatedCandidate {
   requests: { id: string; refName: string; refEmail: string; status: string; refLink: string; callbackCode: string }[];
 }
 
-export function CandidateWizard({ agency, onDone, onBack }: { agency: AgencyLike; onDone: (c: CreatedCandidate) => void; onBack: () => void }) {
+export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: AgencyLike; onDone: (c: CreatedCandidate) => void; onBack: () => void; initial?: { name?: string; email?: string; role?: string } }) {
   const { toast } = useToast();
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedCandidate | null>(null);
 
-  // profile
-  const [profile, setProfile] = useState({ fullName: "", email: "", phone: "", role: "RN", specialty: "", yearsExperience: "3", city: "", state: "", licenseNumber: "" });
+  // profile — pre-filled when launched from the nurse portal so the created
+  // reference profile matches the signed-in account email
+  const [profile, setProfile] = useState({ fullName: initial?.name ?? "", email: initial?.email ?? "", phone: "", role: initial?.role ?? "RN", specialty: "", yearsExperience: "3", city: "", state: "", licenseNumber: "" });
   // skills: skillName -> {proficiency, recencyMonths}
   const [skills, setSkills] = useState<Record<string, { proficiency: string; recencyMonths: number }>>({});
   const [refs, setRefs] = useState<RefDraft[]>([emptyRef(), emptyRef()]);

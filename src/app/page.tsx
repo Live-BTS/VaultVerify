@@ -18,6 +18,7 @@ export default function Page() {
   const [refToken, setRefToken] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [wizardPrefill, setWizardPrefill] = useState<{ name: string; email: string; role: string } | undefined>(undefined);
   const [agency, setAgency] = useState<AgencyInfo | null>(null);
   const [booted, setBooted] = useState(false);
 
@@ -87,10 +88,11 @@ export default function Page() {
         <div className="min-h-screen bg-slate-50">
           <CandidateWizard
             agency={fallbackAgency}
-            onBack={goHome}
+            initial={wizardPrefill}
+            onBack={wizardPrefill ? () => setView("checklist") : goHome}
             onDone={(c: CreatedCandidate) => {
               localStorage.setItem("bts_candidate_email", c.email);
-              setView("candidate");
+              setView("checklist");
             }}
           />
         </div>
@@ -102,7 +104,8 @@ export default function Page() {
     case "super":
       return <SuperAdmin onExit={goHome} />;
     case "checklist":
-      return <ChecklistPortal inviteToken={inviteToken} onExit={goHome} />;
+      return <ChecklistPortal inviteToken={inviteToken} onExit={goHome}
+        onLaunchReferences={(p) => { setWizardPrefill(p); setView("wizard"); }} />;
     case "share":
       return <ShareView token={shareToken ?? ""} onExit={goHome} />;
     default:

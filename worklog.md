@@ -204,3 +204,21 @@ Stage Summary:
 - The generated Skills Checklist PDF now matches the user's newest reference ("Sam Full-Colors") to sub-pixel anti-aliasing noise: two-donut Summary at a glance, exact geometry/colors/typography everywhere, pages 2-5 byte-identical layouts.
 - Renderer: src/lib/pdf/skills-checklist-pdf.ts (donut engine + 2-degree segment padding is data-driven, handles N/A rows, all-rated, zero-rated and any category count).
 - Reusable check: bun scripts/render-sample.ts reference/sample-data.json out.pdf && python3 scripts/cmp_sam.py (regenerates ref/cur renders + diff heatmaps in download/pdfnew/cmp/).
+
+---
+Task ID: REF-SECTION-1
+Agent: Super Z (main agent)
+Task: User asked "where is reference section?" — the nurse portal (ChecklistPortal) only covered skills checklists; the reference-verification half lived in a disconnected wizard + old CandidateDashboard. Add a References section to the nurse portal.
+
+Work Log:
+- Built src/components/bts/checklist/ReferencesPanel.tsx: fetches /api/candidate?email=<account email>; renders profile strip (name, role/specialty, X/Y references completed, auto-reminder chip), per-reference cards (StatusBadge, Day N, rating + Skills verified chip when completed, Nudge / Swap reference dialog / Copy link / Open form in new tab, callback code), empty state ("No reference profile yet" + 3-step explainer + "Set up references" CTA), error retry.
+- Wired into ChecklistPortal: new "references" tab (FIRST + default), 4-card summary strip ("References done X/Y" via onStats callback, grid-cols-2 lg:grid-cols-4), header badge "Skills Checklist" → "Nurse portal", auth card retitled "Nurse portal" with updated copy.
+- page.tsx: onLaunchReferences hands {name,email,role} prefill to CandidateWizard (new optional initial prop) and opens it; wizard onDone now lands back in the portal (view "checklist") so the fresh requests appear in References; wizard Back returns to the portal when launched from it, home when launched from the landing nav.
+- Password reset for priya.n@example.com → demo1234 (old hash unknown from prior session).
+- Seeded Candidate for Priya (scripts/seed-priya-refs.ts): Marcus Bell COMPLETED (4.6/5, skillsVerified, email-domain identity) + Sofia Andres SENT (day 2, callback code).
+- Browser-verified: rv1/rv2/rv3 screenshots (populated tab: summary 1/2, completed + pending cards, actions), rv4 (Emma empty state + Set up references), wizard prefill shows "Emma Chen / emma.chen@example.com", Back → portal, rv5 (My checklists intact with donuts/PDF/Share).
+- bun run lint clean.
+
+Stage Summary:
+- The nurse portal is now the single vault: References (default tab) + My checklists + Requests + Invites + Profile, matched by account email; no-reference accounts get a guided setup path into the wizard with their details pre-filled.
+- Screenshots: download/screens/rv1..rv5-*.png. Seed script kept at scripts/seed-priya-refs.ts (idempotent).

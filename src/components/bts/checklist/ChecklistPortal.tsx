@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
 import { RATING_META, specialtyLabel, summarizeAnswers, type SkillAnswer } from "@/lib/bts/checklistShared";
 import { VaultMark, Spinner } from "../brand";
+import { ReferencesPanel } from "./ReferencesPanel";
 import { ChecklistFill, type CatalogSet, type FillSpec } from "./ChecklistFill";
 import { ChecklistOnboarding, type ProfileData } from "./ChecklistOnboarding";
 import {
@@ -18,7 +19,7 @@ import {
 } from "./ReportBits";
 import {
   BadgeCheck, CalendarClock, Check, ChevronDown, ClipboardList, Copy, Download, ExternalLink, Hourglass,
-  Inbox, Link2, Plus, ShieldCheck, X,
+  Inbox, Link2, Plus, ShieldCheck, Users, X,
 } from "lucide-react";
 
 // ── Skills Checklist candidate portal — accounts, onboarding, requests, invites, shares ──
@@ -131,7 +132,7 @@ function ShareDialog({ completion, onClose, onCreated }: { completion: Completio
 }
 
 // ── Main portal ──
-export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string | null; onExit: () => void }) {
+export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { inviteToken?: string | null; onExit: () => void; onLaunchReferences?: (prefill: { name: string; email: string; role: string }) => void }) {
   const [me, setMe] = useState<MeData | null>(null);
   const [sets, setSets] = useState<CatalogSet[]>([]);
   const [booting, setBooting] = useState(true);
@@ -142,13 +143,16 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
   const [authError, setAuthError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // dashboard
-  const [tab, setTab] = useState<"mine" | "requests" | "invites" | "profile">("mine");
+  const [tab, setTab] = useState<"references" | "mine" | "requests" | "invites" | "profile">("references");
+  const [refStats, setRefStats] = useState<{ total: number; completed: number } | null>(null);
   const [showRequest, setShowRequest] = useState(false);
   const [fillSpec, setFillSpec] = useState<FillSpec | null>(null);
   const [shareFor, setShareFor] = useState<CompletionDto | null>(null);
   const [openReport, setOpenReport] = useState<string | null>(null);
   const [claimedInvite, setClaimedInvite] = useState<string | null>(null);
   const [inviteCtx, setInviteCtx] = useState<{ recruiterName: string; facilityName: string; agencyName: string; message: string; candidateEmail: string } | null>(null);
+
+  const handleRefStats = useCallback((s: { total: number; completed: number } | null) => setRefStats(s), []);
 
   const loadMe = useCallback(async () => {
     const res = await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
@@ -256,9 +260,9 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
           <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-8">
             <div className="flex flex-col items-center text-center">
               <VaultMark size={44} />
-              <h1 className="mt-4 text-xl font-semibold text-jade-ink">Skills Checklist</h1>
+              <h1 className="mt-4 text-xl font-semibold text-jade-ink">Nurse portal</h1>
               <p className="mt-1 text-sm text-jade-muted">
-                {mode === "login" ? "Sign in to your self-assessments." : "Create your account — complete a checklist once, reuse it for a year."}
+                {mode === "login" ? "Verified references and skills checklists — one secure vault." : "Create your account — verified references and skill checklists in one vault."}
               </p>
             </div>
             {inviteCtx && (
@@ -327,7 +331,7 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
           <div className="flex items-center gap-3">
             <VaultMark size={32} />
             <div className="leading-tight">
-              <p className="text-sm font-semibold text-jade-ink">Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Skills Checklist</span></p>
+              <p className="text-sm font-semibold text-jade-ink">Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Nurse portal</span></p>
               <p className="text-[11px] text-jade-muted">{acc.name} · {acc.email}</p>
             </div>
           </div>
@@ -342,8 +346,9 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
 
       <main className="mx-auto max-w-5xl px-4 pb-16 pt-8 sm:px-6">
         {/* summary strip */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
+            ["References done", refStats ? `${refStats.completed}/${refStats.total}` : "—", Users],
             ["My checklists", completions.length, ClipboardList],
             ["Awaiting approval", pendingRequests.length, Hourglass],
             ["Requests from recruiters", openInvites.length, Inbox],
@@ -352,15 +357,15 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
             return (
               <div key={label as string} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-4">
                 <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-jade-muted"><I className="h-3.5 w-3.5" /> {label as string}</p>
-                <p className="mt-1 text-2xl font-bold text-jade-ink">{value as number}</p>
+                <p className="mt-1 text-2xl font-bold text-jade-ink">{value as string}</p>
               </div>
             );
           })}
         </div>
 
         {/* tabs */}
-        <div className="mt-8 flex gap-2">
-          {([["mine", "My checklists"], ["requests", "Requests"], ["invites", `Invites${openInvites.length ? ` (${openInvites.length})` : ""}`], ["profile", "Profile"]] as const).map(([k, lb]) => (
+        <div className="mt-8 flex flex-wrap gap-2">
+          {([["references", "References"], ["mine", "My checklists"], ["requests", "Requests"], ["invites", `Invites${openInvites.length ? ` (${openInvites.length})` : ""}`], ["profile", "Profile"]] as const).map(([k, lb]) => (
             <button key={k} type="button" onClick={() => setTab(k)}
               className={cn("rounded-full border px-4 py-1.5 text-sm font-medium transition",
                 tab === k ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
@@ -368,6 +373,12 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
             </button>
           ))}
         </div>
+
+        {/* References — the verified-reference half of the vault */}
+        {tab === "references" && acc.email && (
+          <ReferencesPanel email={acc.email} fallbackName={acc.name} onStats={handleRefStats}
+            onLaunchSetup={() => onLaunchReferences?.({ name: acc.name, email: acc.email, role: acc.title })} />
+        )}
 
         {/* My checklists */}
         {tab === "mine" && (
