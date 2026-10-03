@@ -57,6 +57,34 @@ export async function POST(req: NextRequest) {
     // ── authenticated create ──
     const account = await getAccount();
     if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
+
+    // ── revoke: { token } — candidate withdraws a share link ──
+    if (body.action === "revoke") {
+      const link = await db.checklistShareLink.findUnique({ where: { token: String(body.token ?? "") }, include: { completion: true } });
+      if (!link || link.completion.accountId !== account.id) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
+      await db.checklistShareLink.update({ where: { id: link.id }, data: { revoked: true } });
+      await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_REVOKED", entity: "checklistShareLink", entityId: link.id });
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── extend: { token, days } — push the expiry out (DURATION links) ──
+    if (body.action === "extend") {
+      const link = await db.checklistShareLink.findUnique({ where: { token: String(body.token ?? "") }, include: { completion: true } });
+      if (!link || link.completion.accountId !== account.id) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
+      if (link.revoked) return NextResponse.json({ ok: false, error: "This link was revoked — create a new one" }, { status: 400 });
+      if (link.accessType !== "DURATION") return NextResponse.json({ ok: false, error: "One-time links can't be extended" }, { status: 400 });
+      const days = Math.max(1, Math.min(365, Number(body.days) || 0));
+      if (!days) return NextResponse.json({ ok: false, error: "Set how many days to add" }, { status: 400 });
+      const base = link.expiresAt && link.expiresAt > new Date() ? link.expiresAt.getTime() : Date.now();
+      const expiresAt = new Date(base + days * 24 * 60 * 60 * 1000);
+      await db.checklistShareLink.update({
+        where: { id: link.id },
+        data: { expiresAt, durationDays: (link.durationDays ?? 0) + days },
+      });
+      await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_EXTENDED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ days }) });
+      return NextResponse.json({ ok: true, expiresAt });
+    }
+
     const completion = await db.checklistCompletion.findUnique({ where: { id: String(body.completionId ?? "") } });
     if (!completion || completion.accountId !== account.id) return NextResponse.json({ ok: false, error: "Checklist not found" }, { status: 404 });
     if (completion.expiresAt < new Date()) return NextResponse.json({ ok: false, error: "This checklist has expired — retake it to share again" }, { status: 400 });

@@ -82,9 +82,9 @@ export async function POST(req: NextRequest) {
   if (!body.references || body.references.length < 2) {
     return NextResponse.json({ error: "At least 2 references are required" }, { status: 400 });
   }
-  if (CHECKLISTS.find((c) => c.specialty === body.specialty) && (!body.skills || body.skills.length === 0)) {
-    return NextResponse.json({ error: "Skills checklist must be completed for the selected specialty" }, { status: 400 });
-  }
+  // NOTE: the skills checklist is a SEPARATE, self-reported feature — it is NOT
+  // required for (or verified by) reference verification. Optional self-reported
+  // skills submitted here are stored as-is.
 
   const existing = await db.candidate.findFirst({ where: { email: body.email.toLowerCase().trim() } });
   if (existing) {

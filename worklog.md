@@ -222,3 +222,23 @@ Work Log:
 Stage Summary:
 - The nurse portal is now the single vault: References (default tab) + My checklists + Requests + Invites + Profile, matched by account email; no-reference accounts get a guided setup path into the wizard with their details pre-filled.
 - Screenshots: download/screens/rv1..rv5-*.png. Seed script kept at scripts/seed-priya-refs.ts (idempotent).
+
+---
+Task ID: SIDEBAR-REF-1
+Agent: Super Z (main agent)
+Task: User directive — candidate login gets ONE dashboard with sidebar (Dashboard / Skill Checklist / References / Controlled Sharing / Settings); recruiter + superadmin get sidebars per role; References and Skill Checklists are TWO INDEPENDENT features (checklist = self-assessment, NO reference verification; reference = employment/capability verification with will-you-rehire style questions). Work priority: REFERENCE.
+
+Work Log:
+- NEW src/components/bts/shell/PortalShell.tsx: shared role-based sidebar (desktop rail + mobile slide-over drawer, spring motion, reduced-motion respected, nav badges, user card w/ sign-out, optional brandOverride, wide mode).
+- Candidate portal (ChecklistPortal.tsx) restructured from tabs to PortalShell sections: Dashboard (greeting, 4 live stat cards, quick actions, recent activity) / References / Skill checklists (internal chips: My checklists · Requests · Invites) / Controlled sharing / Settings. Reference stats prefetched via /api/candidate?email= for dashboard + sidebar badge (X/Y).
+- NEW src/components/bts/checklist/SharingPanel.tsx — Controlled Sharing ledger: every checklist share link (state: Active / Viewed one-time / Expired / Revoked, view counts, labels) with Copy / +7d / +30d / Revoke; plus Reference-access list (recruiter requests) with "verified records can't be revoked once signed" note.
+- /api/checklist/share: added owner-guarded "revoke" and "extend" actions (extend = push expiresAt from max(now, current expiry), audit-logged).
+- /api/candidate/actions: added "add_reference" action (validated, duplicate-guarded, sends SMS+email invite, audit) — candidate can add referees beyond the initial two; ReferencesPanel gained an Add-a-reference dialog.
+- REFERENCE DECOUPLING: CandidateWizard skills step REMOVED (3 steps: Profile → References → Consent & send; skills: [] payload; consent copy no longer says the checklist is shared with references). POST /api/candidate no longer requires a skills checklist. ReferenceFlow skills-verification step REMOVED (welcome bullets updated; questions → remarks directly; totalSteps 6→5; payload drops skillsVerified/skillChecks; unused state/imports cleaned). DB SkillVerification/skillsVerified columns kept for backward compat; recruiter console still renders legacy skillChecks when present.
+- Recruiter console (RecruiterDashboard.tsx) restructured to PortalShell (brandOverride = agency logo): Dashboard (6 stat cards + Fraud review + Awaiting references quick lists) / References (pipeline + detail dialog) / Skill checklists (RecruiterChecklists) / Notifications / Audit trail. Superadmin already had a sidebar (unchanged).
+- Fixed TS issues introduced by restructure (onNavigate casts, onSaved wrappers, Spinner size prop) — bun run lint clean, tsc clean for app code (pre-existing API detail-string errors unchanged, build unaffected).
+- Browser-verified: sb1 candidate dashboard (sidebar + stats + quick actions + activity), sb2 sharing ledger (live link), sb3 extend +7d (Oct 10 → Oct 17 + toast), sb4 revoke (Revoked badge, 0 active, resolve API returns invalid), new 30-day link created via API; sb5-sb7 recruiter console sections; reference flow walked end-to-end as Sofia Andres for Priya (no skills step, signed & submitted, sb8/sb9); References tab 2/2 with Add-a-reference (sb10); wizard stepper = Profile/References/Consent & send.
+
+Stage Summary:
+- Candidate, recruiter portals now share one role-based sidebar shell; candidate vault = Dashboard + References + Skill checklists + Controlled sharing + Settings.
+- References are a fully independent feature: own onboarding (3-step wizard), own portal section with add/nudge/swap, own share semantics; the skill checklist is pure self-assessment and is no longer collected or verified in the reference path.

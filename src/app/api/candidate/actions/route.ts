@@ -15,8 +15,14 @@ function baseUrl(req: NextRequest): string {
 }
 
 interface ActionPayload {
-  action: "nudge" | "swap";
-  requestId: string;
+  action: "nudge" | "swap" | "add_reference";
+  requestId?: string;
+  email?: string;
+  reference?: {
+    refName: string; refTitle: string; refEmail: string; refPhone: string;
+    facilityName: string; facilityCity?: string; facilityState?: string;
+    relationship: string; workStartDate?: string; workEndDate?: string;
+  };
   replacement?: {
     refName: string; refTitle: string; refEmail: string; refPhone: string;
     facilityName: string; facilityCity?: string; facilityState?: string;
@@ -33,10 +39,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const request = await db.referenceRequest.findUnique({
-    where: { id: body.requestId },
-    include: { candidate: { include: { agency: true } } },
-  });
+  const request = body.requestId
+    ? await db.referenceRequest.findUnique({
+        where: { id: body.requestId },
+        include: { candidate: { include: { agency: true } } },
+      })
+    : null;
   if (!request) return NextResponse.json({ error: "Request not found" }, { status: 404 });
 
   const agency = request.candidate.agency;
@@ -53,6 +61,45 @@ export async function POST(req: NextRequest) {
     await db.referenceRequest.update({ where: { id: request.id }, data: { lastReminderAt: new Date() } });
     await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "NUDGE_SENT", entity: "reference_request", entityId: request.id, ip: clientIp(req) });
     return NextResponse.json({ ok: true, message: `Nudge sent to ${request.refName}` });
+  }
+
+  // ── add_reference: { email, reference } — candidate adds another reference from the portal ──
+  if (body.action === "add_reference") {
+    const rf = body.reference;
+    if (!rf?.refName || !rf?.refTitle || !rf?.refEmail || !rf?.facilityName || !rf?.relationship) {
+      return NextResponse.json({ error: "Name, title, email, facility, and relationship are required" }, { status: 400 });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rf.refEmail)) {
+      return NextResponse.json({ error: "Enter a valid email for the reference" }, { status: 400 });
+    }
+    const email = String(body.email ?? "").toLowerCase().trim();
+    const candidate = await db.candidate.findFirst({ where: { email }, include: { agency: true } });
+    if (!candidate) return NextResponse.json({ error: "No reference profile found for this account" }, { status: 404 });
+    const dup = await db.referenceRequest.findFirst({ where: { candidateId: candidate.id, refEmail: rf.refEmail.toLowerCase().trim(), status: { notIn: ["EXPIRED"] } } });
+    if (dup) return NextResponse.json({ error: `${dup.refName} already has an open request` }, { status: 409 });
+    const created = await db.referenceRequest.create({
+      data: {
+        candidateId: candidate.id,
+        refName: rf.refName.trim(),
+        refTitle: rf.refTitle.trim(),
+        refEmail: rf.refEmail.toLowerCase().trim(),
+        refPhone: rf.refPhone ?? "",
+        facilityName: rf.facilityName.trim(),
+        facilityCity: rf.facilityCity ?? "",
+        facilityState: rf.facilityState ?? "",
+        relationship: rf.relationship,
+        workStartDate: rf.workStartDate ?? "",
+        workEndDate: rf.workEndDate ?? "",
+        status: "SENT",
+        expiresAt: new Date(Date.now() + LINK_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+      },
+    });
+    const link = `${baseUrl(req)}/?r=${created.token}`;
+    const bodyText = inviteBody(candidate.agency.name, candidate.fullName, link, LINK_EXPIRY_DAYS);
+    await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
+    await sendNotification({ channel: "EMAIL", kind: "INVITE", to: created.refEmail, subject: `Reference request — ${candidate.fullName}`, body: bodyText, requestId: created.id });
+    await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "REFERENCE_ADDED", entity: "reference_request", entityId: created.id, detail: { ref: created.refEmail }, ip: clientIp(req) });
+    return NextResponse.json({ ok: true, message: `Request sent to ${created.refName}` });
   }
 
   if (body.action === "swap") {

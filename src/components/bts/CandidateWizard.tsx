@@ -10,10 +10,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { SPECIALTIES, NURSE_ROLES, PROFICIENCY_META, specialtyLabel, type ChecklistSkill } from "@/lib/bts/constants";
-import { CHECKLISTS, RECENCY_OPTIONS, templateFor } from "@/lib/bts/questions";
+import { SPECIALTIES, NURSE_ROLES, specialtyLabel } from "@/lib/bts/constants";
 import { AgencyLogo, Spinner } from "./brand";
-import { ArrowLeft, ArrowRight, ClipboardList, Send, CheckCircle2, Wand2, Lock, UserRound, Users, FileSignature } from "lucide-react";
+import { ArrowLeft, ArrowRight, Send, CheckCircle2, Wand2, Lock, UserRound, Users, FileSignature } from "lucide-react";
 
 interface RefDraft {
   refName: string; refTitle: string; refEmail: string; refPhone: string;
@@ -45,23 +44,13 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
   // profile — pre-filled when launched from the nurse portal so the created
   // reference profile matches the signed-in account email
   const [profile, setProfile] = useState({ fullName: initial?.name ?? "", email: initial?.email ?? "", phone: "", role: initial?.role ?? "RN", specialty: "", yearsExperience: "3", city: "", state: "", licenseNumber: "" });
-  // skills: skillName -> {proficiency, recencyMonths}
-  const [skills, setSkills] = useState<Record<string, { proficiency: string; recencyMonths: number }>>({});
+  // NOTE: skills are NOT collected here — the skills checklist is a separate
+  // self-assessment feature completed in the Skills Checklist portal.
   const [refs, setRefs] = useState<RefDraft[]>([emptyRef(), emptyRef()]);
   const [consent, setConsent] = useState({ agreed: false, signature: "" });
 
-  const template = useMemo(() => (profile.specialty ? templateFor(profile.specialty) : null), [profile.specialty]);
-  const hasTemplate = !!CHECKLISTS.find((c) => c.specialty === profile.specialty);
-
   const setP = (k: keyof typeof profile, v: string) => setProfile((p) => ({ ...p, [k]: v }));
   const setR = (i: number, k: keyof RefDraft, v: string) => setRefs((rs) => rs.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
-
-  const applyTemplateDefaults = (specialty: string) => {
-    const t = templateFor(specialty);
-    const next: Record<string, { proficiency: string; recencyMonths: number }> = {};
-    for (const s of t.skills) next[s.name] = { proficiency: "INDEPENDENT", recencyMonths: 1 };
-    setSkills(next);
-  };
 
   const validateProfile = () => {
     if (!profile.fullName.trim() || !profile.email.trim() || !profile.specialty) return "Name, email, and specialty are required.";
@@ -81,18 +70,16 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
     if (step === 0) {
       const err = validateProfile();
       if (err) return toast({ title: err, variant: "destructive" });
-      if (hasTemplate && Object.keys(skills).length === 0) applyTemplateDefaults(profile.specialty);
     }
-    if (step === 2) {
+    if (step === 1) {
       const err = validateRefs();
       if (err) return toast({ title: err, variant: "destructive" });
     }
-    setStep((s) => Math.min(s + 1, 3));
+    setStep((s) => Math.min(s + 1, 2));
   };
 
   const demoFill = () => {
     setProfile({ fullName: "Dana Whitfield", email: `dana.whitfield+${Math.floor(Math.random() * 9000 + 1000)}@example.com`, phone: "(720) 555-0134", role: "RN", specialty: "ICU", yearsExperience: "4", city: "Denver", state: "CO", licenseNumber: "CO-RN-77120" });
-    applyTemplateDefaults("ICU");
     setRefs([
       { refName: "Marcus Bell", refTitle: "ICU Nurse Manager", refEmail: "mbell@denverhealth.org", refPhone: "(720) 555-0161", facilityName: "Denver Health", facilityCity: "Denver", facilityState: "CO", relationship: "Direct supervisor", workStartDate: "2022-08", workEndDate: "" },
       { refName: "Sofia Andres", refTitle: "Charge Nurse, SICU", refEmail: "s.andres@uchealth.org", refPhone: "(720) 555-0188", facilityName: "UCHealth", facilityCity: "Aurora", facilityState: "CO", relationship: "Charge nurse / team lead", workStartDate: "2020-03", workEndDate: "2022-06" },
@@ -114,7 +101,7 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
           ...profile,
           yearsExperience: Number(profile.yearsExperience) || 0,
           consentSignature: consent.signature.trim(),
-          skills: Object.entries(skills).map(([skillName, v]) => ({ skillName, proficiency: v.proficiency, recencyMonths: v.recencyMonths })),
+          skills: [],
           references: refs,
         }),
       });
@@ -164,7 +151,6 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
 
   const steps = [
     { label: "Profile", icon: UserRound },
-    { label: "Skills", icon: ClipboardList },
     { label: "References", icon: Users },
     { label: "Consent & send", icon: FileSignature },
   ];
@@ -228,18 +214,12 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
                   <Label>Specialty / unit *</Label>
                   <Select
                     value={profile.specialty}
-                    onValueChange={(v) => {
-                      setP("specialty", v);
-                      applyTemplateDefaults(v);
-                    }}
+                    onValueChange={(v) => setP("specialty", v)}
                   >
                     <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select specialty" /></SelectTrigger>
                     <SelectContent>
                       {SPECIALTIES.map((s) => (
-                        <SelectItem key={s.key} value={s.key}>
-                          {s.label}
-                          {!CHECKLISTS.find((c) => c.specialty === s.key) && <span className="ml-1 text-xs text-slate-400">(checklist coming soon)</span>}
-                        </SelectItem>
+                        <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -264,58 +244,8 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
             </div>
           )}
 
-          {/* ── Step 1: Skills ── */}
+          {/* ── Step 1: References ── */}
           {step === 1 && (
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {hasTemplate ? `${template?.label} skills checklist` : "Skills checklist"}
-              </h2>
-              <p className="mt-1 text-sm text-slate-600">
-                {hasTemplate
-                  ? "Rate each skill honestly — your reference will be asked to verify the high-risk ones. These become your badges."
-                  : `The ${specialtyLabel(profile.specialty)} template ships in week 5 of the roadmap. You can still send reference requests now — the skills step will be skipped.`}
-              </p>
-              {hasTemplate && (
-                <div className="mt-5 max-h-[26rem] space-y-3 overflow-y-auto pr-1">
-                  {template?.skills.map((s: ChecklistSkill) => (
-                    <div key={s.name} className={cn("rounded-lg border p-3", s.highRisk ? "border-amber-200 bg-amber-50/60" : "border-slate-200")}>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium text-slate-900">
-                          {s.name}
-                          {s.highRisk && <span className="ml-2 rounded bg-amber-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">High-risk</span>}
-                        </p>
-                      </div>
-                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                        {Object.entries(PROFICIENCY_META).map(([k, meta]) => (
-                          <button
-                            key={k}
-                            type="button"
-                            onClick={() => setSkills((sk) => ({ ...sk, [s.name]: { ...sk[s.name], proficiency: k } }))}
-                            className={cn("rounded-full border px-3 py-1 text-xs font-medium transition", skills[s.name]?.proficiency === k ? "border-teal-700 bg-teal-700 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-teal-400")}
-                          >
-                            {meta.short}
-                          </button>
-                        ))}
-                        <select
-                          aria-label={`Recency for ${s.name}`}
-                          className="ml-auto rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600"
-                          value={skills[s.name]?.recencyMonths ?? 1}
-                          onChange={(e) => setSkills((sk) => ({ ...sk, [s.name]: { ...sk[s.name], recencyMonths: Number(e.target.value) } }))}
-                        >
-                          {RECENCY_OPTIONS.map((r) => (
-                            <option key={r.value} value={r.value}>{r.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Step 2: References ── */}
-          {step === 2 && (
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Add 2 professional references</h2>
               <p className="mt-1 text-sm text-slate-600">Pick managers or charge nurses who saw your clinical work directly. They can correct details if anything is off.</p>
@@ -372,15 +302,15 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
             </div>
           )}
 
-          {/* ── Step 3: Consent ── */}
-          {step === 3 && (
+          {/* ── Step 2: Consent ── */}
+          {step === 2 && (
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Consent, release & send</h2>
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
                 <p className="font-semibold text-slate-900">Reference Request Authorization & Release</p>
                 <p className="mt-2">
                   I authorize {agency.name} to contact the professional references listed above regarding my employment history, clinical performance, and professional conduct.
-                  I understand my self-reported skills checklist will be shared with my references for verification. I release all parties from liability for information
+                  I understand the completed references are used to verify my employment and capabilities. I release all parties from liability for information
                   provided in good faith. This consent is stored with my profile before any outreach is made.
                 </p>
               </div>
@@ -411,7 +341,7 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
             <Button variant="ghost" onClick={() => (step === 0 ? onBack() : setStep((s) => s - 1))}>
               <ArrowLeft className="mr-1.5 h-4 w-4" /> {step === 0 ? "Cancel" : "Back"}
             </Button>
-            {step < 3 ? (
+            {step < 2 ? (
               <Button onClick={next} className="bg-teal-700 hover:bg-teal-800">
                 Continue <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>

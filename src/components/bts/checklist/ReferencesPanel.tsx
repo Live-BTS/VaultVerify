@@ -9,7 +9,10 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { specialtyLabel } from "@/lib/bts/constants";
 import { Spinner, StatusBadge } from "../brand";
-import { BellRing, Copy, ExternalLink, RefreshCcw, UserRound, Users } from "lucide-react";
+import { BellRing, Copy, ExternalLink, RefreshCcw, Send, UserPlus, UserRound, Users } from "lucide-react";
+import type { ChangeEvent } from "react";
+
+const RELATIONSHIPS = ["Direct supervisor", "Charge nurse / team lead", "Peer colleague on same unit", "Educator / preceptor", "Other working relationship"];
 
 // ── References section of the nurse portal ──
 // Bridges the reference-verification half of the product (Candidate + ReferenceRequest)
@@ -108,6 +111,20 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats }:
     }
   };
 
+  const addRef = async (reference: Record<string, string>) => {
+    const res = await fetch("/api/candidate/actions", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add_reference", email, reference }),
+    });
+    const d = await res.json();
+    if (res.ok) {
+      toast({ title: d.message ?? "Request sent" });
+      load();
+    } else {
+      toast({ title: d.error ?? "Could not add reference", variant: "destructive" });
+    }
+  };
+
   if (state === "loading") {
     return <div className="flex justify-center py-16"><Spinner label="Loading your references…" /></div>;
   }
@@ -167,6 +184,10 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats }:
         <span className="rounded-lg border border-verify-green/30 bg-verify-green/10 px-3 py-1.5 text-[11px] font-medium text-verify-ink">
           Auto-reminders at day 2 · 5 · 9
         </span>
+      </div>
+
+      <div className="flex justify-end">
+        <AddReferenceDialog onAdd={addRef} />
       </div>
 
       {/* request cards */}
@@ -279,6 +300,78 @@ function SwapDialog({ onSwap }: { onSwap: (replacement: Record<string, string>) 
         <Button className="w-full bg-verify-green text-vault-dark hover:bg-verify-green/90"
           onClick={() => { onSwap(repl); setOpen(false); }}>
           Send replacement request
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddReferenceDialog({ onAdd }: { onAdd: (reference: Record<string, string>) => void }) {
+  const [open, setOpen] = useState(false);
+  const [ref, setRef] = useState({ refName: "", refTitle: "", refEmail: "", refPhone: "", facilityName: "", facilityCity: "", facilityState: "", relationship: "Direct supervisor", workStartDate: "", workEndDate: "" });
+  const field = (k: keyof typeof ref) => ({
+    value: ref[k],
+    onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setRef((r) => ({ ...r, [k]: e.target.value })),
+  });
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+          <UserPlus className="mr-1.5 h-3.5 w-3.5" /> Add a reference
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add another reference</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-jade-muted">They&apos;ll receive a branded SMS + email with a secure link that expires in 14 days.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label>Name *</Label>
+            <Input {...field("refName")} placeholder="Daniel Okafor" className="mt-1" />
+          </div>
+          <div>
+            <Label>Title *</Label>
+            <Input {...field("refTitle")} placeholder="ICU Nurse Manager" className="mt-1" />
+          </div>
+          <div>
+            <Label>Work email *</Label>
+            <Input type="email" {...field("refEmail")} placeholder="d.okafor@hospital.org" className="mt-1" />
+          </div>
+          <div>
+            <Label>Phone</Label>
+            <Input {...field("refPhone")} placeholder="(312) 555-0177" className="mt-1" />
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Facility *</Label>
+            <Input {...field("facilityName")} placeholder="St. Mary's Medical Center" className="mt-1" />
+          </div>
+          <div>
+            <Label>City</Label>
+            <Input {...field("facilityCity")} className="mt-1" />
+          </div>
+          <div>
+            <Label>State</Label>
+            <Input {...field("facilityState")} className="mt-1" />
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Working relationship *</Label>
+            <select {...field("relationship")} className="mt-1 w-full rounded-md border border-vault-border bg-white px-3 py-2 text-sm text-jade-ink">
+              {RELATIONSHIPS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>Start (month/year)</Label>
+            <Input {...field("workStartDate")} placeholder="2023-06" className="mt-1" />
+          </div>
+          <div>
+            <Label>End (blank = current)</Label>
+            <Input {...field("workEndDate")} placeholder="present" className="mt-1" />
+          </div>
+        </div>
+        <Button className="w-full bg-verify-green text-vault-dark hover:bg-verify-green/90"
+          onClick={() => { onAdd(ref); setOpen(false); setRef({ ...ref, refName: "", refTitle: "", refEmail: "", refPhone: "" }); }}>
+          <Send className="mr-1.5 h-4 w-4" /> Send secure request
         </Button>
       </DialogContent>
     </Dialog>

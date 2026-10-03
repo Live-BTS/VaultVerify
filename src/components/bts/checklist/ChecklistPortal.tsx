@@ -10,6 +10,8 @@ import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
 import { RATING_META, specialtyLabel, summarizeAnswers, type SkillAnswer } from "@/lib/bts/checklistShared";
 import { VaultMark, Spinner } from "../brand";
 import { ReferencesPanel } from "./ReferencesPanel";
+import { SharingPanel } from "./SharingPanel";
+import { PortalShell } from "../shell/PortalShell";
 import { ChecklistFill, type CatalogSet, type FillSpec } from "./ChecklistFill";
 import { ChecklistOnboarding, type ProfileData } from "./ChecklistOnboarding";
 import {
@@ -19,7 +21,7 @@ import {
 } from "./ReportBits";
 import {
   BadgeCheck, CalendarClock, Check, ChevronDown, ClipboardList, Copy, Download, ExternalLink, Hourglass,
-  Inbox, Link2, Plus, ShieldCheck, Users, X,
+  Inbox, LayoutDashboard, Link2, Plus, Settings2, Share2, ShieldCheck, Users, X,
 } from "lucide-react";
 
 // ── Skills Checklist candidate portal — accounts, onboarding, requests, invites, shares ──
@@ -143,7 +145,8 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
   const [authError, setAuthError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // dashboard
-  const [tab, setTab] = useState<"references" | "mine" | "requests" | "invites" | "profile">("references");
+  const [section, setSection] = useState<"dashboard" | "checklists" | "references" | "sharing" | "settings">("dashboard");
+  const [checkTab, setCheckTab] = useState<"mine" | "requests" | "invites">("mine");
   const [refStats, setRefStats] = useState<{ total: number; completed: number } | null>(null);
   const [showRequest, setShowRequest] = useState(false);
   const [fillSpec, setFillSpec] = useState<FillSpec | null>(null);
@@ -171,6 +174,22 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
       } catch { /* portal still renders */ } finally { setBooting(false); }
     })();
   }, [loadMe]);
+
+  // prefetch reference stats (dashboard card + sidebar badge) — the References
+  // panel refreshes the same state whenever it loads
+  useEffect(() => {
+    const email = me?.account?.email;
+    if (!email) return;
+    fetch(`/api/candidate?email=${encodeURIComponent(email)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.candidate) {
+          const reqs = d.candidate.requests as { status: string }[];
+          setRefStats({ total: reqs.length, completed: reqs.filter((r) => r.status === "COMPLETED" || r.status === "FLAGGED").length });
+        } else setRefStats(null);
+      })
+      .catch(() => setRefStats(null));
+  }, [me?.account?.email]);
 
   // claim an invite link after sign-in
   useEffect(() => {
@@ -226,7 +245,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
         spec={fillSpec}
         sets={sets}
         onExit={async () => { setFillSpec(null); await loadMe(); }}
-        onDone={async () => { setFillSpec(null); setTab("mine"); await loadMe(); }}
+        onDone={async () => { setFillSpec(null); setSection("checklists"); setCheckTab("mine"); await loadMe(); }}
       />
     );
   }
@@ -237,7 +256,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
       <ChecklistOnboarding
         account={me.account}
         sets={sets}
-        onSaved={loadMe}
+        onSaved={async () => { await loadMe(); }}
         onExit={signOut}
         banner={
           (me.invites ?? []).some((i) => i.status !== "COMPLETED")
@@ -324,64 +343,141 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
 
   const startFill = (spec: FillSpec) => setFillSpec(spec);
 
+  const activeShares = completions.reduce((n, c) => n + c.shareLinks.filter((l) => !l.revoked && !(l.accessType === "ONE_TIME" && l.viewedAt) && !(l.expiresAt && new Date(l.expiresAt) < new Date())).length, 0);
+  const checklistActions = approvedRequests.length + openInvites.length;
+  const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 18 ? "Good afternoon" : "Good evening";
+
   return (
-    <div className="vv-page min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-white/85 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <VaultMark size={32} />
-            <div className="leading-tight">
-              <p className="text-sm font-semibold text-jade-ink">Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Nurse portal</span></p>
-              <p className="text-[11px] text-jade-muted">{acc.name} · {acc.email}</p>
+    <PortalShell
+      badge="Nurse portal"
+      userName={acc.name}
+      userEmail={acc.email}
+      active={section}
+      onNavigate={(k) => setSection(k as "dashboard" | "references" | "checklists" | "sharing" | "settings")}
+      onSignOut={signOut}
+      headerActions={
+        <Button size="sm" onClick={() => setShowRequest(true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+          <Plus className="mr-1 h-3.5 w-3.5" /> Request checklist
+        </Button>
+      }
+      nav={[
+        { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { key: "references", label: "References", icon: Users, badge: refStats ? `${refStats.completed}/${refStats.total}` : undefined },
+        { key: "checklists", label: "Skill checklists", icon: ClipboardList, badge: checklistActions || undefined },
+        { key: "sharing", label: "Controlled sharing", icon: Share2, badge: activeShares || undefined },
+        { key: "settings", label: "Settings", icon: Settings2 },
+      ]}
+    >
+        {/* ── Dashboard ── */}
+        {section === "dashboard" && (
+          <div className="space-y-6">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-verify-ink/80">{greeting}</p>
+              <h2 className="mt-1 text-2xl font-bold text-jade-ink">Welcome back, {acc.name.split(" ")[0]}</h2>
+              <p className="mt-1 text-sm text-jade-muted">Verified references and self-assessed skill checklists — one secure vault.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {([
+                ["References", refStats ? `${refStats.completed}/${refStats.total}` : "—", "done", "references", Users],
+                ["Checklists", String(completions.filter((c) => new Date(c.expiresAt) >= new Date()).length), "valid now", "checklists", ClipboardList],
+                ["Share links", String(activeShares), "active", "sharing", Share2],
+                ["Open requests", String(openInvites.length + pendingRequests.length), "need action", "checklists", Inbox],
+              ] as const).map(([label, value, sub, target, Icon]) => (
+                <button key={label} type="button" onClick={() => setSection(target)}
+                  className="rounded-xl border border-vault-border bg-white vv-card-shadow p-4 text-left transition hover:border-verify-green/50">
+                  <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-jade-muted"><Icon className="h-3.5 w-3.5" /> {label}</p>
+                  <p className="mt-1 text-2xl font-bold text-jade-ink">{value}</p>
+                  <p className="text-[11px] text-jade-muted">{sub}</p>
+                </button>
+              ))}
+            </div>
+
+            {/* quick actions */}
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">Quick actions</p>
+              <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                <button type="button" onClick={() => setSection("references")} className="rounded-xl border border-vault-border bg-white p-4 text-left vv-card-shadow transition hover:border-verify-green/50">
+                  <Users className="h-4 w-4 text-verify-ink" />
+                  <p className="mt-2 text-sm font-semibold text-jade-ink">{refStats ? "Manage references" : "Set up references"}</p>
+                  <p className="mt-0.5 text-xs text-jade-muted">{refStats ? "Nudge, swap, or add a reference" : "Verify your employment with 2 referees"}</p>
+                </button>
+                <button type="button" onClick={() => setSection("checklists")} className="rounded-xl border border-vault-border bg-white p-4 text-left vv-card-shadow transition hover:border-verify-green/50">
+                  <ClipboardList className="h-4 w-4 text-verify-ink" />
+                  <p className="mt-2 text-sm font-semibold text-jade-ink">{checklistActions ? "Complete a checklist" : "Browse checklists"}</p>
+                  <p className="mt-0.5 text-xs text-jade-muted">{checklistActions ? `${checklistActions} checklist request(s) waiting` : "Self-assess your specialty skills"}</p>
+                </button>
+                <button type="button" onClick={() => setSection("sharing")} className="rounded-xl border border-vault-border bg-white p-4 text-left vv-card-shadow transition hover:border-verify-green/50">
+                  <Share2 className="h-4 w-4 text-verify-ink" />
+                  <p className="mt-2 text-sm font-semibold text-jade-ink">Controlled sharing</p>
+                  <p className="mt-0.5 text-xs text-jade-muted">See who has access — revoke or extend anytime</p>
+                </button>
+              </div>
+            </div>
+
+            {/* recent activity */}
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">Recent activity</p>
+              <div className="mt-2 space-y-2">
+                {completions.slice(0, 3).map((c) => (
+                  <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-vault-border bg-white px-4 py-3 vv-card-shadow">
+                    <p className="flex items-center gap-2 text-sm text-jade-ink"><BadgeCheck className="h-4 w-4 text-verify-ink" /> {c.specialtyLabel} checklist completed</p>
+                    <p className="text-xs text-jade-muted">{fmt(c.completedAt)} · valid until {fmt(c.expiresAt)}</p>
+                  </div>
+                ))}
+                {openInvites.slice(0, 2).map((i) => (
+                  <div key={i.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-verify-green/30 bg-verify-green/10 px-4 py-3">
+                    <p className="flex items-center gap-2 text-sm text-verify-ink"><Inbox className="h-4 w-4" /> {i.recruiterName} requested your {i.specialty ? specialtyLabel(i.specialty) : "specialty"} checklist</p>
+                    <Button size="sm" variant="ghost" onClick={() => { setSection("checklists"); setCheckTab("invites"); }} className="text-verify-ink hover:bg-verify-green/20">Review</Button>
+                  </div>
+                ))}
+                {completions.length === 0 && openInvites.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-vault-border bg-white/60 px-4 py-6 text-center text-sm text-jade-muted">
+                    Nothing yet — set up your references or request your first checklist to get started.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => setShowRequest(true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
-              <Plus className="mr-1 h-3.5 w-3.5" /> Request checklist
-            </Button>
-            <Button variant="ghost" size="sm" onClick={signOut} className="text-jade-muted hover:text-jade-ink">Sign out</Button>
-          </div>
-        </div>
-      </header>
+        )}
 
-      <main className="mx-auto max-w-5xl px-4 pb-16 pt-8 sm:px-6">
-        {/* summary strip */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {[
-            ["References done", refStats ? `${refStats.completed}/${refStats.total}` : "—", Users],
-            ["My checklists", completions.length, ClipboardList],
-            ["Awaiting approval", pendingRequests.length, Hourglass],
-            ["Requests from recruiters", openInvites.length, Inbox],
-          ].map(([label, value, Icon]) => {
-            const I = Icon as typeof ClipboardList;
-            return (
-              <div key={label as string} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-4">
-                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-jade-muted"><I className="h-3.5 w-3.5" /> {label as string}</p>
-                <p className="mt-1 text-2xl font-bold text-jade-ink">{value as string}</p>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* tabs */}
-        <div className="mt-8 flex flex-wrap gap-2">
-          {([["references", "References"], ["mine", "My checklists"], ["requests", "Requests"], ["invites", `Invites${openInvites.length ? ` (${openInvites.length})` : ""}`], ["profile", "Profile"]] as const).map(([k, lb]) => (
-            <button key={k} type="button" onClick={() => setTab(k)}
-              className={cn("rounded-full border px-4 py-1.5 text-sm font-medium transition",
-                tab === k ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
-              {lb}
-            </button>
-          ))}
-        </div>
-
-        {/* References — the verified-reference half of the vault */}
-        {tab === "references" && acc.email && (
+        {/* ── References — the verified-reference half of the vault ── */}
+        {section === "references" && acc.email && (
           <ReferencesPanel email={acc.email} fallbackName={acc.name} onStats={handleRefStats}
             onLaunchSetup={() => onLaunchReferences?.({ name: acc.name, email: acc.email, role: acc.title })} />
         )}
 
+        {/* ── Controlled sharing ── */}
+        {section === "sharing" && (
+          <SharingPanel
+            completions={completions.map((c) => ({ id: c.id, specialtyLabel: c.specialtyLabel, jobTitle: c.jobTitle, expired: new Date(c.expiresAt) < new Date(), shareLinks: c.shareLinks }))}
+            recruiterAccess={invites.map((i) => ({ id: i.id, recruiterName: i.recruiterName, facilityName: i.facilityName, status: i.status, createdAt: i.createdAt }))}
+            onChanged={loadMe}
+          />
+        )}
+
+        {/* ── Settings ── */}
+        {section === "settings" && (
+          <div className="mt-2">
+            <ChecklistOnboarding account={acc} sets={sets} onSaved={async () => { await loadMe(); }} embedded />
+          </div>
+        )}
+
+        {/* ── Skill checklists (self-assessments — independent from references) ── */}
+        {section === "checklists" && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {([["mine", "My checklists"], ["requests", "Requests"], ["invites", `Invites${openInvites.length ? ` (${openInvites.length})` : ""}`]] as const).map(([k, lb]) => (
+                <button key={k} type="button" onClick={() => setCheckTab(k)}
+                  className={cn("rounded-full border px-4 py-1.5 text-sm font-medium transition",
+                    checkTab === k ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                  {lb}
+                </button>
+              ))}
+            </div>
+
         {/* My checklists */}
-        {tab === "mine" && (
+        {checkTab === "mine" && (
           <div className="mt-6 space-y-4">
             {completions.length === 0 && (
               <div className="rounded-2xl border border-dashed border-vault-border bg-white/60 p-10 text-center">
@@ -512,7 +608,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
         )}
 
         {/* Requests */}
-        {tab === "requests" && (
+        {checkTab === "requests" && (
           <div className="mt-6 space-y-4">
             {approvedRequests.map((r) => (
               <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verify-green/30 bg-verify-green/10 p-5">
@@ -545,15 +641,8 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
           </div>
         )}
 
-        {/* Profile (edit onboarding details) */}
-        {tab === "profile" && (
-          <div className="mt-6">
-            <ChecklistOnboarding account={acc} sets={sets} onSaved={loadMe} embedded />
-          </div>
-        )}
-
         {/* Invites */}
-        {tab === "invites" && (
+        {checkTab === "invites" && (
           <div className="mt-6 space-y-4">
             {openInvites.map((i) => (
               <div key={i.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verify-green/30 bg-verify-green/10 p-5">
@@ -585,12 +674,13 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
             )}
           </div>
         )}
-      </main>
+          </>
+        )}
 
       {/* Request-new panel */}
       <AnimatePresence>
         {showRequest && (
-          <RequestPanel sets={sets} onClose={() => setShowRequest(false)} onRequested={async () => { setShowRequest(false); setTab("requests"); await loadMe(); }} />
+          <RequestPanel sets={sets} onClose={() => setShowRequest(false)} onRequested={async () => { setShowRequest(false); setSection("checklists"); setCheckTab("requests"); await loadMe(); }} />
         )}
       </AnimatePresence>
 
@@ -598,7 +688,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
       <AnimatePresence>
         {shareFor && <ShareDialog completion={shareFor} onClose={() => setShareFor(null)} onCreated={loadMe} />}
       </AnimatePresence>
-    </div>
+    </PortalShell>
   );
 }
 
@@ -643,7 +733,7 @@ function RequestPanel({ sets, onClose, onRequested }: { sets: CatalogSet[]; onCl
                 <p className="mt-0.5 text-xs text-jade-muted">{s.skills.length} skill(s) · {new Set(s.skills.map((k) => k.category)).size} categor{s.skills.length === 1 ? "y" : "ies"}</p>
               </div>
               <Button size="sm" disabled={busyId === s.key} onClick={() => request(s)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
-                {busyId === s.key ? <Spinner size={14} /> : <><ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Request</>}
+                {busyId === s.key ? <span className="mr-1 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-[-2px]" /> : <><ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Request</>}
               </Button>
             </div>
           ))}

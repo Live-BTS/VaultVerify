@@ -10,8 +10,8 @@ import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { QUESTIONS, Q8_EXPLANATION_PROMPT, RECENCY_OPTIONS } from "@/lib/bts/questions";
-import { RATING_SCALE, UNABLE_TO_OBSERVE, PROFICIENCY_META } from "@/lib/bts/constants";
+import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
+import { RATING_SCALE, UNABLE_TO_OBSERVE } from "@/lib/bts/constants";
 import { AgencyLogo, VaultMark } from "./brand";
 import { Lock, ShieldCheck, ArrowRight, ArrowLeft, CheckCircle2, PhoneCall, MailCheck, CircleAlert, PartyPopper } from "lucide-react";
 
@@ -28,21 +28,13 @@ interface FlowContext {
   flags: { type: string; severity: string; detail: string }[];
 }
 
-interface SkillCheck {
-  skillName: string;
-  nurseProficiency: string;
-  confirmed: boolean;
-  refProficiency?: string;
-  comment?: string;
-}
-
 type AnswerMap = Record<string, { type: string; value: string | number | null; unableToObserve?: boolean }>;
 
 export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => void }) {
   const { toast } = useToast();
   const [ctx, setCtx] = useState<FlowContext | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [step, setStep] = useState(0); // 0 welcome, 1 identity, 2 employment, 3 questions, 4 skills, 5 remarks, 6 sign, 7 done
+  const [step, setStep] = useState(0); // 0 welcome, 1 identity, 2 employment, 3 questions, 4 remarks, 5 sign, 6 done
   const [qIndex, setQIndex] = useState(0);
   const [busy, setBusy] = useState(false);
 
@@ -56,8 +48,6 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
   const [answers, setAnswers] = useState<AnswerMap>({});
   const [q8Explanation, setQ8Explanation] = useState("");
   const [remarks, setRemarks] = useState("");
-  const [skillsVerified, setSkillsVerified] = useState(false);
-  const [skillChecks, setSkillChecks] = useState<Record<string, SkillCheck>>({});
   const [signature, setSignature] = useState("");
   const [finalConsent, setFinalConsent] = useState(false);
   const [finalStatus, setFinalStatus] = useState<string | null>(null);
@@ -71,7 +61,7 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
         setCtx(data);
         if (data.response) {
           // already submitted
-          setStep(7);
+          setStep(6);
           setFinalStatus(data.request.status);
         }
       } catch (e) {
@@ -163,12 +153,10 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
         remarks,
         signatureName: signature.trim(),
         durationSeconds: Math.round((Date.now() - start) / 1000),
-        skillsVerified,
-        skillChecks: Object.values(skillChecks),
       };
       const data = await post(payload);
       setFinalStatus(data.status);
-      setStep(7);
+      setStep(6);
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Submission failed", variant: "destructive" });
     } finally {
@@ -202,7 +190,7 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
   }
 
   // ── Done ──
-  if (step === 7) {
+  if (step === 6) {
     const flagged = finalStatus === "FLAGGED";
     return (
       <CenteredCard>
@@ -220,8 +208,8 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
     );
   }
 
-  const totalSteps = 6;
-  const progressPct = step <= 2 ? (step / totalSteps) * 100 : step === 3 ? ((2 + (qIndex + 1) / QUESTIONS.length) / totalSteps) * 100 : ((step + 1) / totalSteps) * 100;
+  const totalSteps = 5;
+  const progressPct = step <= 2 ? (step / totalSteps) * 100 : step === 3 ? ((2 + (qIndex + 1) / QUESTIONS.length) / totalSteps) * 100 : (step / totalSteps) * 100;
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-100">
@@ -269,7 +257,7 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
               <ul className="mt-4 space-y-2.5 text-sm text-slate-700">
                 <li className="flex gap-2"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> Identity check first — your answers carry weight because they&apos;re provably yours</li>
                 <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> 10 quick questions, one per screen, with simple anchored scales</li>
-                <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> Optionally verify their self-reported skills (high-risk ones highlighted)</li>
+                <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> Signed, timestamped, and delivered as a branded verification packet</li>
                 <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> Typed e-signature at the end — no account needed</li>
               </ul>
               <Button className="mt-6 w-full bg-teal-700 hover:bg-teal-800" onClick={() => setStep(1)}>
@@ -452,9 +440,9 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
                 <Button
                   className="flex-1 bg-teal-700 hover:bg-teal-800"
                   disabled={!qAnswered() || (question.key === "q8_discipline" && q8Yes && q8Explanation.trim().length < 10)}
-                  onClick={() => (qIndex < QUESTIONS.length - 1 ? setQIndex((i) => i + 1) : nextAfterQuestions())}
+                  onClick={() => (qIndex < QUESTIONS.length - 1 ? setQIndex((i) => i + 1) : setStep(4))}
                 >
-                  {qIndex < QUESTIONS.length - 1 ? "Next question" : "Continue to skills"}
+                  {qIndex < QUESTIONS.length - 1 ? "Next question" : "Continue"}
                   <ArrowRight className="ml-1.5 h-4 w-4" />
                 </Button>
               </div>
@@ -462,100 +450,8 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
           </Card>
         )}
 
-        {/* ── Step 4: Skills verification (optional) ── */}
+        {/* ── Step 4: Remarks ── */}
         {step === 4 && (
-          <Card className="mt-4 border-slate-200">
-            <CardContent className="p-6">
-              <h1 className="text-lg font-bold text-slate-900">Verify their skills <span className="text-sm font-normal text-slate-500">(optional)</span></h1>
-              <p className="mt-1.5 text-sm text-slate-600">
-                {ctx.candidate.fullName} self-rated their {ctx.candidate.specialtyLabel} skills. Confirm the ones you directly observed — high-risk skills matter most. Skip freely if you can&apos;t speak to them.
-              </p>
-              <div className="mt-4 max-h-96 space-y-2.5 overflow-y-auto pr-1">
-                {[...ctx.nurseSkills].sort((a, b) => (a.highRisk === b.highRisk ? 0 : a.highRisk ? -1 : 1)).map((s) => {
-                  const check = skillChecks[s.skillName];
-                  return (
-                    <div key={s.skillName} className={cn("rounded-lg border p-3", s.highRisk ? "border-amber-200 bg-amber-50/60" : "border-slate-200")}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">
-                            {s.skillName}
-                            {s.highRisk && <span className="ml-2 rounded bg-amber-600 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">High-risk</span>}
-                          </p>
-                          <p className="mt-0.5 text-xs text-slate-500">
-                            Self-reported: <strong>{PROFICIENCY_META[s.proficiency]?.short ?? s.proficiency}</strong> · {recencyLabel(s.recencyMonths)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          className={cn("rounded-full border px-3 py-1 text-xs font-medium transition", check?.confirmed ? "border-teal-700 bg-teal-700 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-teal-400")}
-                          onClick={() =>
-                            setSkillChecks((sc) => {
-                              const cur = sc[s.skillName];
-                              if (cur?.confirmed) {
-                                const next = { ...sc };
-                                delete next[s.skillName];
-                                return next;
-                              }
-                              return { ...sc, [s.skillName]: { skillName: s.skillName, nurseProficiency: s.proficiency, confirmed: true, comment: cur?.comment ?? "" } };
-                            })
-                          }
-                        >
-                          {check?.confirmed ? "✓ Confirmed" : "✓ Confirm"}
-                        </button>
-                        <select
-                          aria-label={`Adjust ${s.skillName}`}
-                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600"
-                          value={check && check.confirmed === false ? (check.refProficiency ?? "") : ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setSkillChecks((sc) => {
-                              const next = { ...sc };
-                              if (v === "") {
-                                delete next[s.skillName];
-                                return next;
-                              }
-                              const isNotObserved = v === "__NOT_OBSERVED";
-                              next[s.skillName] = {
-                                skillName: s.skillName,
-                                nurseProficiency: s.proficiency,
-                                confirmed: false,
-                                refProficiency: isNotObserved ? undefined : v,
-                                comment: isNotObserved ? "Did not directly observe" : sc[s.skillName]?.comment ?? "",
-                              };
-                              return next;
-                            });
-                          }}
-                        >
-                          <option value="">Adjust level…</option>
-                          {Object.entries(PROFICIENCY_META).map(([k, m]) => (
-                            <option key={k} value={k}>{m.short}</option>
-                          ))}
-                          <option value="__NOT_OBSERVED">Didn&apos;t observe</option>
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-4 flex items-start gap-2">
-                <Checkbox id="skv" checked={skillsVerified} onCheckedChange={(v) => setSkillsVerified(v === true)} />
-                <Label htmlFor="skv" className="text-xs leading-snug text-slate-600">
-                  I verified the skills marked &ldquo;Confirm&rdquo; above (badges become <strong>Manager-verified</strong>; unmarked stay <strong>Self-reported</strong>).
-                </Label>
-              </div>
-              <Button className="mt-5 w-full bg-teal-700 hover:bg-teal-800" onClick={() => setStep(5)}>
-                Continue <ArrowRight className="ml-1.5 h-4 w-4" />
-              </Button>
-              <button className="mt-2 w-full text-center text-xs text-slate-400 underline" onClick={() => { setSkillsVerified(false); setStep(5); }}>
-                Skip — leave all skills as self-reported
-              </button>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── Step 5: Remarks ── */}
-        {step === 5 && (
           <Card className="mt-4 border-slate-200">
             <CardContent className="p-6">
               <h1 className="text-lg font-bold text-slate-900">
@@ -575,17 +471,17 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
               <Button
                 className="mt-5 w-full bg-teal-700 hover:bg-teal-800"
                 disabled={q8Yes && remarks.trim().length < 5}
-                onClick={() => setStep(6)}
+                onClick={() => setStep(5)}
               >
                 Continue to signature <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
-              <Button variant="ghost" className="mt-2 w-full" onClick={() => setStep(4)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
+              <Button variant="ghost" className="mt-2 w-full" onClick={() => setStep(3)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
             </CardContent>
           </Card>
         )}
 
-        {/* ── Step 6: Signature ── */}
-        {step === 6 && (
+        {/* ── Step 5: Signature ── */}
+        {step === 5 && (
           <Card className="mt-4 border-slate-200">
             <CardContent className="p-6">
               <h1 className="text-lg font-bold text-slate-900">Review & e-sign</h1>
@@ -607,7 +503,7 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
               <Button disabled={busy} className="mt-5 w-full bg-teal-700 hover:bg-teal-800" onClick={submitAll}>
                 {busy ? "Submitting…" : "Sign & submit reference"}
               </Button>
-              <Button variant="ghost" className="mt-2 w-full" onClick={() => setStep(5)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
+              <Button variant="ghost" className="mt-2 w-full" onClick={() => setStep(4)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
             </CardContent>
           </Card>
         )}
@@ -618,16 +514,6 @@ export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => 
       </footer>
     </div>
   );
-
-  function nextAfterQuestions() {
-    if (ctx && ctx.nurseSkills.length > 0) setStep(4);
-    else setStep(5);
-  }
-}
-
-function recencyLabel(months: number): string {
-  const opt = RECENCY_OPTIONS.find((r) => r.value === months) ?? RECENCY_OPTIONS[RECENCY_OPTIONS.length - 1];
-  return opt.label.toLowerCase();
 }
 
 function CenteredCard({ children }: { children: React.ReactNode }) {

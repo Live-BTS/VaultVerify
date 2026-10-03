@@ -12,8 +12,9 @@ import { AgencyLogo, StatusBadge, SkillBadge, FlagChip, RatingPips, Spinner } fr
 import { specialtyLabel, STATUS_META } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { RecruiterChecklists } from "./checklist/RecruiterChecklists";
+import { PortalShell } from "./shell/PortalShell";
 import { cn } from "@/lib/utils";
-import { LogIn, RefreshCcw, Download, ShieldAlert, Activity, Inbox, Users, Clock3, Star, Flag, Database } from "lucide-react";
+import { LogIn, RefreshCcw, Download, ShieldAlert, Activity, Inbox, Users, Clock3, Star, Flag, Database, LayoutDashboard, ClipboardList, BellRing, FileSearch } from "lucide-react";
 
 interface ReqRow {
   id: string;
@@ -68,6 +69,7 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReqRow | null>(null);
   const [sweeping, setSweeping] = useState(false);
+  const [section, setSection] = useState<"dashboard" | "references" | "checklists" | "notifications" | "audit">("dashboard");
 
   const load = useCallback(async (c: string) => {
     setLoading(true);
@@ -161,61 +163,102 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
   }
 
   const s = data.stats;
+  const flaggedRequests = data.requests.filter((r) => r.status === "FLAGGED");
+  const awaitingRequests = data.requests.filter((r) => r.status === "SENT" || r.status === "OPENED" || r.status === "IN_PROGRESS");
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+    <PortalShell
+      badge="Recruiter console"
+      brandOverride={
+        <div className="px-4 pb-4 pt-6">
           <AgencyLogo logoText={data.agency.logoText} name={data.agency.name} />
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={sweep} disabled={sweeping} className="border-teal-700 text-teal-800 hover:bg-teal-50">
-              <RefreshCcw className={cn("mr-1.5 h-3.5 w-3.5", sweeping && "animate-spin")} /> Run reminder sweep
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => { sessionStorage.removeItem("bts_recruiter_code"); onSignOut(); }}>Sign out</Button>
-          </div>
         </div>
-      </header>
+      }
+      userName={`Recruiter · ${data.agency.name}`}
+      userEmail="Access-code sign-in"
+      wide
+      active={section}
+      onNavigate={(k) => setSection(k as "dashboard" | "references" | "checklists" | "notifications" | "audit")}
+      onSignOut={() => { sessionStorage.removeItem("bts_recruiter_code"); onSignOut(); }}
+      headerActions={
+        <Button size="sm" variant="outline" onClick={sweep} disabled={sweeping} className="border-verify-green/40 text-verify-ink hover:bg-verify-green/10">
+          <RefreshCcw className={cn("mr-1.5 h-3.5 w-3.5", sweeping && "animate-spin")} /> Run reminder sweep
+        </Button>
+      }
+      nav={[
+        { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { key: "references", label: "References", icon: FileSearch, badge: awaitingRequests.length || undefined },
+        { key: "checklists", label: "Skill checklists", icon: ClipboardList },
+        { key: "notifications", label: "Notifications", icon: BellRing, badge: data.notifications.length },
+        { key: "audit", label: "Audit trail", icon: Activity },
+      ]}
+    >
+      {/* ── Dashboard ── */}
+      {section === "dashboard" && (
+        <div className="space-y-6">
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            {[
+              { icon: Users, label: "Requests", value: String(s.totalRequests), sub: "all time" },
+              { icon: Star, label: "Completion", value: `${s.completionRate}%`, sub: "target >70%", good: s.completionRate >= 70 },
+              { icon: Inbox, label: "Pending", value: String(s.pendingCount), sub: "awaiting refs" },
+              { icon: Flag, label: "Flagged", value: String(s.flaggedCount), sub: "fraud review", danger: s.flaggedCount > 0 },
+              { icon: Clock3, label: "Median time", value: s.medianCompletionSeconds ? `${Math.round(s.medianCompletionSeconds / 60)}m` : "—", sub: "per form" },
+              { icon: Star, label: "Avg rating", value: s.avgRating != null ? s.avgRating.toFixed(1) : "—", sub: "out of 5.0" },
+            ].map((c) => (
+              <Card key={c.label} className="border-slate-200">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                    <c.icon className={cn("h-3.5 w-3.5", c.danger ? "text-rose-500" : c.good ? "text-teal-600" : "text-slate-400")} />
+                    {c.label}
+                  </div>
+                  <p className={cn("mt-1.5 text-2xl font-bold", c.danger ? "text-rose-600" : c.good ? "text-teal-700" : "text-slate-900")}>{c.value}</p>
+                  <p className="text-[11px] text-slate-400">{c.sub}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {[
-            { icon: Users, label: "Requests", value: String(s.totalRequests), sub: "all time" },
-            { icon: Star, label: "Completion", value: `${s.completionRate}%`, sub: "target >70%", good: s.completionRate >= 70 },
-            { icon: Inbox, label: "Pending", value: String(s.pendingCount), sub: "awaiting refs" },
-            { icon: Flag, label: "Flagged", value: String(s.flaggedCount), sub: "fraud review", danger: s.flaggedCount > 0 },
-            { icon: Clock3, label: "Median time", value: s.medianCompletionSeconds ? `${Math.round(s.medianCompletionSeconds / 60)}m` : "—", sub: "per form" },
-            { icon: Star, label: "Avg rating", value: s.avgRating != null ? s.avgRating.toFixed(1) : "—", sub: "out of 5.0" },
-          ].map((c) => (
-            <Card key={c.label} className="border-slate-200">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                  <c.icon className={cn("h-3.5 w-3.5", c.danger ? "text-rose-500" : c.good ? "text-teal-600" : "text-slate-400")} />
-                  {c.label}
+          {/* needs attention */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="border-slate-200">
+              <CardContent className="p-5">
+                <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Flag className="h-4 w-4 text-rose-500" /> Fraud review ({flaggedRequests.length})</p>
+                <div className="mt-3 space-y-2">
+                  {flaggedRequests.slice(0, 4).map((r) => (
+                    <button key={r.id} type="button" onClick={() => { setSection("references"); setDetail(r); }}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-2 text-left text-sm transition hover:bg-rose-50">
+                      <span className="text-slate-800">{r.candidate.fullName} · {r.refName}</span>
+                      <span className="text-xs font-semibold text-rose-600">{r.flags.filter((f) => !f.resolved).length} open</span>
+                    </button>
+                  ))}
+                  {flaggedRequests.length === 0 && <p className="py-3 text-sm text-slate-400">Nothing flagged — pipeline is clean.</p>}
                 </div>
-                <p className={cn("mt-1.5 text-2xl font-bold", c.danger ? "text-rose-600" : c.good ? "text-teal-700" : "text-slate-900")}>{c.value}</p>
-                <p className="text-[11px] text-slate-400">{c.sub}</p>
               </CardContent>
             </Card>
-          ))}
+            <Card className="border-slate-200">
+              <CardContent className="p-5">
+                <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4 text-amber-500" /> Awaiting references ({awaitingRequests.length})</p>
+                <div className="mt-3 space-y-2">
+                  {awaitingRequests.slice(0, 4).map((r) => (
+                    <button key={r.id} type="button" onClick={() => { setSection("references"); setDetail(r); }}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:bg-slate-50">
+                      <span className="text-slate-800">{r.candidate.fullName} · {r.refName}</span>
+                      <span className="text-xs text-slate-400">day {r.daysOpen}</span>
+                    </button>
+                  ))}
+                  {awaitingRequests.length === 0 && <p className="py-3 text-sm text-slate-400">No open requests right now.</p>}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
+      )}
 
-        <Tabs defaultValue="pipeline" className="mt-8">
-          <TabsList>
-            <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
-            <TabsTrigger value="checklists">Checklists</TabsTrigger>
-            <TabsTrigger value="notifications">Notifications ({data.notifications.length})</TabsTrigger>
-            <TabsTrigger value="audit">Audit trail</TabsTrigger>
-          </TabsList>
-
-          {/* ── Checklists (self-assessments — separate from references) ── */}
-          <TabsContent value="checklists" className="mt-4">
-            <RecruiterChecklists code={code} recruiterName={`Recruiter · ${data.agency.name}`} />
-          </TabsContent>
-
-          {/* ── Pipeline ── */}
-          <TabsContent value="pipeline" className="mt-4">
-            <div className="space-y-3">
-              {data.requests.map((r) => {
+      {/* ── References pipeline ── */}
+      {section === "references" && (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-500">Employment &amp; capability verification — one request per reference. Click a row for the full verified report.</p>
+          {data.requests.map((r) => {
                 const openFlags = r.flags.filter((f) => !f.resolved);
                 return (
                   <Card
@@ -250,11 +293,16 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
                   </Card>
                 );
               })}
-            </div>
-          </TabsContent>
+        </div>
+      )}
 
-          {/* ── Notifications ── */}
-          <TabsContent value="notifications" className="mt-4">
+      {/* ── Checklists (self-assessments — separate from references) ── */}
+      {section === "checklists" && (
+        <RecruiterChecklists code={code} recruiterName={`Recruiter · ${data.agency.name}`} />
+      )}
+
+      {/* ── Notifications ── */}
+      {section === "notifications" && (
             <Card className="border-slate-200">
               <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
                 {data.notifications.map((n) => (
@@ -269,10 +317,10 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
                 {data.notifications.length === 0 && <p className="p-6 text-sm text-slate-400">No notifications yet.</p>}
               </CardContent>
             </Card>
-          </TabsContent>
+      )}
 
-          {/* ── Audit ── */}
-          <TabsContent value="audit" className="mt-4">
+      {/* ── Audit ── */}
+      {section === "audit" && (
             <Card className="border-slate-200">
               <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0 font-mono text-xs">
                 {data.audit.map((a) => (
@@ -287,9 +335,7 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
                 {data.audit.length === 0 && <p className="p-6 font-sans text-sm text-slate-400">No audit events yet.</p>}
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
-      </main>
+      )}
 
       {/* ── Detail dialog ── */}
       <Dialog open={!!detail} onOpenChange={(v) => !v && setDetail(null)}>
@@ -414,6 +460,6 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </PortalShell>
   );
 }
