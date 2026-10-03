@@ -89,14 +89,19 @@ const WHITE = "#FFFFFF";
 const ACCENT_ON_DARK = "#8BE39A";
 
 const LVL: Record<Rating, string> = { 4: "#12A150", 3: "#2F80ED", 2: "#F2A20C", 1: "#E5484D" };
+const DONUT_TRACK = "#EAF0EC";
+const NAVY = "#1E3A5F";
+const STEEL = "#6F8FB0";
+const PALE = "#C3CCD5";
+const NA_DOT = "#DDE3E9";
 const LVL_LABEL: Record<Rating, string> = { 4: "Proficient", 3: "Experienced", 2: "Limited", 1: "No theory" };
 const LVL_LEGEND: Record<Rating, string> = { 1: "No theory / experience", 2: "Limited", 3: "Experienced", 4: "Proficient" };
 
 interface RecStyle { label: string; fill: string; text: string; border: string | null; bar: string }
 const REC: Record<LastPerformed, RecStyle> = {
-  within_3_months: { label: "Within 3 months", fill: "#1E3A5F", text: WHITE, border: null, bar: "#1E3A5F" },
-  within_6_months: { label: "Within 6 months", fill: "#6F8FB0", text: WHITE, border: null, bar: "#6F8FB0" },
-  over_6_months: { label: "6+ months ago", fill: "#E3E8ED", text: "#566273", border: null, bar: "#C9D1D9" },
+  within_3_months: { label: "Within 3 months", fill: NAVY, text: WHITE, border: null, bar: NAVY },
+  within_6_months: { label: "Within 6 months", fill: STEEL, text: WHITE, border: null, bar: STEEL },
+  over_6_months: { label: "6+ months ago", fill: "#E3E8ED", text: "#566273", border: null, bar: PALE },
   na: { label: "N/A", fill: WHITE, text: "#8A97A3", border: "#B9C3CD", bar: "#E8ECEF" },
 };
 const REC_ORDER: LastPerformed[] = ["within_3_months", "within_6_months", "over_6_months", "na"];
@@ -144,7 +149,6 @@ function draw(data: ChecklistData, assetsDir: string, total: number): Promise<{ 
   const N = all.length;
   const ratedAll = all.filter((s) => s.rating != null);
   const AVG = ratedAll.length ? ratedAll.reduce((a, s) => a + (s.rating as Rating), 0) / ratedAll.length : 0;
-  const PROF = all.filter((s) => s.rating === 4).length;
   const RECENT = all.filter((s) => s.lastPerformed === "within_3_months").length;
   const cnt = { 1: 0, 2: 0, 3: 0, 4: 0 } as Record<Rating, number>;
   all.forEach((s) => { if (s.rating != null) cnt[s.rating]++; });
@@ -211,6 +215,43 @@ function draw(data: ChecklistData, assetsDir: string, total: number): Promise<{ 
       doc.fillColor([77, 171, 87] as any).fillOpacity(a).circle(W - 40, 10, r).fill();
     }
     doc.restore();
+  };
+
+  /** Clockwise-from-12-o'clock arc as cubic Beziers (butt caps cut radially, like the design). */
+  const arcPath = (cx: number, cy: number, r: number, a0: number, a1: number): string => {
+    const P = (a: number): [number, number] => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+    const segs = Math.max(1, Math.ceil(Math.abs(a1 - a0) / (Math.PI / 2)));
+    const [x0, y0] = P(a0);
+    let d = `M ${x0.toFixed(3)} ${y0.toFixed(3)}`;
+    for (let i = 0; i < segs; i++) {
+      const t0 = a0 + ((a1 - a0) * i) / segs;
+      const t1 = a0 + ((a1 - a0) * (i + 1)) / segs;
+      const k = (4 / 3) * Math.tan((t1 - t0) / 4);
+      const [xa, ya] = P(t0);
+      const [xb, yb] = P(t1);
+      d += ` C ${(xa + k * r * Math.cos(t0)).toFixed(3)} ${(ya + k * r * Math.sin(t0)).toFixed(3)} ${(xb - k * r * Math.cos(t1)).toFixed(3)} ${(yb - k * r * Math.sin(t1)).toFixed(3)} ${xb.toFixed(3)} ${yb.toFixed(3)}`;
+    }
+    return d;
+  };
+  /** Donut = light track ring + clockwise segments from 12 o'clock (centerline r, lw 13). */
+  const donut = (cx: number, cy: number, parts: [number, string][]) => {
+    doc.lineWidth(13).lineCap("butt");
+    doc.circle(cx, cy, 30).stroke(DONUT_TRACK as any);
+    const tot = parts.reduce((a, p) => a + p[0], 0);
+    if (!tot) return;
+    let a = 0;
+    const GAP = (2 * Math.PI) / 180; // 2° padding between segments, like the design
+    for (const [n, col] of parts) {
+      if (!n) continue;
+      const sweep = (2 * Math.PI * n) / tot;
+      if (sweep >= 2 * Math.PI - 1e-6) {
+        doc.circle(cx, cy, 30).stroke(col as any);
+      } else {
+        const s0 = a + (a > 0 || a + sweep < 2 * Math.PI ? GAP / 2 : 0);
+        doc.path(arcPath(cx, cy, 30, s0, a + sweep - GAP / 2)).stroke(col as any);
+      }
+      a += sweep;
+    }
   };
 
   // ------------------------------------------------------------------ rating widgets
@@ -350,53 +391,55 @@ function draw(data: ChecklistData, assetsDir: string, total: number): Promise<{ 
   meta(mx + 68, CT + 62, "Valid until", cand.validUntil);
   meta(mx + 160, CT + 62, "Source", cand.source);
 
-  // ---- Summary at a glance (restrained white card; only the two bars carry colour)
+  // ---- Summary at a glance (white card; two colour donuts with count legends)
   const ST0 = CT + CH + 16;
-  const SUM_H = 122;
+  const SUM_H = 128;
   rrect(M, ST0, CW, SUM_H, 14, WHITE, LINE);
   text(M + 20, ST0 + 24, "Summary at a glance", "PB", 9.5, TEAL);
-  const stats: [string, string, string][] = [
-    [String(N), "", "Skills assessed"],
-    [AVG.toFixed(1), " / 4", "Average rating"],
-    [String(PROF), `  ${Math.round((100 * PROF) / N)}%`, "Rated Proficient"],
-    [String(RECENT), `  ${Math.round((100 * RECENT) / N)}%`, "Used within 3 months"],
-  ];
-  const colw = (CW - 40) / 4;
-  stats.forEach(([big, sub, lab], i) => {
-    const sx = M + 20 + i * colw;
-    if (i) line(sx - 12, ST0 + 38, sx - 12, ST0 + 76, LINE, 0.8);
-    text(sx, ST0 + 58, big, "PB", 20, INK);
-    text(sx + width(big, "PB", 20) + 2, ST0 + 58, sub, "PM", 8, SLATE);
-    text(sx, ST0 + 72, lab, "P", 7.4, SLATE);
-  });
-  line(M + 20, ST0 + 84, W - M - 20, ST0 + 84, LINE, 0.8);
+  text(W - M - 20, ST0 + 24, `${N} skills assessed`, "PM", 7.6, SLATE, "r");
 
-  /** Pill-shaped stacked bar. Counts are printed inside segments wide enough to hold them. */
-  const stacked = (x: number, top: number, w: number, h: number, parts: [number, string, string][]) => {
-    const tot = parts.reduce((a, p) => a + p[0], 0);
-    doc.save();
-    doc.roundedRect(x, top, w, h, h / 2).clip();
-    let cx_ = x;
-    for (const [n, col, tcol] of parts) {
-      if (!n) continue;
-      const sw = (w * n) / tot;
-      doc.rect(cx_, top, sw, h).fill(col);
-      line(cx_, top, cx_, top + h, WHITE, 1.2);
-      if (sw > 15) text(cx_ + sw / 2, top + h / 2 + 2.3, String(n), "PB", 6.4, tcol, "c");
-      cx_ += sw;
-    }
-    doc.restore();
+  const mixLegend = (
+    lx: number,
+    title: string,
+    rows: [string, number, string][],
+    countEndX: number,
+    pctEndX: number,
+  ) => {
+    text(lx, ST0 + 52, title, "PM", 7, SLATE);
+    rows.forEach(([lab, n, col], i) => {
+      const by = ST0 + 68 + i * 15; // text baseline; row pitch 15pt
+      doc.circle(lx + 3, by - 2.6, 3).fill(col as any);
+      text(lx + 12, by, lab, "PM", 7.6, INK);
+      text(countEndX, by, String(n), "PB", 7.6, INK, "r");
+      text(pctEndX, by, `${Math.round((100 * n) / Math.max(N, 1))}%`, "P", 7.2, SLATE, "r");
+    });
   };
-  const bw = (CW - 40 - 28) / 2;
-  text(M + 20, ST0 + 98, "Rating mix", "PM", 7, SLATE);
-  stacked(M + 20, ST0 + 103, bw, 10, [[cnt[4], LVL[4], WHITE], [cnt[3], LVL[3], WHITE], [cnt[2], LVL[2], WHITE], [cnt[1], LVL[1], WHITE]]);
-  text(M + 20 + bw + 28, ST0 + 98, "Last performed", "PM", 7, SLATE);
-  stacked(M + 20 + bw + 28, ST0 + 103, bw, 10, [
-    [rcnt.within_3_months, REC.within_3_months.bar, WHITE],
-    [rcnt.within_6_months, REC.within_6_months.bar, WHITE],
-    [rcnt.over_6_months, REC.over_6_months.bar, "#3F4B5A"],
-    [rcnt.na, REC.na.bar, "#3F4B5A"],
+
+  // Left donut: rating mix of rated rows, centre = average of 4
+  donut(M + 58, ST0 + 80, [[cnt[4], LVL[4]], [cnt[3], LVL[3]], [cnt[2], LVL[2]], [cnt[1], LVL[1]]]);
+  text(M + 58, ST0 + 84, AVG.toFixed(1), "PB", 15, INK, "c");
+  text(M + 58, ST0 + 94, "avg of 4", "P", 6.4, SLATE, "c");
+  mixLegend(
+    M + 112, "Rating mix",
+    [["Proficient", cnt[4], LVL[4]], ["Experienced", cnt[3], LVL[3]], ["Limited", cnt[2], LVL[2]], ["No theory", cnt[1], LVL[1]]],
+    M + 221, M + 251,
+  );
+  line(M + 266, ST0 + 40, M + 266, ST0 + 114, LINE, 0.8);
+
+  // Right donut: last-performed mix, centre = % recent (within 3 months)
+  donut(M + 319, ST0 + 80, [
+    [rcnt.within_3_months, NAVY],
+    [rcnt.within_6_months, STEEL],
+    [rcnt.over_6_months, PALE],
+    [rcnt.na, NA_DOT],
   ]);
+  text(M + 319, ST0 + 84, `${Math.round((100 * RECENT) / Math.max(N, 1))}%`, "PB", 15, INK, "c");
+  text(M + 319, ST0 + 94, "recent", "P", 6.4, SLATE, "c");
+  mixLegend(
+    M + 373, "Last performed",
+    [["Within 3 months", rcnt.within_3_months, NAVY], ["Within 6 months", rcnt.within_6_months, STEEL], ["6+ months ago", rcnt.over_6_months, PALE], ["N/A", rcnt.na, NA_DOT]],
+    M + 482, W - M - 20,
+  );
 
   // ---- Category overview
   const OT = ST0 + SUM_H + 14;

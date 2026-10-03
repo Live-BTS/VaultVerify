@@ -183,3 +183,24 @@ Work Log:
 Stage Summary:
 - The generated Skills Checklist PDF is now the approved design, byte-for-byte layout: golden test PASS (5 pages, 31/0/0/0/1 differing pixels) and real completions render identically (summary math, N/A handling, extras groups, attestation incl. drawn signatures, footers).
 - Renderer = handoff code unchanged at src/lib/pdf/skills-checklist-pdf.ts; data mapping isolated in /api/checklist/pdf; assets at assets/skills-checklist (copied into standalone deploys via outputFileTracingIncludes).
+
+---
+Task ID: PDF-EXACT-2
+Agent: Super Z (main agent)
+Task: Make the generated Skills Checklist PDF match the NEW reference "upload/VaultVerify-Skills-Checklist-Sam-Full-Colors (3).pdf" exactly (user: "Still need improvement attaching the reference doc"). The new reference supersedes the old approved design: its "Summary at a glance" card now uses two full-color DONUT charts (rating mix + last performed) instead of stat columns + stacked bars.
+
+Work Log:
+- Built a page-by-page pixel diff pipeline (150 dpi pdftoppm + numpy) over golden sample-data.json (identical "Sam" data): first diff = 249,610 px on page 1, pages 2-5 already identical (8/9/13/6 px).
+- Reverse-engineered the new summary card from the reference PDF vector layer with pdfplumber: card (40,186)-(572,314) h=128; donuts = stroked arcs centerline r=30, lw=13, track #EAF0EC, clockwise from 12 o'clock; colors = existing LVL palette (#12A150/#2F80ED/#F2A20C/#E5484D) + recency #1E3A5F/#6F8FB0/#C3CCD5, 4th legend dot #DDE3E9; legend rows pitch 15pt (label PM 7.6 INK at x+12, count PB 7.6 INK right-aligned, pct P 7.2 SLATE right-aligned); titles PM 7.0 SLATE; centers PB 15 INK + P 6.4 SLATE ("3.2 avg of 4", "52% recent"); divider x=306 #E2EAE6; right label "N skills assessed" PM 7.6 SLATE at (W-M-20).
+- Rewrote the summary section in src/lib/pdf/skills-checklist-pdf.ts: removed stat columns + stacked pill bars, added arcPath (clockwise cubic-Bezier arcs, ReportLab-compatible kappa/segmentation) + donut() (track ring + proportional segments) + mixLegend(); SUM_H 122->128 (fixes the 6pt downstream shift on page 1).
+- Word-position parity verified with pdfplumber diff: every summary-band word at delta 0.00; caught and reverted a wrong W-M-20 change in Category overview (reference right edge is really 554 = W-M-18).
+- Donut forensics: reference segments have ~2-degree angular gaps at boundaries. Parameter sweep over gap width (0.4-3.0) found the minimum at exactly 2.0 deg (page-1 diff 729 -> 192 px). Gap hardcoded.
+- Final golden diff vs Sam-Full-Colors (3).pdf: page 1 = 192 differing px (sub-pixel AA specks on tiny clock icons only; every word/vector at identical position), pages 2-5 = 8/9/13/6 px. Side-by-side + donut zooms in download/pdfnew/cmp/.
+- Real-data verification through the live API (share=cmusu5v5a000clsuyhgl78xbj, Priya ICU): page 1 shows "13 skills assessed", donut 3.5 avg with mix 7/4/1/0, 77% recent donut with 10/1/1/1 incl. light-grey N/A segment (matches summarizeAnswers exactly); pages 2-3 render rows/chips/pills/dashed N/A ring correctly; HTTP 200 174,643 B.
+- bun run lint clean; bun run build passes (route table printed); dev server healthy after build (home 200, PDF 200).
+- Cleanup: removed /tmp sweep artifacts and one-off DB listing script; kept cmp_sam.py / diff_clusters.py / wordcmp*.py / extract_ref*.py as reusable PDF-parity tools.
+
+Stage Summary:
+- The generated Skills Checklist PDF now matches the user's newest reference ("Sam Full-Colors") to sub-pixel anti-aliasing noise: two-donut Summary at a glance, exact geometry/colors/typography everywhere, pages 2-5 byte-identical layouts.
+- Renderer: src/lib/pdf/skills-checklist-pdf.ts (donut engine + 2-degree segment padding is data-driven, handles N/A rows, all-rated, zero-rated and any category count).
+- Reusable check: bun scripts/render-sample.ts reference/sample-data.json out.pdf && python3 scripts/cmp_sam.py (regenerates ref/cur renders + diff heatmaps in download/pdfnew/cmp/).

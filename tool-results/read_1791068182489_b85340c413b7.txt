@@ -1,0 +1,588 @@
+     1→/**
+     2→ * VaultVerify - Skills Checklist PDF (Node / PDFKit port)
+     3→ *
+     4→ * Faithful port of the approved reference implementation (generate_checklist.py).
+     5→ * All coordinates are PDF points on US Letter (612 x 792) with a TOP-LEFT origin,
+     6→ * which is what PDFKit uses, so the `top` values from the reference apply unchanged.
+     7→ *
+     8→ * Usage:
+     9→ *   import { renderSkillsChecklistPdf } from "@/lib/pdf/skills-checklist-pdf";
+    10→ *   const pdf: Buffer = await renderSkillsChecklistPdf(data);
+    11→ *
+    12→ * Runtime: Node.js only (never the Edge runtime).
+    13→ *
+    14→ * Two documented additive extensions over the approved handoff (everything else is
+    15→ * unchanged; the golden test against reference/approved-design.pdf still passes):
+    16→ *  1. `rating: null` rows (candidate marked the skill N/A) render a dashed neutral
+    17→ *     ring with "N/A" centred - the same visual language as the design's own dashed
+    18→ *     N/A last-performed chip (#B9C3CD border, #8A97A3 text). Averages/proficient
+    19→ *     counts use rated rows only, exactly like the app's summarizeAnswers().
+    20→ *  2. `attestation.signatureImage` (data URL) embeds a Draw/Upload signature image
+    21→ *     above the signature line; typed signatures keep the Lora Italic text.
+    22→ */
+    23→import path from "node:path";
+    24→import PDFDocument from "pdfkit";
+    25→
+    26→// --------------------------------------------------------------------------- types
+    27→export type Rating = 1 | 2 | 3 | 4;
+    28→export type LastPerformed = "within_3_months" | "within_6_months" | "over_6_months" | "na";
+    29→
+    30→export interface ChecklistData {
+    31→  candidate: {
+    32→    name: string;
+    33→    profession: string;
+    34→    jobTitle: string;
+    35→    specialty: string;
+    36→    email: string;
+    37→    experience: string;
+    38→    completedOn: string;
+    39→    validUntil: string;
+    40→    source: string;
+    41→  };
+    42→  categories: {
+    43→    name: string;
+    44→    shortName?: string;
+    45→    skills: { name: string; rating: Rating | null; lastPerformed: LastPerformed }[];
+    46→  }[];
+    47→  questions?: {
+    48→    category: string;
+    49→    items: (
+    50→      | { type: "yes_no"; question: string; answer: boolean }
+    51→      | { type: "text"; question: string; answer: string }
+    52→    )[];
+    53→  }[];
+    54→  attestation: {
+    55→    statements: { text: string; accepted: boolean }[];
+    56→    signatureName?: string;
+    57→    /** data:image/png|jpeg;base64,... - drawn or uploaded signature (additive). */
+    58→    signatureImage?: string;
+    59→    printedName?: string;
+    60→    signedOn?: string;
+    61→  };
+    62→  footerNote: string;
+    63→  generatedOn: string;
+    64→  sampleNotice?: string;
+    65→}
+    66→
+    67→export interface RenderOptions {
+    68→  /** Folder that contains logo.png and fonts/. Default: <cwd>/assets/skills-checklist */
+    69→  assetsDir?: string;
+    70→}
+    71→
+    72→// --------------------------------------------------------------------------- design tokens
+    73→const W = 612;
+    74→const H = 792;
+    75→const M = 40;
+    76→const CW = W - 2 * M;
+    77→const LIMIT = H - 76; // lowest y a content row may reach (footer lives below)
+    78→
+    79→const INK = "#0B2E33";
+    80→const TEAL = "#0F5257";
+    81→const DEEP = "#03363D";
+    82→const LEAF = "#4DAA57";
+    83→const LEAF_D = "#2F8A3E";
+    84→const MINT = "#EEF6F1";
+    85→const MINT2 = "#DDEDE3";
+    86→const SLATE = "#5E7075";
+    87→const LINE = "#E2EAE6";
+    88→const WHITE = "#FFFFFF";
+    89→const ACCENT_ON_DARK = "#8BE39A";
+    90→
+    91→const LVL: Record<Rating, string> = { 4: "#12A150", 3: "#2F80ED", 2: "#F2A20C", 1: "#E5484D" };
+    92→const LVL_LABEL: Record<Rating, string> = { 4: "Proficient", 3: "Experienced", 2: "Limited", 1: "No theory" };
+    93→const LVL_LEGEND: Record<Rating, string> = { 1: "No theory / experience", 2: "Limited", 3: "Experienced", 4: "Proficient" };
+    94→
+    95→interface RecStyle { label: string; fill: string; text: string; border: string | null; bar: string }
+    96→const REC: Record<LastPerformed, RecStyle> = {
+    97→  within_3_months: { label: "Within 3 months", fill: "#1E3A5F", text: WHITE, border: null, bar: "#1E3A5F" },
+    98→  within_6_months: { label: "Within 6 months", fill: "#6F8FB0", text: WHITE, border: null, bar: "#6F8FB0" },
+    99→  over_6_months: { label: "6+ months ago", fill: "#E3E8ED", text: "#566273", border: null, bar: "#C9D1D9" },
+   100→  na: { label: "N/A", fill: WHITE, text: "#8A97A3", border: "#B9C3CD", bar: "#E8ECEF" },
+   101→};
+   102→const REC_ORDER: LastPerformed[] = ["within_3_months", "within_6_months", "over_6_months", "na"];
+   103→
+   104→const RX = 322; // centre of the rating ring
+   105→const LPX = 446; // left edge of the "Last performed" chip
+   106→const SKILL_W = 246; // max width of a skill name before it wraps
+   107→
+   108→// --------------------------------------------------------------------------- colour helpers
+   109→type RGB = [number, number, number];
+   110→const toRgb = (hex: string): RGB => {
+   111→  const h = hex.replace("#", "");
+   112→  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+   113→};
+   114→/** Blend a colour toward white by k (0..1). */
+   115→const mix = (hex: string, k: number): RGB => toRgb(hex).map((v) => v + (255 - v) * k) as RGB;
+   116→const darken = (hex: string, k: number): RGB => toRgb(hex).map((v) => v * k) as RGB;
+   117→
+   118→// --------------------------------------------------------------------------- validation
+   119→function validate(data: ChecklistData) {
+   120→  for (const cat of data.categories) {
+   121→    for (const s of cat.skills) {
+   122→      if (s.rating != null && ![1, 2, 3, 4].includes(s.rating)) throw new Error(`Bad rating for "${s.name}": ${s.rating}`);
+   123→      if (!(s.lastPerformed in REC)) throw new Error(`Bad lastPerformed for "${s.name}": ${s.lastPerformed}`);
+   124→    }
+   125→  }
+   126→  if (!data.categories.some((c) => c.skills.length)) throw new Error("Checklist has no skills");
+   127→}
+   128→
+   129→// --------------------------------------------------------------------------- public API
+   130→export async function renderSkillsChecklistPdf(data: ChecklistData, opts: RenderOptions = {}): Promise<Buffer> {
+   131→  validate(data);
+   132→  const assetsDir = opts.assetsDir ?? path.join(process.cwd(), "assets", "skills-checklist");
+   133→  // Two passes: the first counts pages so "Page x of y" is right on every page.
+   134→  const first = await draw(data, assetsDir, 1);
+   135→  const second = await draw(data, assetsDir, first.pages);
+   136→  return second.buffer;
+   137→}
+   138→
+   139→// --------------------------------------------------------------------------- renderer
+   140→function draw(data: ChecklistData, assetsDir: string, total: number): Promise<{ buffer: Buffer; pages: number }> {
+   141→  const cand = data.candidate;
+   142→  const cats = data.categories;
+   143→  const all = cats.flatMap((c) => c.skills);
+   144→  const N = all.length;
+   145→  const ratedAll = all.filter((s) => s.rating != null);
+   146→  const AVG = ratedAll.length ? ratedAll.reduce((a, s) => a + (s.rating as Rating), 0) / ratedAll.length : 0;
+   147→  const PROF = all.filter((s) => s.rating === 4).length;
+   148→  const RECENT = all.filter((s) => s.lastPerformed === "within_3_months").length;
+   149→  const cnt = { 1: 0, 2: 0, 3: 0, 4: 0 } as Record<Rating, number>;
+   150→  all.forEach((s) => { if (s.rating != null) cnt[s.rating]++; });
+   151→  const rcnt = { within_3_months: 0, within_6_months: 0, over_6_months: 0, na: 0 } as Record<LastPerformed, number>;
+   152→  all.forEach((s) => rcnt[s.lastPerformed]++);
+   153→  const roleLine = `${cand.name}, ${cand.jobTitle} (${cand.specialty})`;
+   154→
+   155→  const doc = new PDFDocument({
+   156→    size: [W, H],
+   157→    margin: 0,
+   158→    autoFirstPage: false,
+   159→    info: { Title: `Skills Checklist - ${cand.name} (${cand.jobTitle}, ${cand.specialty})`, Author: "VaultVerify" },
+   160→  });
+   161→  const chunks: Buffer[] = [];
+   162→  doc.on("data", (c: Buffer) => chunks.push(c));
+   163→
+   164→  const fontDir = path.join(assetsDir, "fonts");
+   165→  doc.registerFont("P", path.join(fontDir, "Poppins-Regular.ttf"));
+   166→  doc.registerFont("PL", path.join(fontDir, "Poppins-Light.ttf"));
+   167→  doc.registerFont("PM", path.join(fontDir, "Poppins-Medium.ttf"));
+   168→  doc.registerFont("PB", path.join(fontDir, "Poppins-Bold.ttf"));
+   169→  doc.registerFont("Sig", path.join(fontDir, "Lora-Italic-Regular.ttf"));
+   170→  // Pass the file PATH (not a Buffer) so PDFKit embeds the logo once and reuses it on every page
+   171→  const logo = path.join(assetsDir, "logo.png");
+   172→
+   173→  // ------------------------------------------------------------------ primitives
+   174→  type Fill = string | RGB;
+   175→  const rrect = (x: number, top: number, w: number, h: number, r: number, fill?: Fill, stroke?: Fill, lw = 0.8) => {
+   176→    doc.roundedRect(x, top, w, h, r);
+   177→    if (fill && stroke) { doc.lineWidth(lw); doc.fillAndStroke(fill as any, stroke as any); }
+   178→    else if (fill) doc.fill(fill as any);
+   179→    else if (stroke) { doc.lineWidth(lw); doc.stroke(stroke as any); }
+   180→  };
+   181→  const width = (s: string, font = "P", size = 9) => doc.font(font).fontSize(size).widthOfString(s);
+   182→  const text = (x: number, top: number, s: string, font = "P", size = 9, color: Fill = INK, align: "l" | "r" | "c" = "l") => {
+   183→    doc.font(font).fontSize(size).fillColor(color as any);
+   184→    const w = doc.widthOfString(s);
+   185→    const x0 = align === "l" ? x : align === "r" ? x - w : x - w / 2;
+   186→    doc.text(s, x0, top, { lineBreak: false, baseline: "alphabetic" });
+   187→  };
+   188→  const line = (x1: number, y1: number, x2: number, y2: number, color: Fill, lw: number) => {
+   189→    doc.lineWidth(lw).strokeColor(color as any).moveTo(x1, y1).lineTo(x2, y2).stroke();
+   190→  };
+   191→  /** ReportLab simpleSplit: greedy word wrap on spaces. */
+   192→  const wrap = (s: string, font: string, size: number, maxW: number): string[] => {
+   193→    const out: string[] = [];
+   194→    for (const para of s.split("\n")) {
+   195→      let cur = "";
+   196→      for (const w of para.split(/\s+/).filter(Boolean)) {
+   197→        const cand2 = cur ? `${cur} ${w}` : w;
+   198→        if (!cur || width(cand2, font, size) <= maxW) cur = cand2;
+   199→        else { out.push(cur); cur = w; }
+   200→      }
+   201→      out.push(cur);
+   202→    }
+   203→    return out;
+   204→  };
+   205→  const alpha = (fn: () => void, a: number) => { doc.save(); doc.fillOpacity(a); fn(); doc.restore(); };
+   206→
+   207→  const headerRings = (hb: number) => {
+   208→    doc.save();
+   209→    doc.rect(0, 0, W, hb).clip();
+   210→    for (const [r, a] of [[150, 0.06], [112, 0.07], [74, 0.08]] as const) {
+   211→      doc.fillColor([77, 171, 87] as any).fillOpacity(a).circle(W - 40, 10, r).fill();
+   212→    }
+   213→    doc.restore();
+   214→  };
+   215→
+   216→  // ------------------------------------------------------------------ rating widgets
+   217→  /** 4-segment score ring; segments fill clockwise from 12 o'clock up to `level`, number centred. */
+   218→  const ring = (cx: number, cy: number, level: Rating, r = 8.2, lw = 2.6) => {
+   219→    doc.lineCap("round").lineWidth(lw);
+   220→    for (let i = 0; i < 4; i++) {
+   221→      const a0 = ((i * 90 + 6) * Math.PI) / 180;
+   222→      const a1 = ((i * 90 + 84) * Math.PI) / 180;
+   223→      const p = (a: number): [number, number] => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+   224→      const [x0, y0] = p(a0);
+   225→      const [x1, y1] = p(a1);
+   226→      doc.path(`M ${x0} ${y0} A ${r} ${r} 0 0 1 ${x1} ${y1}`).stroke((i < level ? LVL[level] : "#E3EAE7") as any);
+   227→    }
+   228→    text(cx, cy + 2.6, String(level), "PB", 7.4, LVL[level], "c");
+   229→  };
+   230→  /** N/A rating row (additive): dashed neutral ring, same language as the design's dashed N/A chip. */
+   231→  const ringNA = (cx: number, cy: number, r = 8.2) => {
+   232→    doc.lineWidth(1.8).dash(2.2, { space: 1.8 });
+   233→    doc.circle(cx, cy, r).stroke("#B9C3CD");
+   234→    doc.undash();
+   235→    text(cx, cy + 2.2, "N/A", "PB", 5.4, "#8A97A3", "c");
+   236→  };
+   237→  const levelChip = (x: number, cy: number, level: Rating) => {
+   238→    const lab = LVL_LABEL[level];
+   239→    const w = width(lab, "PB", 6.6) + 14;
+   240→    rrect(x, cy - 6.5, w, 13, 6.5, mix(LVL[level], 0.84));
+   241→    text(x + w / 2, cy + 2.4, lab, "PB", 6.6, darken(LVL[level], 0.72), "c");
+   242→  };
+   243→  const recChip = (x: number, cy: number, key: LastPerformed, size = 6.4): number => {
+   244→    const st = REC[key];
+   245→    const icon = key === "na" ? 0 : 10;
+   246→    const w = width(st.label, "PB", size) + 14 + icon;
+   247→    rrect(x, cy - 6.5, w, 13, 6.5, st.fill);
+   248→    if (st.border) {
+   249→      doc.lineWidth(0.8).dash(2, { space: 1.6 });
+   250→      doc.roundedRect(x, cy - 6.5, w, 13, 6.5).stroke(st.border);
+   251→      doc.undash();
+   252→    }
+   253→    if (icon) { // tiny clock icon
+   254→      const ix = x + 9;
+   255→      doc.lineWidth(0.8).lineCap("round").strokeColor(st.text);
+   256→      doc.circle(ix, cy, 2.8).stroke();
+   257→      doc.moveTo(ix, cy).lineTo(ix, cy - 1.8).stroke();
+   258→      doc.moveTo(ix, cy).lineTo(ix + 1.5, cy + 0.6).stroke();
+   259→    }
+   260→    text(icon ? x + (w + icon) / 2 : x + w / 2, cy + 2.3, st.label, "PB", size, st.text, "c");
+   261→    return w;
+   262→  };
+   263→
+   264→  // ------------------------------------------------------------------ page chrome
+   265→  let page = 0;
+   266→  const tableHeader = (top: number): number => {
+   267→    rrect(M, top, CW, 34, 10, INK);
+   268→    text(M + 16, top + 21, "Skill", "PB", 8.5, WHITE);
+   269→    text(RX - 10, top + 21, "Rating", "PB", 8.5, ACCENT_ON_DARK);
+   270→    text(LPX, top + 21, "Last performed", "PB", 8.5, ACCENT_ON_DARK);
+   271→    return top + 40;
+   272→  };
+   273→  const footer = (last: boolean) => {
+   274→    line(M, H - 56, W - M, H - 56, LINE, 0.6);
+   275→    if (last) {
+   276→      wrap(data.footerNote, "P", 6.6, CW - 70).forEach((ln, k) => text(M, H - 44 + k * 9, ln, "P", 6.6, SLATE));
+   277→      let gen = `Generated ${data.generatedOn} by VaultVerify.`;
+   278→      if (data.sampleNotice) gen += "   " + data.sampleNotice;
+   279→      text(M, H - 44 + 2 * 9, gen, "PM", 6.6, TEAL);
+   280→    } else {
+   281→      text(M, H - 40, `VaultVerify   Skills Checklist: ${roleLine}`, "PM", 6.8, TEAL);
+   282→    }
+   283→    text(W - M, H - 40, `Page ${page} of ${total}`, "PM", 6.8, SLATE, "r");
+   284→  };
+   285→  const slimHeader = (): number => {
+   286→    doc.rect(0, 0, W, 52).fill(DEEP);
+   287→    headerRings(52);
+   288→    doc.rect(0, 52, W, 2).fill(LEAF);
+   289→    rrect(M, 11, 30, 30, 8, "#F3F8F4");
+   290→    doc.image(logo, M + 3, 14, { width: 24, height: 24 });
+   291→    text(M + 40, 31, "VaultVerify", "PB", 12.5, WHITE);
+   292→    text(W - M, 31, `Skills Checklist: ${roleLine}`, "PM", 8.5, WHITE, "r");
+   293→    return 72;
+   294→  };
+   295→  const newPage = (): number => {
+   296→    footer(false);
+   297→    doc.addPage();
+   298→    page++;
+   299→    return slimHeader();
+   300→  };
+   301→
+   302→  // ================================================================== PAGE 1
+   303→  doc.addPage();
+   304→  page = 1;
+   305→
+   306→  // ---- brand header (logo LEFT, platform name next to it)
+   307→  const HB = 104;
+   308→  doc.rect(0, 0, W, HB).fill(DEEP);
+   309→  headerRings(HB);
+   310→  doc.rect(0, HB, W, 3).fill(LEAF);
+   311→  rrect(M, 17, 54, 54, 14, "#F3F8F4");
+   312→  doc.image(logo, M + 4, 21, { width: 46, height: 46 });
+   313→  text(M + 68, 43, "VaultVerify", "PB", 21, WHITE);
+   314→  text(M + 69, 60, "References, verified. Skills, proven.", "PL", 8.5, "#BFE3C7");
+   315→  text(W - M, 40, "Skills Checklist", "PM", 15, WHITE, "r");
+   316→  text(W - M, 56, "Self-assessment completed by the candidate", "PL", 8, "#BFD6D3", "r");
+   317→
+   318→  // ---- candidate card (overlaps the header)
+   319→  const CT = 78;
+   320→  const CH = 92;
+   321→  [0.025, 0.03, 0.04].forEach((a, i) => { // faux soft shadow
+   322→    alpha(() => doc.roundedRect(M - 3 + i, CT + 1 + (2 - i) * 1.2, CW + 6 - 2 * i, CH + 2, 16).fill([10, 46, 51] as any), a);
+   323→  });
+   324→  rrect(M, CT, CW, CH, 14, WHITE, LINE);
+   325→  doc.circle(M + 36, CT + 36, 20).fill(TEAL);
+   326→  text(M + 36, CT + 43, cand.name.slice(0, 1).toUpperCase(), "PB", 18, WHITE, "c");
+   327→  // Name: shrink to fit left of the divider (max 160pt); ellipsis only as a last resort
+   328→  let nameTxt = cand.name;
+   329→  let nameSize = 21;
+   330→  while (width(nameTxt, "PB", nameSize) > 160 && nameSize > 13) nameSize--;
+   331→  while (width(nameTxt, "PB", nameSize) > 160 && nameTxt.length > 4) nameTxt = nameTxt.slice(0, -4).trimEnd() + "...";
+   332→  text(M + 68, CT + 34, nameTxt, "PB", nameSize, INK);
+   333→  let cx = M + 68;
+   334→  for (const chip of [cand.jobTitle, cand.specialty, cand.profession]) {
+   335→    const w = width(chip, "PM", 7.5) + 14;
+   336→    if (cx + w > M + 232) break; // never run into the divider
+   337→    rrect(cx, CT + 44, w, 16, 8, MINT2);
+   338→    text(cx + w / 2, CT + 55.2, chip, "PM", 7.5, TEAL, "c");
+   339→    cx += w + 5;
+   340→  }
+   341→  line(M + 240, CT + 16, M + 240, CT + CH - 16, LINE, 0.8);
+   342→  const meta = (x: number, top: number, label: string, value: string) => {
+   343→    text(x, top, label, "P", 6.8, SLATE);
+   344→    text(x, top + 12, value, "PM", 8, INK);
+   345→  };
+   346→  const mx = M + 256;
+   347→  meta(mx, CT + 30, "Email", cand.email);
+   348→  meta(mx + 150, CT + 30, "Self-reported experience", cand.experience);
+   349→  meta(mx, CT + 62, "Completed", cand.completedOn);
+   350→  meta(mx + 68, CT + 62, "Valid until", cand.validUntil);
+   351→  meta(mx + 160, CT + 62, "Source", cand.source);
+   352→
+   353→  // ---- Summary at a glance (restrained white card; only the two bars carry colour)
+   354→  const ST0 = CT + CH + 16;
+   355→  const SUM_H = 122;
+   356→  rrect(M, ST0, CW, SUM_H, 14, WHITE, LINE);
+   357→  text(M + 20, ST0 + 24, "Summary at a glance", "PB", 9.5, TEAL);
+   358→  const stats: [string, string, string][] = [
+   359→    [String(N), "", "Skills assessed"],
+   360→    [AVG.toFixed(1), " / 4", "Average rating"],
+   361→    [String(PROF), `  ${Math.round((100 * PROF) / N)}%`, "Rated Proficient"],
+   362→    [String(RECENT), `  ${Math.round((100 * RECENT) / N)}%`, "Used within 3 months"],
+   363→  ];
+   364→  const colw = (CW - 40) / 4;
+   365→  stats.forEach(([big, sub, lab], i) => {
+   366→    const sx = M + 20 + i * colw;
+   367→    if (i) line(sx - 12, ST0 + 38, sx - 12, ST0 + 76, LINE, 0.8);
+   368→    text(sx, ST0 + 58, big, "PB", 20, INK);
+   369→    text(sx + width(big, "PB", 20) + 2, ST0 + 58, sub, "PM", 8, SLATE);
+   370→    text(sx, ST0 + 72, lab, "P", 7.4, SLATE);
+   371→  });
+   372→  line(M + 20, ST0 + 84, W - M - 20, ST0 + 84, LINE, 0.8);
+   373→
+   374→  /** Pill-shaped stacked bar. Counts are printed inside segments wide enough to hold them. */
+   375→  const stacked = (x: number, top: number, w: number, h: number, parts: [number, string, string][]) => {
+   376→    const tot = parts.reduce((a, p) => a + p[0], 0);
+   377→    doc.save();
+   378→    doc.roundedRect(x, top, w, h, h / 2).clip();
+   379→    let cx_ = x;
+   380→    for (const [n, col, tcol] of parts) {
+   381→      if (!n) continue;
+   382→      const sw = (w * n) / tot;
+   383→      doc.rect(cx_, top, sw, h).fill(col);
+   384→      line(cx_, top, cx_, top + h, WHITE, 1.2);
+   385→      if (sw > 15) text(cx_ + sw / 2, top + h / 2 + 2.3, String(n), "PB", 6.4, tcol, "c");
+   386→      cx_ += sw;
+   387→    }
+   388→    doc.restore();
+   389→  };
+   390→  const bw = (CW - 40 - 28) / 2;
+   391→  text(M + 20, ST0 + 98, "Rating mix", "PM", 7, SLATE);
+   392→  stacked(M + 20, ST0 + 103, bw, 10, [[cnt[4], LVL[4], WHITE], [cnt[3], LVL[3], WHITE], [cnt[2], LVL[2], WHITE], [cnt[1], LVL[1], WHITE]]);
+   393→  text(M + 20 + bw + 28, ST0 + 98, "Last performed", "PM", 7, SLATE);
+   394→  stacked(M + 20 + bw + 28, ST0 + 103, bw, 10, [
+   395→    [rcnt.within_3_months, REC.within_3_months.bar, WHITE],
+   396→    [rcnt.within_6_months, REC.within_6_months.bar, WHITE],
+   397→    [rcnt.over_6_months, REC.over_6_months.bar, "#3F4B5A"],
+   398→    [rcnt.na, REC.na.bar, "#3F4B5A"],
+   399→  ]);
+   400→
+   401→  // ---- Category overview
+   402→  const OT = ST0 + SUM_H + 14;
+   403→  const OH = 38 + cats.length * 17 + 22;
+   404→  rrect(M, OT, CW, OH, 14, MINT);
+   405→  text(M + 18, OT + 22, "Category overview", "PB", 9.5, TEAL);
+   406→  text(W - M - 18, OT + 22, "Average rating and recent activity by category", "PL", 7.4, SLATE, "r");
+   407→  let yy = OT + 44;
+   408→  for (const cat of cats) {
+   409→    const rs = (cat.skills.filter((s) => s.rating != null) as { rating: Rating }[]).map((s) => s.rating);
+   410→    const avg = rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0;
+   411→    const pr = rs.filter((r) => r === 4).length;
+   412→    const rc = cat.skills.filter((s) => s.lastPerformed === "within_3_months").length;
+   413→    let label = cat.shortName || cat.name;
+   414→    while (width(label, "PM", 7.6) > 150 && label.length > 4) label = label.slice(0, -4).trimEnd() + "...";
+   415→    text(M + 18, yy + 4, label, "PM", 7.6, INK);
+   416→    const tx = M + 176;
+   417→    const tw = 110;
+   418→    doc.roundedRect(tx, yy - 3, tw, 6, 3).fill("#C9DDD0");
+   419→    doc.roundedRect(tx, yy - 3, (tw * avg) / 4, 6, 3).fill(LEAF);
+   420→    text(tx + tw + 10, yy + 4, avg.toFixed(1), "PB", 7.6, LEAF_D);
+   421→    text(M + 330, yy + 4, `${pr} of ${cat.skills.length} Proficient`, "P", 7.2, SLATE);
+   422→    text(W - M - 18, yy + 4, `${rc} of ${cat.skills.length} recent`, "P", 7.2, SLATE, "r");
+   423→    yy += 17;
+   424→  }
+   425→  text(M + 18, OT + OH - 9, "Recent means last performed within 3 months.", "PL", 6.8, SLATE);
+   426→
+   427→  // ---- Legends
+   428→  const LT = OT + OH + 14;
+   429→  text(M, LT + 8, "Rating scale", "PB", 8.5, INK);
+   430→  let lx = M + 74;
+   431→  ([1, 2, 3, 4] as Rating[]).forEach((lv) => {
+   432→    ring(lx + 6, LT + 5, lv, 6.4, 2.0);
+   433→    text(lx + 17, LT + 8, `${lv}  ${LVL_LEGEND[lv]}`, "P", 7, SLATE);
+   434→    lx += [128, 78, 92, 80][lv - 1];
+   435→  });
+   436→  text(M, LT + 30, "Last performed", "PB", 8.5, INK);
+   437→  let lx2 = M + 74;
+   438→  for (const key of REC_ORDER) lx2 += recChip(lx2, LT + 27, key, 6.2) + 10;
+   439→
+   440→  // ---- Skills table
+   441→  let y = tableHeader(LT + 46);
+   442→  for (const cat of cats) {
+   443→    const skills = cat.skills;
+   444→    // Keep a category band together with at least its first two rows
+   445→    const need = 19 + skills.slice(0, 2).reduce((a, s) => a + 10 + 9 * wrap(s.name, "P", 7.9, SKILL_W).length, 0) + 6;
+   446→    if (y + need > LIMIT) y = tableHeader(newPage());
+   447→    const band = (continued = false) => {
+   448→      rrect(M, y, CW, 19, 6, MINT);
+   449→      text(M + 16, y + 13, cat.name + (continued ? " (continued)" : ""), "PB", 8.3, TEAL);
+   450→      y += 19;
+   451→    };
+   452→    band();
+   453→    for (const s of skills) {
+   454→      const ln = wrap(s.name, "P", 7.9, SKILL_W);
+   455→      const rh = 12 + 9 * ln.length;
+   456→      if (y + rh > LIMIT) { y = tableHeader(newPage()); band(true); }
+   457→      ln.forEach((l, k) => text(M + 16, y + 13 + k * 9, l, "P", 7.9, INK));
+   458→      // dotted leader from the end of the name to the rating
+   459→      const lw_ = width(ln[ln.length - 1], "P", 7.9);
+   460→      const ly = y + rh / 2 + 3.2 + (ln.length - 1) * 4.5;
+   461→      doc.lineWidth(0.7).lineCap("round").dash(0.6, { space: 3.2 });
+   462→      doc.moveTo(M + 16 + lw_ + 8, ly).lineTo(RX - 14, ly).stroke("#D3DDD8");
+   463→      doc.undash();
+   464→      if (s.rating != null) {
+   465→        ring(RX, y + rh / 2, s.rating);
+   466→        levelChip(RX + 14, y + rh / 2, s.rating);
+   467→      } else {
+   468→        ringNA(RX, y + rh / 2);
+   469→      }
+   470→      recChip(LPX, y + rh / 2, s.lastPerformed);
+   471→      line(M + 10, y + rh, W - M - 10, y + rh, LINE, 0.6);
+   472→      y += rh;
+   473→    }
+   474→    y += 5;
+   475→  }
+   476→
+   477→  // ---- Additional questions (yes/no + free text)
+   478→  const ensure = (h: number) => { if (y + h > LIMIT) y = newPage(); };
+   479→  /** Segmented Yes | No toggle. Selected side is filled (green = Yes, slate = No). */
+   480→  const seg = (x: number, top: number, ans: boolean) => {
+   481→    const w = 100;
+   482→    const h = 18;
+   483→    rrect(x, top, w, h, 9, "#E9EFEC");
+   484→    const col = ans ? LEAF_D : SLATE;
+   485→    const sx = ans ? x : x + 48;
+   486→    const [labOn, labOff, onX, offX] = ans ? ["Yes", "No", x + 26, x + 76] : ["No", "Yes", x + 74, x + 24];
+   487→    alpha(() => doc.roundedRect(sx - 2, top - 2, 54, h + 4, 11).fill(col), 0.18);
+   488→    rrect(sx, top, 52, h, 9, col);
+   489→    doc.circle(ans ? sx + 9 : sx + 43, top + 9, 2.2).fill(WHITE);
+   490→    text(onX + (ans ? 4 : -4), top + 12.2, labOn, "PB", 7.8, WHITE, "c");
+   491→    text(offX, top + 12.2, labOff, "PM", 7.6, "#8A9A96", "c");
+   492→  };
+   493→
+   494→  if (data.questions && data.questions.length) {
+   495→    ensure(34 + 19 + 30);
+   496→    y += 6;
+   497→    rrect(M, y, CW, 34, 10, INK);
+   498→    text(M + 16, y + 21, "Additional questions", "PB", 8.5, WHITE);
+   499→    text(W - M - 16, y + 21, "Answer", "PB", 8.5, ACCENT_ON_DARK, "r");
+   500→    y += 40;
+   501→    for (const group of data.questions) {
+   502→      ensure(19 + 30);
+   503→      rrect(M, y, CW, 19, 6, MINT);
+   504→      text(M + 16, y + 13, group.category, "PB", 8.3, TEAL);
+   505→      y += 19;
+   506→      for (const item of group.items) {
+   507→        if (item.type === "yes_no") {
+   508→          const ln = wrap(item.question, "P", 7.9, 360);
+   509→          const rh = Math.max(28, 14 + 9 * ln.length);
+   510→          ensure(rh);
+   511→          ln.forEach((l, k) => text(M + 16, y + rh / 2 + 3 - (ln.length - 1) * 4.5 + k * 9, l, "P", 7.9, INK));
+   512→          seg(W - M - 10 - 100, y + rh / 2 - 9, item.answer === true);
+   513→          line(M + 10, y + rh, W - M - 10, y + rh, LINE, 0.6);
+   514→          y += rh;
+   515→        } else {
+   516→          const ql = wrap(item.question, "P", 7.9, CW - 32);
+   517→          const answer = (item.answer || "").trim() || "No answer provided";
+   518→          const al = wrap(answer, "PM", 8, CW - 32 - 28);
+   519→          const bh = 14 + 10.5 * al.length;
+   520→          ensure(8 + 10 * ql.length + bh + 10);
+   521→          y += 8;
+   522→          ql.forEach((l, k) => text(M + 16, y + 7 + k * 10, l, "P", 7.9, SLATE));
+   523→          y += 10 * ql.length + 2;
+   524→          rrect(M + 16, y, CW - 32, bh, 8, "#F7FAF8", "#D5E2DB", 0.9);
+   525→          doc.roundedRect(M + 16, y, 3.5, bh, 1.75).fill(LEAF);
+   526→          al.forEach((l, k) => text(M + 30, y + 14 + k * 10.5, l, "PM", 8, INK));
+   527→          y += bh + 8;
+   528→        }
+   529→      }
+   530→      y += 5;
+   531→    }
+   532→  }
+   533→
+   534→  // ---- Candidate attestation (checkboxes + signature)
+   535→  const att = data.attestation;
+   536→  const AH = 214;
+   537→  if (y + 8 + AH > LIMIT + 14) y = newPage();
+   538→  y += 10;
+   539→  rrect(M, y, CW, AH, 14, MINT);
+   540→  doc.roundedRect(M, y, 4, AH, 2).fill(LEAF);
+   541→  text(M + 22, y + 26, "Candidate attestation", "PB", 11, TEAL);
+   542→  text(M + 22, y + 40, "Please read and confirm before this checklist is shared.", "PL", 7.8, SLATE);
+   543→  const checkbox = (x: number, top: number, checked: boolean) => {
+   544→    if (checked) alpha(() => doc.roundedRect(x - 3, top - 3, 20, 20, 7).fill([77, 171, 87] as any), 0.2);
+   545→    rrect(x, top, 14, 14, 4, checked ? LEAF_D : WHITE, LEAF_D, 1.2);
+   546→    if (checked) {
+   547→      doc.lineWidth(1.8).lineCap("round").lineJoin("round").strokeColor(WHITE);
+   548→      doc.moveTo(x + 3.4, top + 7.4).lineTo(x + 6, top + 10).lineTo(x + 11, top + 4).stroke();
+   549→    }
+   550→  };
+   551→  let cy_ = y + 60;
+   552→  for (const st of att.statements) {
+   553→    checkbox(M + 22, cy_ - 1, st.accepted);
+   554→    wrap(st.text, "P", 7.9, CW - 90).forEach((l, k) => text(M + 46, cy_ + 9 + k * 10.5, l, "P", 7.9, INK));
+   555→    cy_ += 40;
+   556→  }
+   557→  const sy = y + 148;
+   558→  const sx = M + 22;
+   559→  const sigLine = (x1: number, x2: number) => line(x1, sy + 22, x2, sy + 22, "#9DB5AC", 0.9);
+   560→  sigLine(sx, sx + 215);
+   561→  const hasSig = !!(att.signatureName || att.signatureImage);
+   562→  if (att.signatureImage) {
+   563→    // Drawn / uploaded signature: embed the image above the line (additive extension).
+   564→    try {
+   565→      const b64 = String(att.signatureImage).replace(/^data:image\/\w+;base64,/, "");
+   566→      doc.image(Buffer.from(b64, "base64"), sx + 6, sy - 10, { fit: [200, 30], align: "left" });
+   567→    } catch { /* ignore malformed image data; the line stays blank */ }
+   568→  } else if (att.signatureName) {
+   569→    text(sx + 6, sy + 16, att.signatureName, "Sig", 24, INK);
+   570→  }
+   571→  text(sx, sy + 34, "Candidate signature", "P", 6.8, SLATE);
+   572→  if (hasSig) text(sx + 215, sy + 34, "Signed electronically", "PM", 6.8, LEAF_D, "r");
+   573→  sigLine(sx + 245, sx + 355);
+   574→  text(sx + 249, sy + 15, att.printedName ?? "", "PM", 9, INK);
+   575→  text(sx + 245, sy + 34, "Printed name", "P", 6.8, SLATE);
+   576→  sigLine(sx + 380, sx + 480);
+   577→  text(sx + 384, sy + 15, att.signedOn ?? "", "PM", 9, INK);
+   578→  text(sx + 380, sy + 34, "Date", "P", 6.8, SLATE);
+   579→  y += AH + 8;
+   580→
+   581→  footer(true);
+   582→  return new Promise((resolve, reject) => {
+   583→    doc.on("end", () => resolve({ buffer: Buffer.concat(chunks), pages: page }));
+   584→    doc.on("error", reject);
+   585→    doc.end();
+   586→  });
+   587→}
+   588→
