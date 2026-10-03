@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { buildChecklistPdf, type ChecklistPdfData } from "@/lib/bts/checklistPdf";
+import type { ChecklistCompletion, ChecklistAccount } from "@prisma/client";
 
 // ── GET /api/checklist/pdf — branded checklist PDF ──
 // ?share=<token>                    public via share link (validates without consuming one-time)
@@ -11,8 +12,8 @@ import { buildChecklistPdf, type ChecklistPdfData } from "@/lib/bts/checklistPdf
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   try {
-    let account: { name: string; email: string; title: string } | null = null;
-    let completion = null;
+    let account: ChecklistAccount | null = null;
+    let completion: ChecklistCompletion | null = null;
 
     const shareToken = sp.get("share");
     const completionId = sp.get("completion");
@@ -44,13 +45,21 @@ export async function GET(req: NextRequest) {
 
     if (!account || !completion) return new NextResponse("Not found", { status: 404 });
 
-    const answers = JSON.parse(completion.answers || "[]") as { category: string; skill: string; questionType: string; value: number | string | null; na: boolean; highRisk: boolean }[];
+    type RawAnswer = { category: string; skill: string; questionType: string; value: number | string | null; na: boolean; highRisk?: boolean; lastPerformed?: string | null };
+    const safeParse = <T,>(raw: string | null | undefined, fallback: T): T => {
+      try { const v = JSON.parse(raw || ""); return (v ?? fallback) as T; } catch { return fallback; }
+    };
+    const answers = safeParse<RawAnswer[]>(completion.answers, []);
     const grouped: ChecklistPdfData["categories"] = [];
     for (const a of answers) {
       let cat = grouped.find((g) => g.name === a.category);
       if (!cat) { cat = { name: a.category, items: [] }; grouped.push(cat); }
-      cat.items.push({ skill: a.skill, questionType: a.questionType, value: a.value, na: a.na, highRisk: a.highRisk });
+      cat.items.push({ skill: a.skill, questionType: a.questionType, value: a.value, na: a.na, highRisk: !!a.highRisk, lastPerformed: a.lastPerformed ?? null });
     }
+    const additional = safeParse<ChecklistPdfData["additional"]>(completion.additional, []);
+    const attestation = completion.attestation
+      ? safeParse<ChecklistPdfData["attestation"]>(completion.attestation, null)
+      : null;
 
     const bytes = await buildChecklistPdf({
       account: { name: account.name, email: account.email, title: account.title },
@@ -65,6 +74,8 @@ export async function GET(req: NextRequest) {
         expiresAt: completion.expiresAt,
       },
       categories: grouped,
+      additional,
+      attestation,
     });
 
     const fname = `Skills-Checklist-${completion.specialtyLabel || completion.specialty}-${account.name.replace(/[^a-z0-9]+/gi, "-")}.pdf`;

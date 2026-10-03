@@ -1,0 +1,452 @@
+    36→    36→  profession: string; discipline: string; specialty: string;
+    37→    37→  yrsOverall: number; yrsSpecialty: number; yrsOverallStart: string; yrsSpecialtyStart: string;
+    38→    38→}
+    39→    39→interface CompanyRow {
+    40→    40→  id: string; name: string; slug: string; logoText: string; candidates: number;
+    41→    41→  primaryColor: string; accentColor: string; creditsGranted: number; creditsUsed: number; creditsRemaining: number;
+    42→    42→}
+    43→    43→interface Overview {
+    44→    44→  stats: { agencies: number; candidates: number; requests: number; completed: number; responses: number; templates: number; openFlags: number; notifications: number; pendingChecklistRequests: number };
+    45→    45→  agencies: { id: string; name: string; slug: string; logoText: string; candidates: number; primaryColor: string; accentColor: string }[];
+    46→    46→  sets: TemplateSet[];
+    47→    47→  users: UserRow[];
+    48→    48→  candidateProfiles: CandidateProfileRow[];
+    49→    49→  companies: CompanyRow[];
+    50→    50→}
+    51→    51→
+    52→    52→interface ChecklistRequestRow {
+    53→    53→  id: string;
+    54→    54→  account: { name: string; email: string; title: string };
+    55→    55→  profession: string; jobTitle: string; specialty: string;
+    56→    56→  status: string; requestedAt: string; decidedAt: string | null;
+    57→    57→}
+    58→    58→
+    59→    59→type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "skills";
+    60→    60→
+    61→    61→const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skill Name", "Question Type", "Has N/A Option"];
+    62→    62→
+    63→    63→async function parseWorkbook(file: File): Promise<{ rows: ImportRow[]; sheetName: string; headerFound: boolean }> {
+    64→    64→  const buf = await file.arrayBuffer();
+    65→    65→  const wb = XLSX.read(buf, { type: "array" });
+    66→    66→  const sheetName = wb.SheetNames.find((n) => /skill/i.test(n)) ?? wb.SheetNames[0];
+    67→    67→  const ws = wb.Sheets[sheetName];
+    68→    68→  const aoa: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
+    69→    69→  // locate header row within the first 12 rows
+    70→    70→  let headerIdx = -1;
+    71→    71→  for (let i = 0; i < Math.min(aoa.length, 12); i++) {
+    72→    72→    const cells = (aoa[i] ?? []).map((c) => String(c ?? "").trim().toLowerCase());
+    73→    73→    if (cells.includes("skill name") && cells.includes("profession")) { headerIdx = i; break; }
+    74→    74→  }
+    75→    75→  if (headerIdx === -1) return { rows: [], sheetName, headerFound: false };
+    76→    76→  const headers = (aoa[headerIdx] ?? []).map((c) => String(c ?? "").trim());
+    77→    77→  const idx = (name: string) => headers.findIndex((h) => h.toLowerCase() === name.toLowerCase());
+    78→    78→  const colMap = { profession: idx("Profession"), jobTitle: idx("Job Title"), specialty: idx("Specialty"), category: idx("Category"), skillName: idx("Skill Name"), questionType: idx("Question Type"), hasNA: idx("Has N/A Option") };
+    79→    79→  const rows: ImportRow[] = [];
+    80→    80→  for (const cells of aoa.slice(headerIdx + 1)) {
+    81→    81→    const get = (i: number) => (i >= 0 ? String(cells[i] ?? "").trim() : "");
+    82→    82→    const r = { profession: get(colMap.profession), jobTitle: get(colMap.jobTitle), specialty: get(colMap.specialty), category: get(colMap.category), skillName: get(colMap.skillName), questionType: get(colMap.questionType), hasNA: get(colMap.hasNA).toLowerCase() === "yes" };
+    83→    83→    if (!r.profession && !r.jobTitle && !r.specialty && !r.category && !r.skillName) continue; // skip fully blank rows
+    84→    84→    rows.push(r);
+    85→    85→  }
+    86→    86→  return { rows, sheetName, headerFound: true };
+    87→    87→}
+    88→    88→
+    89→    89→const NAV: [Section, string, typeof Users][] = [
+    90→    90→  ["requests", "Requests", Hourglass],
+    91→    91→  ["users", "User management", Users],
+    92→    92→  ["companies", "Company management", Building2],
+    93→    93→  ["candidates", "Candidate management", BookUser],
+    94→    94→  ["credits", "Credit management", Wallet],
+    95→    95→  ["skills", "Skills & imports", Database],
+    96→    96→];
+    97→    97→
+    98→    98→const th = "px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-jade-muted";
+    99→    99→const td = "px-3 py-2.5 text-sm text-jade-ink border-t border-vault-border/60";
+   100→   100→
+   101→   101→export function SuperAdmin({ onExit }: { onExit: () => void }) {
+   102→   102→  const { toast } = useToast();
+   103→   103→  const [code, setCode] = useState("");
+   104→   104→  const [data, setData] = useState<Overview | null>(null);
+   105→   105→  const [loading, setLoading] = useState(false);
+   106→   106→  const [section, setSection] = useState<Section>("requests");
+   107→   107→  const [cqRequests, setCqRequests] = useState<ChecklistRequestRow[] | null>(null);
+   108→   108→  const [openSet, setOpenSet] = useState<string | null>(null);
+   109→   109→  const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string } | null>(null);
+   110→   110→  const [importing, setImporting] = useState(false);
+   111→   111→  const fileRef = useRef<HTMLInputElement>(null);
+   112→   112→
+   113→   113→  const call = useCallback(async (payload: Record<string, unknown>) => {
+   114→   114→    const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, ...payload }) });
+   115→   115→    const d = await res.json();
+   116→   116→    if (!res.ok || !d.ok) throw new Error(d.error ?? "Request failed");
+   117→   117→    return d;
+   118→   118→  }, [code]);
+   119→   119→
+   120→   120→  const auth = async (c?: string) => {
+   121→   121→    const useCode = c ?? code;
+   122→   122→    if (!useCode.trim()) return toast({ title: "Enter the superadmin code.", variant: "destructive" });
+   123→   123→    setLoading(true);
+   124→   124→    try {
+   125→   125→      const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", code: useCode }) });
+   126→   126→      const d = await res.json();
+   127→   127→      if (!res.ok || !d.ok) throw new Error(d.error ?? "Invalid code");
+   128→   128→      setCode(useCode);
+   129→   129→      setData(d);
+   130→   130→    } catch (e) {
+   131→   131→      toast({ title: e instanceof Error ? e.message : "Sign-in failed", variant: "destructive" });
+   132→   132→    } finally {
+   133→   133→      setLoading(false);
+   134→   134→    }
+   135→   135→  };
+   136→   136→
+   137→   137→  const refresh = async () => {
+   138→   138→    try { setData(await call({ action: "auth" })); } catch { /* keep old data */ }
+   139→   139→  };
+   140→   140→
+   141→   141→  const loadRequests = async () => {
+   142→   142→    try { const d = await call({ action: "requests" }); setCqRequests(d.requests); } catch { /* keep old */ }
+   143→   143→  };
+   144→   144→
+   145→   145→  const decide = async (id: string, approve: boolean) => {
+   146→   146→    try {
+   147→   147→      await call({ action: "decide", id, approve });
+   148→   148→      toast({ title: approve ? "Request approved" : "Request declined", description: approve ? "The candidate can now complete the checklist." : "The candidate will see the decision in their portal." });
+   149→   149→      await Promise.all([refresh(), loadRequests()]);
+   150→   150→    } catch { toast({ title: "Decision failed", variant: "destructive" }); }
+   151→   151→  };
+   152→   152→
+   153→   153→  const onFile = async (f: File | null) => {
+   154→   154→    if (!f) return;
+   155→   155→    try {
+   156→   156→      const { rows, sheetName, headerFound } = await parseWorkbook(f);
+   157→   157→      if (!headerFound) {
+   158→   158→        setPending(null);
+   159→   159→        return toast({ title: "Headers not found", description: `Sheet "${sheetName}" must contain the 7 MyZipVault columns (Profession … Has N/A Option).`, variant: "destructive" });
+   160→   160→      }
+   161→   161→      const { errors, clean } = validateRows(rows);
+   162→   162→      setPending({ rows, clean, errors, fileName: f.name });
+   163→   163→    } catch {
+   164→   164→      toast({ title: "Could not read that file", description: "Save the workbook as .xlsx and try again.", variant: "destructive" });
+   165→   165→    }
+   166→   166→  };
+   167→   167→
+   168→   168→  const runImport = async () => {
+   169→   169→    if (!pending) return;
+   170→   170→    setImporting(true);
+   171→   171→    try {
+   172→   172→      const d = await call({ action: "import", rows: pending.rows });
+   173→   173→      toast({ title: `Imported ${d.created} new · updated ${d.updated}`, description: d.errors?.length ? `${d.errors.length} row(s) rejected — see report.` : "All rows passed validation." });
+   174→   174→      setPending(null);
+   175→   175→      if (fileRef.current) fileRef.current.value = "";
+   176→   176→      await refresh();
+   177→   177→    } catch (e) {
+   178→   178→      toast({ title: e instanceof Error ? e.message : "Import failed", variant: "destructive" });
+   179→   179→    } finally {
+   180→   180→      setImporting(false);
+   181→   181→    }
+   182→   182→  };
+   183→   183→
+   184→   184→  const toggleRow = async (row: TemplateRow) => {
+   185→   185→    try { await call({ action: "toggle", id: row.id, active: !row.active }); await refresh(); } catch { toast({ title: "Update failed", variant: "destructive" }); }
+   186→   186→  };
+   187→   187→
+   188→   188→  const deleteSet = async (s: TemplateSet) => {
+   189→   189→    try {
+   190→   190→      const d = await call({ action: "deleteSet", profession: s.profession, jobTitle: s.jobTitle, specialty: s.specialty });
+   191→   191→      toast({ title: `Deleted ${d.deleted} template rows`, description: `${s.specialty} for ${s.jobTitle}` });
+   192→   192→      await refresh();
+   193→   193→    } catch { toast({ title: "Delete failed", variant: "destructive" }); }
+   194→   194→  };
+   195→   195→
+   196→   196→  // ── Gate ──
+   197→   197→  if (!data) {
+   198→   198→    return (
+   199→   199→      <div className="vv-page flex min-h-screen items-center justify-center px-4">
+   200→   200→        <div className="w-full max-w-md rounded-2xl border border-vault-border bg-white vv-card-shadow p-8">
+   201→   201→          <div className="flex flex-col items-center text-center">
+   202→   202→            <VaultMark size={44} />
+   203→   203→            <h1 className="mt-4 text-xl font-semibold text-jade-ink">Super Admin</h1>
+   204→   204→            <p className="mt-1 text-sm text-jade-muted">Platform control: users, companies, candidate data, credits, skills.</p>
+   205→   205→          </div>
+   206→   206→          <div className="mt-6">
+   207→   207→            <Label htmlFor="sa-code" className="text-jade-ink/80">Access code</Label>
+   208→   208→            <Input
+   209→   209→              id="sa-code"
+   210→   210→              type="password"
+   211→   211→              value={code}
+   212→   212→              onChange={(e) => setCode(e.target.value)}
+   213→   213→              onKeyDown={(e) => e.key === "Enter" && auth()}
+   214→   214→              placeholder="Superadmin code"
+   215→   215→              className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
+   216→   216→            />
+   217→   217→            <p className="mt-2 text-xs text-jade-muted">
+   218→   218→              Sandbox demo code:{" "}
+   219→   219→              <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => auth("zipvault2026")}>
+   220→   220→                zipvault2026
+   221→   221→              </button>
+   222→   222→            </p>
+   223→   223→          </div>
+   224→   224→          <Button onClick={() => auth()} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   225→   225→            {loading ? "Checking…" : "Unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
+   226→   226→          </Button>
+   227→   227→          <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
+   228→   228→            ← Back to site
+   229→   229→          </button>
+   230→   230→        </div>
+   231→   231→      </div>
+   232→   232→    );
+   233→   233→  }
+   234→   234→
+   235→   235→  const s = data.stats;
+   236→   236→  const stats: [string, string | number, string?][] = [
+   237→   237→    ["Companies", s.agencies],
+   238→   238→    ["Users", data.users.length],
+   239→   239→    ["Ref requests", s.requests],
+   240→   240→    ["Completed refs", s.completed],
+   241→   241→    ["Skill templates", s.templates],
+   242→   242→    ["Open flags", s.openFlags, s.openFlags > 0 ? "text-rose-600" : undefined],
+   243→   243→    ["Notifications", s.notifications],
+   244→   244→  ];
+   245→   245→
+   246→   246→  const badgeFor = (sec: Section): number =>
+   247→   247→    sec === "requests" ? s.pendingChecklistRequests : 0;
+   248→   248→
+   249→   249→  const navList = (
+   250→   250→    <nav className="space-y-1">
+   251→   251→      {NAV.map(([sec, label, Icon]) => {
+   252→   252→        const active = section === sec;
+   253→   253→        const badge = badgeFor(sec);
+   254→   254→        return (
+   255→   255→          <button key={sec} type="button"
+   256→   256→            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); }}
+   257→   257→            className={cn(
+   258→   258→              "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
+   259→   259→              active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
+   260→   260→            )}>
+   261→   261→            <Icon className={cn("h-4 w-4 shrink-0", active && "text-verify-ink")} />
+   262→   262→            <span className="flex-1 text-left">{label}</span>
+   263→   263→            {badge > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{badge}</span>}
+   264→   264→          </button>
+   265→   265→        );
+   266→   266→      })}
+   267→   267→    </nav>
+   268→   268→  );
+   269→   269→
+   270→   270→  return (
+   271→   271→    <div className="vv-page min-h-screen">
+   272→   272→      {/* Header */}
+   273→   273→      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-white/85 backdrop-blur-xl">
+   274→   274→        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+   275→   275→          <div className="flex items-center gap-3">
+   276→   276→            <VaultMark size={32} />
+   277→   277→            <div className="leading-tight">
+   278→   278→              <p className="text-sm font-semibold text-jade-ink">
+   279→   279→                Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Super Admin</span>
+   280→   280→              </p>
+   281→   281→              <p className="text-[11px] text-jade-muted">Zipvault skills platform console</p>
+   282→   282→            </div>
+   283→   283→          </div>
+   284→   284→          <div className="flex items-center gap-2">
+   285→   285→            <Button variant="ghost" onClick={refresh} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">
+   286→   286→              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+   287→   287→            </Button>
+   288→   288→            <Button variant="ghost" onClick={onExit} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">Sign out</Button>
+   289→   289→          </div>
+   290→   290→        </div>
+   291→   291→      </header>
+   292→   292→
+   293→   293→      <div className="mx-auto flex max-w-7xl gap-6 px-4 pb-16 pt-8 sm:px-6">
+   294→   294→        {/* Sidebar (desktop) */}
+   295→   295→        <aside className="hidden w-60 shrink-0 lg:block">
+   296→   296→          <div className="sticky top-24 rounded-2xl border border-vault-border bg-white vv-card-shadow p-3">
+   297→   297→            <p className="flex items-center gap-1.5 px-3 pb-2 pt-1 text-[10px] font-bold uppercase tracking-widest text-[#8aa29c]">
+   298→   298→              <LayoutDashboard className="h-3 w-3" /> Console
+   299→   299→            </p>
+   300→   300→            {navList}
+   301→   301→          </div>
+   302→   302→        </aside>
+   303→   303→
+   304→   304→        {/* Main column */}
+   305→   305→        <main className="min-w-0 flex-1">
+   306→   306→          {/* Section switcher (mobile) */}
+   307→   307→          <div className="mb-6 flex gap-2 overflow-x-auto pb-1 lg:hidden">{navList}</div>
+   308→   308→
+   309→   309→          {/* Stats */}
+   310→   310→          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+   311→   311→            {stats.map(([label, value, tone]) => (
+   312→   312→              <div key={label} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-4">
+   313→   313→                <p className="text-[11px] font-medium uppercase tracking-wider text-jade-muted">{label}</p>
+   314→   314→                <p className={cn("mt-1 text-2xl font-bold text-jade-ink", tone)}>{value}</p>
+   315→   315→              </div>
+   316→   316→            ))}
+   317→   317→          </div>
+   318→   318→
+   319→   319→          {/* ── Requests ── */}
+   320→   320→          {section === "requests" && (
+   321→   321→            <div className="mt-8 space-y-3">
+   322→   322→              <div>
+   323→   323→                <h2 className="text-base font-semibold text-jade-ink">Candidate checklist requests</h2>
+   324→   324→                <p className="mt-1 text-sm text-jade-muted">
+   325→   325→                  Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year.
+   326→   326→                </p>
+   327→   327→              </div>
+   328→   328→              {!cqRequests && <div className="flex justify-center rounded-xl border border-vault-border bg-white vv-card-shadow p-10"><Spinner /></div>}
+   329→   329→              {cqRequests?.length === 0 && (
+   330→   330→                <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-10 text-center text-sm text-jade-muted">No requests yet.</div>
+   331→   331→              )}
+   332→   332→              {cqRequests?.map((r) => (
+   333→   333→                <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+   334→   334→                  <div>
+   335→   335→                    <p className="text-sm font-semibold text-jade-ink">
+   336→   336→                      {specialtyLabel(r.specialty)} <span className="text-xs font-normal text-jade-muted">· {r.jobTitle} · {r.profession}</span>
+   337→   337→                    </p>
+   338→   338→                    <p className="mt-0.5 text-xs text-jade-muted">
+   339→   339→                      {r.account.name} · {r.account.email} · requested {new Date(r.requestedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+   340→   340→                    </p>
+   341→   341→                  </div>
+   342→   342→                  {r.status === "PENDING" ? (
+   343→   343→                    <div className="flex gap-2">
+   344→   344→                      <Button size="sm" onClick={() => decide(r.id, true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   345→   345→                        <Check className="mr-1.5 h-3.5 w-3.5" /> Approve
+   346→   346→                      </Button>
+   347→   347→                      <Button size="sm" variant="ghost" onClick={() => decide(r.id, false)} className="border border-rose-300 text-rose-600 hover:bg-rose-50">
+   348→   348→                        <X className="mr-1.5 h-3.5 w-3.5" /> Decline
+   349→   349→                      </Button>
+   350→   350→                    </div>
+   351→   351→                  ) : (
+   352→   352→                    <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
+   353→   353→                      r.status === "APPROVED" ? "border-verify-green/40 text-verify-ink" : "border-rose-300 text-rose-600")}>
+   354→   354→                      {r.status === "APPROVED" ? "Approved" : "Declined"}
+   355→   355→                    </span>
+   356→   356→                  )}
+   357→   357→                </div>
+   358→   358→              ))}
+   359→   359→            </div>
+   360→   360→          )}
+   361→   361→
+   362→   362→          {/* ── User management ── */}
+   363→   363→          {section === "users" && (
+   364→   364→            <div className="mt-8 space-y-3">
+   365→   365→              <div>
+   366→   366→                <h2 className="text-base font-semibold text-jade-ink">User management</h2>
+   367→   367→                <p className="mt-1 text-sm text-jade-muted">Everyone with a platform login — candidate accounts, onboarding status and activity.</p>
+   368→   368→              </div>
+   369→   369→              <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
+   370→   370→                <table className="min-w-full text-left">
+   371→   371→                  <thead>
+   372→   372→                    <tr>
+   373→   373→                      {["Name", "Email", "Discipline", "Onboarding", "Checklists", "Requests", "Invites", "Joined"].map((h) => (
+   374→   374→                        <th key={h} className={th}>{h}</th>
+   375→   375→                      ))}
+   376→   376→                    </tr>
+   377→   377→                  </thead>
+   378→   378→                  <tbody>
+   379→   379→                    {data.users.map((u) => (
+   380→   380→                      <tr key={u.id}>
+   381→   381→                        <td className={cn(td, "font-medium")}>{u.name}</td>
+   382→   382→                        <td className={cn(td, "text-jade-muted")}>{u.email}</td>
+   383→   383→                        <td className={td}>{u.title}</td>
+   384→   384→                        <td className={td}>
+   385→   385→                          <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+   386→   386→                            u.onboardingComplete ? "border-verify-green/40 text-verify-ink" : "border-amber-300 text-amber-600")}>
+   387→   387→                            {u.onboardingComplete ? "Complete" : "Pending"}
+   388→   388→                          </span>
+   389→   389→                        </td>
+   390→   390→                        <td className={td}>{u.completions}</td>
+   391→   391→                        <td className={td}>{u.requests}</td>
+   392→   392→                        <td className={td}>{u.invites}</td>
+   393→   393→                        <td className={cn(td, "text-jade-muted")}>{new Date(u.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
+   394→   394→                      </tr>
+   395→   395→                    ))}
+   396→   396→                    {data.users.length === 0 && (
+   397→   397→                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={8}>No users yet.</td></tr>
+   398→   398→                    )}
+   399→   399→                  </tbody>
+   400→   400→                </table>
+   401→   401→              </div>
+   402→   402→            </div>
+   403→   403→          )}
+   404→   404→
+   405→   405→          {/* ── Company management ── */}
+   406→   406→          {section === "companies" && (
+   407→   407→            <div className="mt-8 space-y-3">
+   408→   408→              <div>
+   409→   409→                <h2 className="text-base font-semibold text-jade-ink">Company management</h2>
+   410→   410→                <p className="mt-1 text-sm text-jade-muted">Agencies on the platform. Creation & white-label editing ship with the multi-tenant admin phase.</p>
+   411→   411→              </div>
+   412→   412→              {data.companies.map((a) => (
+   413→   413→                <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+   414→   414→                  <div className="flex items-center gap-3">
+   415→   415→                    <span className="h-3 w-3 rounded-full" style={{ background: a.accentColor }} />
+   416→   416→                    <div>
+   417→   417→                      <p className="text-sm font-medium text-jade-ink">{a.name}</p>
+   418→   418→                      <p className="text-xs text-jade-muted">slug: {a.slug} · {a.candidates} candidate(s)</p>
+   419→   419→                    </div>
+   420→   420→                  </div>
+   421→   421→                  <p className="text-xs text-jade-muted">{a.creditsRemaining} of {a.creditsGranted} credits remaining</p>
+   422→   422→                </div>
+   423→   423→              ))}
+   424→   424→            </div>
+   425→   425→          )}
+   426→   426→
+   427→   427→          {/* ── Candidate management — Data Center ── */}
+   428→   428→          {section === "candidates" && (
+   429→   429→            <div className="mt-8 space-y-3">
+   430→   430→              <div>
+   431→   431→                <h2 className="text-base font-semibold text-jade-ink">Candidate management — Data Center</h2>
+   432→   432→                <p className="mt-1 text-sm text-jade-muted">
+   433→   433→                  Every candidate detail collected at onboarding, in one uniform table. Experience fields are entered once (years or calendar start date) and the platform keeps the years-of-experience columns current automatically.
+   434→   434→                </p>
+   435→   435→              </div>
+   436→   436→              <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
+   437→   437→                <table className="min-w-full text-left">
+   438→   438→                  <thead>
+   439→   439→                    <tr>
+   440→   440→                      {["Name", "Number", "Email", "City", "State", "ZIP", "Profession", "Discipline", "Specialty", "Overall YOE", "Specialty YOE"].map((h) => (
+   441→   441→                        <th key={h} className={cn(th, "whitespace-nowrap")}>{h}</th>
+   442→   442→                      ))}
+   443→   443→                    </tr>
+   444→   444→                  </thead>
+   445→   445→                  <tbody>
+   446→   446→                    {data.candidateProfiles.map((c) => (
+   447→   447→                      <tr key={c.id}>
+   448→   448→                        <td className={cn(td, "whitespace-nowrap font-medium")}>{c.name}</td>
+   449→   449→                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{c.phone || "—"}</td>
+   450→   450→                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{c.email}</td>
+   451→   451→                        <td className={td}>{c.city || "—"}</td>
+   452→   452→                        <td className={td}>{c.state || "—"}</td>
+   453→   453→                        <td className={td}>{c.zip || "—"}</td>
+   454→   454→                        <td className={cn(td, "whitespace-nowrap")}>{c.profession ? professionLabel(c.profession) : "—"}</td>
+   455→   455→                        <td className={cn(td, "whitespace-nowrap")}>{c.discipline ? disciplineLabel(c.discipline) : "—"}</td>
+   456→   456→                        <td className={cn(td, "whitespace-nowrap")}>{c.specialty ? specialtyLabel(c.specialty) : "—"}</td>
+   457→   457→                        <td className={cn(td, "whitespace-nowrap")}>
+   458→   458→                          {c.yrsOverall} yr{c.yrsOverallStart && <span className="ml-1 text-[10px] text-[#8aa29c]">auto</span>}
+   459→   459→                        </td>
+   460→   460→                        <td className={cn(td, "whitespace-nowrap")}>
+   461→   461→                          {c.yrsSpecialty} yr{c.yrsSpecialtyStart && <span className="ml-1 text-[10px] text-[#8aa29c]">auto</span>}
+   462→   462→                        </td>
+   463→   463→                      </tr>
+   464→   464→                    ))}
+   465→   465→                    {data.candidateProfiles.length === 0 && (
+   466→   466→                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={11}>No candidate profiles yet.</td></tr>
+   467→   467→                    )}
+   468→   468→                  </tbody>
+   469→   469→                </table>
+   470→   470→              </div>
+   471→   471→            </div>
+   472→   472→          )}
+   473→   473→
+   474→   474→          {/* ── Credit management ── */}
+   475→   475→          {section === "credits" && (
+   476→   476→            <div className="mt-8 space-y-3">
+   477→   477→              <div>
+   478→   478→                <h2 className="text-base font-semibold text-jade-ink">Credit management</h2>
+   479→   479→                <p className="mt-1 text-sm text-jade-muted">
+   480→   480→                  Sandbox metering: 1 credit per outbound verification (reference requests + checklist invites). Swap in the billing provider of choice at launch.
+   481→   481→                </p>
+   482→   482→              </div>
+   483→   483→              {data.companies.map((a) => {
+   484→   484→                const pct = a.creditsGranted ? Math.min(100, Math.round((a.creditsUsed / a.creditsGranted) * 100)) : 0;
+   485→   485→                return (
+
+[showing lines 36-485 of 649; use offset=486 with limit to continue reading]

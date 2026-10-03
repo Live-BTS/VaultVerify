@@ -12,7 +12,7 @@ import { professionLabel, disciplineLabel } from "@/lib/bts/catalog";
 import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
-  Check, X, Users, BookUser, Wallet, LayoutDashboard,
+  Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -47,6 +47,7 @@ interface Overview {
   users: UserRow[];
   candidateProfiles: CandidateProfileRow[];
   companies: CompanyRow[];
+  extras: ExtraQ[];
 }
 
 interface ChecklistRequestRow {
@@ -54,6 +55,10 @@ interface ChecklistRequestRow {
   account: { name: string; email: string; title: string };
   profession: string; jobTitle: string; specialty: string;
   status: string; requestedAt: string; decidedAt: string | null;
+}
+
+interface ExtraQ {
+  id: string; kind: string; prompt: string; placeholder: string; specialty: string; active: boolean; sortOrder: number;
 }
 
 type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "skills";
@@ -191,6 +196,27 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
       toast({ title: `Deleted ${d.deleted} template rows`, description: `${s.specialty} for ${s.jobTitle}` });
       await refresh();
     } catch { toast({ title: "Delete failed", variant: "destructive" }); }
+  };
+
+  // ── Additional questions (the PDF's extra section, shown on every checklist) ──
+  const [editQ, setEditQ] = useState<{ id?: string; kind: string; prompt: string; placeholder: string; specialty: string } | null>(null);
+  const saveExtra = async () => {
+    if (!editQ) return;
+    try {
+      await call(editQ.id
+        ? { action: "extra.update", id: editQ.id, prompt: editQ.prompt, placeholder: editQ.placeholder, specialty: editQ.specialty }
+        : { action: "extra.create", kind: editQ.kind, prompt: editQ.prompt, placeholder: editQ.placeholder, specialty: editQ.specialty });
+      toast({ title: editQ.id ? "Question updated" : "Question added", description: "It now appears on every checklist fill form and report." });
+      setEditQ(null);
+      await refresh();
+    } catch { toast({ title: "Save failed", variant: "destructive" }); }
+  };
+  const toggleExtra = async (q: ExtraQ) => {
+    try { await call({ action: "extra.toggle", id: q.id, active: !q.active }); await refresh(); } catch { toast({ title: "Update failed", variant: "destructive" }); }
+  };
+  const deleteExtra = async (q: ExtraQ) => {
+    if (!confirm(`Delete "${q.prompt.slice(0, 60)}"? New checklists will no longer ask it.`)) return;
+    try { await call({ action: "extra.delete", id: q.id }); toast({ title: "Question deleted" }); await refresh(); } catch { toast({ title: "Delete failed", variant: "destructive" }); }
   };
 
   // ── Gate ──
@@ -508,6 +534,103 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           {/* ── Skills & imports ── */}
           {section === "skills" && (
             <div className="mt-8 space-y-6">
+              {/* Additional questions — the PDF's extra section, shown on every checklist */}
+              <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-jade-ink">Additional questions</h2>
+                    <p className="mt-1 text-sm text-jade-muted">
+                      Asked on every checklist, under the skill ratings — Yes/No answers are required by the candidate, note fields are optional. Edits apply to new completions; saved reports keep their original answers.
+                    </p>
+                  </div>
+                  <Button size="sm" onClick={() => setEditQ({ kind: "YES_NO", prompt: "", placeholder: "", specialty: "" })}
+                    className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                    <PlusCircle className="mr-1.5 h-3.5 w-3.5" /> Add question
+                  </Button>
+                </div>
+
+                {editQ && (
+                  <div className="mt-4 rounded-xl border border-verify-green/30 bg-[#f2f7f4] p-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label className="text-jade-ink/80">Answer type</Label>
+                        <div className="mt-1.5 flex gap-2">
+                          {[["YES_NO", "Yes / No"], ["TEXT", "Text note"]].map(([k, lb]) => (
+                            <button key={k} type="button" disabled={!!editQ.id}
+                              onClick={() => setEditQ({ ...editQ, kind: k })}
+                              className={cn("rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50",
+                                editQ.kind === k ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                              {lb}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-jade-ink/80">Applies to (optional)</Label>
+                        <Input value={editQ.specialty} onChange={(e) => setEditQ({ ...editQ, specialty: e.target.value.toUpperCase() })}
+                          placeholder="Empty = every checklist · e.g. ICU" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <Label className="text-jade-ink/80">Question</Label>
+                      <Input value={editQ.prompt} onChange={(e) => setEditQ({ ...editQ, prompt: e.target.value })}
+                        placeholder="e.g. Are you willing to float to other units when needed?" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                    </div>
+                    {editQ.kind === "TEXT" && (
+                      <div className="mt-3">
+                        <Label className="text-jade-ink/80">Placeholder hint</Label>
+                        <Input value={editQ.placeholder} onChange={(e) => setEditQ({ ...editQ, placeholder: e.target.value })}
+                          placeholder="Shown inside the empty answer box" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                      </div>
+                    )}
+                    <div className="mt-4 flex gap-2">
+                      <Button size="sm" onClick={saveExtra} disabled={editQ.prompt.trim().length < 4} className="bg-verify-green text-vault-dark hover:bg-verify-green/90 disabled:opacity-40">
+                        <Check className="mr-1.5 h-3.5 w-3.5" /> {editQ.id ? "Save changes" : "Add question"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditQ(null)} className="border border-vault-border text-jade-muted hover:text-jade-ink">Cancel</Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 overflow-hidden rounded-xl border border-vault-border">
+                  {data.extras.map((q) => (
+                    <div key={q.id} className="flex flex-wrap items-center justify-between gap-3 border-t border-vault-border/60 bg-white px-4 py-3 first:border-t-0">
+                      <div className="min-w-0 flex-1">
+                        <p className={cn("text-sm", q.active ? "text-jade-ink" : "text-[#8aa29c] line-through")}>
+                          <MessagesSquare className="mr-2 inline h-3.5 w-3.5 text-verify-ink/70" />
+                          {q.prompt}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-jade-muted">
+                          <span className="rounded bg-[#f0f6f2] px-1.5 py-0.5 font-mono">{q.kind === "TEXT" ? "text note (optional)" : "yes / no (required)"}</span>
+                          {q.specialty && <span className="ml-2">· only for {specialtyLabel(q.specialty)}</span>}
+                          {q.placeholder && <span className="ml-2 italic">· “{q.placeholder}”</span>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button type="button" onClick={() => setEditQ({ id: q.id, kind: q.kind, prompt: q.prompt, placeholder: q.placeholder, specialty: q.specialty })}
+                          className="rounded-lg p-2 text-jade-muted transition hover:bg-jade-ink/5 hover:text-jade-ink" aria-label="Edit question">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button type="button" onClick={() => toggleExtra(q)}
+                          className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
+                            q.active ? "border-verify-green/50 text-verify-ink hover:bg-verify-green/10" : "border-vault-border text-jade-muted hover:bg-jade-ink/5")}>
+                          <ToggleLeft className="mr-1 inline h-3 w-3" /> {q.active ? "Active" : "Off"}
+                        </button>
+                        <button type="button" onClick={() => deleteExtra(q)}
+                          className="rounded-lg border border-transparent p-2 text-jade-muted transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete question">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {data.extras.length === 0 && (
+                    <div className="border-t border-vault-border/60 bg-white px-4 py-6 text-center text-sm text-jade-muted">
+                      No additional questions yet — add one, or they seed automatically with the report defaults on the next fill.
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Import panel */}
               <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">

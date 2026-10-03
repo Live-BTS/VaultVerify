@@ -158,17 +158,25 @@ export async function POST(req: NextRequest) {
           status: r.status, requestedAt: r.requestedAt, decidedAt: r.decidedAt,
           completionId: r.completion?.id ?? null,
         })),
-        completions: completions.map((c) => ({
-          id: c.id, profession: c.profession, jobTitle: c.jobTitle,
-          specialty: c.specialty, specialtyLabel: c.specialtyLabel,
-          source: c.source, completedAt: c.completedAt, expiresAt: c.expiresAt,
-          yearsExperience: c.yearsExperience,
-          shareLinks: c.shareLinks.map((s) => ({
-            id: s.id, token: s.token, accessType: s.accessType, durationDays: s.durationDays,
-            label: s.label, createdAt: s.createdAt, expiresAt: s.expiresAt,
-            viewedAt: s.viewedAt, viewCount: s.viewCount, revoked: s.revoked,
-          })),
-        })),
+        completions: completions.map((c) => {
+          const safeParse = <T,>(raw: string | null | undefined, fallback: T): T => {
+            try { const v = JSON.parse(raw || ""); return (v ?? fallback) as T; } catch { return fallback; }
+          };
+          return {
+            id: c.id, profession: c.profession, jobTitle: c.jobTitle,
+            specialty: c.specialty, specialtyLabel: c.specialtyLabel,
+            source: c.source, completedAt: c.completedAt, expiresAt: c.expiresAt,
+            yearsExperience: c.yearsExperience,
+            answers: safeParse(c.answers, []) as unknown[], // recency-aware answer rows
+            additional: safeParse(c.additional, []) as unknown[], // extra-question snapshot
+            attestation: c.attestation ? safeParse(c.attestation, null) : null,
+            shareLinks: c.shareLinks.map((s) => ({
+              id: s.id, token: s.token, accessType: s.accessType, durationDays: s.durationDays,
+              label: s.label, createdAt: s.createdAt, expiresAt: s.expiresAt,
+              viewedAt: s.viewedAt, viewCount: s.viewCount, revoked: s.revoked,
+            })),
+          };
+        }),
       });
     }
 

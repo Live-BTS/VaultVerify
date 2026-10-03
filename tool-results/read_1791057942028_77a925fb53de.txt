@@ -1,0 +1,649 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useRef, useState } from "react";
+     4→import { Button } from "@/components/ui/button";
+     5→import { Input } from "@/components/ui/input";
+     6→import { Label } from "@/components/ui/label";
+     7→import { useToast } from "@/hooks/use-toast";
+     8→import { cn } from "@/lib/utils";
+     9→import { validateRows, type ImportRow, type ValidatedRow } from "@/lib/bts/importValidate";
+    10→import { specialtyLabel } from "@/lib/bts/checklistShared";
+    11→import { professionLabel, disciplineLabel } from "@/lib/bts/catalog";
+    12→import { AgencyLogo, VaultMark, Spinner } from "./brand";
+    13→import {
+    14→  ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
+    15→  Check, X, Users, BookUser, Wallet, LayoutDashboard,
+    16→} from "lucide-react";
+    17→import * as XLSX from "xlsx";
+    18→
+    19→// ── Super Admin — platform console with sidebar navigation ─────────
+    20→// Sections: Requests (approval queue) · User management · Company management ·
+    21→// Candidate management (Data Center) · Credit management · Skills & imports.
+    22→
+    23→interface TemplateRow {
+    24→  id: string; category: string; skillName: string; questionType: string; hasNA: boolean; highRisk: boolean; active: boolean; source: string;
+    25→}
+    26→interface TemplateSet {
+    27→  profession: string; jobTitle: string; specialty: string; count: number; sources: string[]; rows: TemplateRow[];
+    28→}
+    29→interface UserRow {
+    30→  id: string; name: string; email: string; title: string; onboardingComplete: boolean;
+    31→  completions: number; requests: number; invites: number; joinedAt: string;
+    32→}
+    33→interface CandidateProfileRow {
+    34→  id: string; name: string; phone: string; email: string;
+    35→  city: string; state: string; zip: string;
+    36→  profession: string; discipline: string; specialty: string;
+    37→  yrsOverall: number; yrsSpecialty: number; yrsOverallStart: string; yrsSpecialtyStart: string;
+    38→}
+    39→interface CompanyRow {
+    40→  id: string; name: string; slug: string; logoText: string; candidates: number;
+    41→  primaryColor: string; accentColor: string; creditsGranted: number; creditsUsed: number; creditsRemaining: number;
+    42→}
+    43→interface Overview {
+    44→  stats: { agencies: number; candidates: number; requests: number; completed: number; responses: number; templates: number; openFlags: number; notifications: number; pendingChecklistRequests: number };
+    45→  agencies: { id: string; name: string; slug: string; logoText: string; candidates: number; primaryColor: string; accentColor: string }[];
+    46→  sets: TemplateSet[];
+    47→  users: UserRow[];
+    48→  candidateProfiles: CandidateProfileRow[];
+    49→  companies: CompanyRow[];
+    50→}
+    51→
+    52→interface ChecklistRequestRow {
+    53→  id: string;
+    54→  account: { name: string; email: string; title: string };
+    55→  profession: string; jobTitle: string; specialty: string;
+    56→  status: string; requestedAt: string; decidedAt: string | null;
+    57→}
+    58→
+    59→type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "skills";
+    60→
+    61→const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skill Name", "Question Type", "Has N/A Option"];
+    62→
+    63→async function parseWorkbook(file: File): Promise<{ rows: ImportRow[]; sheetName: string; headerFound: boolean }> {
+    64→  const buf = await file.arrayBuffer();
+    65→  const wb = XLSX.read(buf, { type: "array" });
+    66→  const sheetName = wb.SheetNames.find((n) => /skill/i.test(n)) ?? wb.SheetNames[0];
+    67→  const ws = wb.Sheets[sheetName];
+    68→  const aoa: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
+    69→  // locate header row within the first 12 rows
+    70→  let headerIdx = -1;
+    71→  for (let i = 0; i < Math.min(aoa.length, 12); i++) {
+    72→    const cells = (aoa[i] ?? []).map((c) => String(c ?? "").trim().toLowerCase());
+    73→    if (cells.includes("skill name") && cells.includes("profession")) { headerIdx = i; break; }
+    74→  }
+    75→  if (headerIdx === -1) return { rows: [], sheetName, headerFound: false };
+    76→  const headers = (aoa[headerIdx] ?? []).map((c) => String(c ?? "").trim());
+    77→  const idx = (name: string) => headers.findIndex((h) => h.toLowerCase() === name.toLowerCase());
+    78→  const colMap = { profession: idx("Profession"), jobTitle: idx("Job Title"), specialty: idx("Specialty"), category: idx("Category"), skillName: idx("Skill Name"), questionType: idx("Question Type"), hasNA: idx("Has N/A Option") };
+    79→  const rows: ImportRow[] = [];
+    80→  for (const cells of aoa.slice(headerIdx + 1)) {
+    81→    const get = (i: number) => (i >= 0 ? String(cells[i] ?? "").trim() : "");
+    82→    const r = { profession: get(colMap.profession), jobTitle: get(colMap.jobTitle), specialty: get(colMap.specialty), category: get(colMap.category), skillName: get(colMap.skillName), questionType: get(colMap.questionType), hasNA: get(colMap.hasNA).toLowerCase() === "yes" };
+    83→    if (!r.profession && !r.jobTitle && !r.specialty && !r.category && !r.skillName) continue; // skip fully blank rows
+    84→    rows.push(r);
+    85→  }
+    86→  return { rows, sheetName, headerFound: true };
+    87→}
+    88→
+    89→const NAV: [Section, string, typeof Users][] = [
+    90→  ["requests", "Requests", Hourglass],
+    91→  ["users", "User management", Users],
+    92→  ["companies", "Company management", Building2],
+    93→  ["candidates", "Candidate management", BookUser],
+    94→  ["credits", "Credit management", Wallet],
+    95→  ["skills", "Skills & imports", Database],
+    96→];
+    97→
+    98→const th = "px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-jade-muted";
+    99→const td = "px-3 py-2.5 text-sm text-jade-ink border-t border-vault-border/60";
+   100→
+   101→export function SuperAdmin({ onExit }: { onExit: () => void }) {
+   102→  const { toast } = useToast();
+   103→  const [code, setCode] = useState("");
+   104→  const [data, setData] = useState<Overview | null>(null);
+   105→  const [loading, setLoading] = useState(false);
+   106→  const [section, setSection] = useState<Section>("requests");
+   107→  const [cqRequests, setCqRequests] = useState<ChecklistRequestRow[] | null>(null);
+   108→  const [openSet, setOpenSet] = useState<string | null>(null);
+   109→  const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string } | null>(null);
+   110→  const [importing, setImporting] = useState(false);
+   111→  const fileRef = useRef<HTMLInputElement>(null);
+   112→
+   113→  const call = useCallback(async (payload: Record<string, unknown>) => {
+   114→    const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, ...payload }) });
+   115→    const d = await res.json();
+   116→    if (!res.ok || !d.ok) throw new Error(d.error ?? "Request failed");
+   117→    return d;
+   118→  }, [code]);
+   119→
+   120→  const auth = async (c?: string) => {
+   121→    const useCode = c ?? code;
+   122→    if (!useCode.trim()) return toast({ title: "Enter the superadmin code.", variant: "destructive" });
+   123→    setLoading(true);
+   124→    try {
+   125→      const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", code: useCode }) });
+   126→      const d = await res.json();
+   127→      if (!res.ok || !d.ok) throw new Error(d.error ?? "Invalid code");
+   128→      setCode(useCode);
+   129→      setData(d);
+   130→    } catch (e) {
+   131→      toast({ title: e instanceof Error ? e.message : "Sign-in failed", variant: "destructive" });
+   132→    } finally {
+   133→      setLoading(false);
+   134→    }
+   135→  };
+   136→
+   137→  const refresh = async () => {
+   138→    try { setData(await call({ action: "auth" })); } catch { /* keep old data */ }
+   139→  };
+   140→
+   141→  const loadRequests = async () => {
+   142→    try { const d = await call({ action: "requests" }); setCqRequests(d.requests); } catch { /* keep old */ }
+   143→  };
+   144→
+   145→  const decide = async (id: string, approve: boolean) => {
+   146→    try {
+   147→      await call({ action: "decide", id, approve });
+   148→      toast({ title: approve ? "Request approved" : "Request declined", description: approve ? "The candidate can now complete the checklist." : "The candidate will see the decision in their portal." });
+   149→      await Promise.all([refresh(), loadRequests()]);
+   150→    } catch { toast({ title: "Decision failed", variant: "destructive" }); }
+   151→  };
+   152→
+   153→  const onFile = async (f: File | null) => {
+   154→    if (!f) return;
+   155→    try {
+   156→      const { rows, sheetName, headerFound } = await parseWorkbook(f);
+   157→      if (!headerFound) {
+   158→        setPending(null);
+   159→        return toast({ title: "Headers not found", description: `Sheet "${sheetName}" must contain the 7 MyZipVault columns (Profession … Has N/A Option).`, variant: "destructive" });
+   160→      }
+   161→      const { errors, clean } = validateRows(rows);
+   162→      setPending({ rows, clean, errors, fileName: f.name });
+   163→    } catch {
+   164→      toast({ title: "Could not read that file", description: "Save the workbook as .xlsx and try again.", variant: "destructive" });
+   165→    }
+   166→  };
+   167→
+   168→  const runImport = async () => {
+   169→    if (!pending) return;
+   170→    setImporting(true);
+   171→    try {
+   172→      const d = await call({ action: "import", rows: pending.rows });
+   173→      toast({ title: `Imported ${d.created} new · updated ${d.updated}`, description: d.errors?.length ? `${d.errors.length} row(s) rejected — see report.` : "All rows passed validation." });
+   174→      setPending(null);
+   175→      if (fileRef.current) fileRef.current.value = "";
+   176→      await refresh();
+   177→    } catch (e) {
+   178→      toast({ title: e instanceof Error ? e.message : "Import failed", variant: "destructive" });
+   179→    } finally {
+   180→      setImporting(false);
+   181→    }
+   182→  };
+   183→
+   184→  const toggleRow = async (row: TemplateRow) => {
+   185→    try { await call({ action: "toggle", id: row.id, active: !row.active }); await refresh(); } catch { toast({ title: "Update failed", variant: "destructive" }); }
+   186→  };
+   187→
+   188→  const deleteSet = async (s: TemplateSet) => {
+   189→    try {
+   190→      const d = await call({ action: "deleteSet", profession: s.profession, jobTitle: s.jobTitle, specialty: s.specialty });
+   191→      toast({ title: `Deleted ${d.deleted} template rows`, description: `${s.specialty} for ${s.jobTitle}` });
+   192→      await refresh();
+   193→    } catch { toast({ title: "Delete failed", variant: "destructive" }); }
+   194→  };
+   195→
+   196→  // ── Gate ──
+   197→  if (!data) {
+   198→    return (
+   199→      <div className="vv-page flex min-h-screen items-center justify-center px-4">
+   200→        <div className="w-full max-w-md rounded-2xl border border-vault-border bg-white vv-card-shadow p-8">
+   201→          <div className="flex flex-col items-center text-center">
+   202→            <VaultMark size={44} />
+   203→            <h1 className="mt-4 text-xl font-semibold text-jade-ink">Super Admin</h1>
+   204→            <p className="mt-1 text-sm text-jade-muted">Platform control: users, companies, candidate data, credits, skills.</p>
+   205→          </div>
+   206→          <div className="mt-6">
+   207→            <Label htmlFor="sa-code" className="text-jade-ink/80">Access code</Label>
+   208→            <Input
+   209→              id="sa-code"
+   210→              type="password"
+   211→              value={code}
+   212→              onChange={(e) => setCode(e.target.value)}
+   213→              onKeyDown={(e) => e.key === "Enter" && auth()}
+   214→              placeholder="Superadmin code"
+   215→              className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
+   216→            />
+   217→            <p className="mt-2 text-xs text-jade-muted">
+   218→              Sandbox demo code:{" "}
+   219→              <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => auth("zipvault2026")}>
+   220→                zipvault2026
+   221→              </button>
+   222→            </p>
+   223→          </div>
+   224→          <Button onClick={() => auth()} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   225→            {loading ? "Checking…" : "Unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
+   226→          </Button>
+   227→          <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
+   228→            ← Back to site
+   229→          </button>
+   230→        </div>
+   231→      </div>
+   232→    );
+   233→  }
+   234→
+   235→  const s = data.stats;
+   236→  const stats: [string, string | number, string?][] = [
+   237→    ["Companies", s.agencies],
+   238→    ["Users", data.users.length],
+   239→    ["Ref requests", s.requests],
+   240→    ["Completed refs", s.completed],
+   241→    ["Skill templates", s.templates],
+   242→    ["Open flags", s.openFlags, s.openFlags > 0 ? "text-rose-600" : undefined],
+   243→    ["Notifications", s.notifications],
+   244→  ];
+   245→
+   246→  const badgeFor = (sec: Section): number =>
+   247→    sec === "requests" ? s.pendingChecklistRequests : 0;
+   248→
+   249→  const navList = (
+   250→    <nav className="space-y-1">
+   251→      {NAV.map(([sec, label, Icon]) => {
+   252→        const active = section === sec;
+   253→        const badge = badgeFor(sec);
+   254→        return (
+   255→          <button key={sec} type="button"
+   256→            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); }}
+   257→            className={cn(
+   258→              "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
+   259→              active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
+   260→            )}>
+   261→            <Icon className={cn("h-4 w-4 shrink-0", active && "text-verify-ink")} />
+   262→            <span className="flex-1 text-left">{label}</span>
+   263→            {badge > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{badge}</span>}
+   264→          </button>
+   265→        );
+   266→      })}
+   267→    </nav>
+   268→  );
+   269→
+   270→  return (
+   271→    <div className="vv-page min-h-screen">
+   272→      {/* Header */}
+   273→      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-white/85 backdrop-blur-xl">
+   274→        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+   275→          <div className="flex items-center gap-3">
+   276→            <VaultMark size={32} />
+   277→            <div className="leading-tight">
+   278→              <p className="text-sm font-semibold text-jade-ink">
+   279→                Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Super Admin</span>
+   280→              </p>
+   281→              <p className="text-[11px] text-jade-muted">Zipvault skills platform console</p>
+   282→            </div>
+   283→          </div>
+   284→          <div className="flex items-center gap-2">
+   285→            <Button variant="ghost" onClick={refresh} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">
+   286→              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+   287→            </Button>
+   288→            <Button variant="ghost" onClick={onExit} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">Sign out</Button>
+   289→          </div>
+   290→        </div>
+   291→      </header>
+   292→
+   293→      <div className="mx-auto flex max-w-7xl gap-6 px-4 pb-16 pt-8 sm:px-6">
+   294→        {/* Sidebar (desktop) */}
+   295→        <aside className="hidden w-60 shrink-0 lg:block">
+   296→          <div className="sticky top-24 rounded-2xl border border-vault-border bg-white vv-card-shadow p-3">
+   297→            <p className="flex items-center gap-1.5 px-3 pb-2 pt-1 text-[10px] font-bold uppercase tracking-widest text-[#8aa29c]">
+   298→              <LayoutDashboard className="h-3 w-3" /> Console
+   299→            </p>
+   300→            {navList}
+   301→          </div>
+   302→        </aside>
+   303→
+   304→        {/* Main column */}
+   305→        <main className="min-w-0 flex-1">
+   306→          {/* Section switcher (mobile) */}
+   307→          <div className="mb-6 flex gap-2 overflow-x-auto pb-1 lg:hidden">{navList}</div>
+   308→
+   309→          {/* Stats */}
+   310→          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+   311→            {stats.map(([label, value, tone]) => (
+   312→              <div key={label} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-4">
+   313→                <p className="text-[11px] font-medium uppercase tracking-wider text-jade-muted">{label}</p>
+   314→                <p className={cn("mt-1 text-2xl font-bold text-jade-ink", tone)}>{value}</p>
+   315→              </div>
+   316→            ))}
+   317→          </div>
+   318→
+   319→          {/* ── Requests ── */}
+   320→          {section === "requests" && (
+   321→            <div className="mt-8 space-y-3">
+   322→              <div>
+   323→                <h2 className="text-base font-semibold text-jade-ink">Candidate checklist requests</h2>
+   324→                <p className="mt-1 text-sm text-jade-muted">
+   325→                  Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year.
+   326→                </p>
+   327→              </div>
+   328→              {!cqRequests && <div className="flex justify-center rounded-xl border border-vault-border bg-white vv-card-shadow p-10"><Spinner /></div>}
+   329→              {cqRequests?.length === 0 && (
+   330→                <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-10 text-center text-sm text-jade-muted">No requests yet.</div>
+   331→              )}
+   332→              {cqRequests?.map((r) => (
+   333→                <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+   334→                  <div>
+   335→                    <p className="text-sm font-semibold text-jade-ink">
+   336→                      {specialtyLabel(r.specialty)} <span className="text-xs font-normal text-jade-muted">· {r.jobTitle} · {r.profession}</span>
+   337→                    </p>
+   338→                    <p className="mt-0.5 text-xs text-jade-muted">
+   339→                      {r.account.name} · {r.account.email} · requested {new Date(r.requestedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+   340→                    </p>
+   341→                  </div>
+   342→                  {r.status === "PENDING" ? (
+   343→                    <div className="flex gap-2">
+   344→                      <Button size="sm" onClick={() => decide(r.id, true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   345→                        <Check className="mr-1.5 h-3.5 w-3.5" /> Approve
+   346→                      </Button>
+   347→                      <Button size="sm" variant="ghost" onClick={() => decide(r.id, false)} className="border border-rose-300 text-rose-600 hover:bg-rose-50">
+   348→                        <X className="mr-1.5 h-3.5 w-3.5" /> Decline
+   349→                      </Button>
+   350→                    </div>
+   351→                  ) : (
+   352→                    <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
+   353→                      r.status === "APPROVED" ? "border-verify-green/40 text-verify-ink" : "border-rose-300 text-rose-600")}>
+   354→                      {r.status === "APPROVED" ? "Approved" : "Declined"}
+   355→                    </span>
+   356→                  )}
+   357→                </div>
+   358→              ))}
+   359→            </div>
+   360→          )}
+   361→
+   362→          {/* ── User management ── */}
+   363→          {section === "users" && (
+   364→            <div className="mt-8 space-y-3">
+   365→              <div>
+   366→                <h2 className="text-base font-semibold text-jade-ink">User management</h2>
+   367→                <p className="mt-1 text-sm text-jade-muted">Everyone with a platform login — candidate accounts, onboarding status and activity.</p>
+   368→              </div>
+   369→              <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
+   370→                <table className="min-w-full text-left">
+   371→                  <thead>
+   372→                    <tr>
+   373→                      {["Name", "Email", "Discipline", "Onboarding", "Checklists", "Requests", "Invites", "Joined"].map((h) => (
+   374→                        <th key={h} className={th}>{h}</th>
+   375→                      ))}
+   376→                    </tr>
+   377→                  </thead>
+   378→                  <tbody>
+   379→                    {data.users.map((u) => (
+   380→                      <tr key={u.id}>
+   381→                        <td className={cn(td, "font-medium")}>{u.name}</td>
+   382→                        <td className={cn(td, "text-jade-muted")}>{u.email}</td>
+   383→                        <td className={td}>{u.title}</td>
+   384→                        <td className={td}>
+   385→                          <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+   386→                            u.onboardingComplete ? "border-verify-green/40 text-verify-ink" : "border-amber-300 text-amber-600")}>
+   387→                            {u.onboardingComplete ? "Complete" : "Pending"}
+   388→                          </span>
+   389→                        </td>
+   390→                        <td className={td}>{u.completions}</td>
+   391→                        <td className={td}>{u.requests}</td>
+   392→                        <td className={td}>{u.invites}</td>
+   393→                        <td className={cn(td, "text-jade-muted")}>{new Date(u.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
+   394→                      </tr>
+   395→                    ))}
+   396→                    {data.users.length === 0 && (
+   397→                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={8}>No users yet.</td></tr>
+   398→                    )}
+   399→                  </tbody>
+   400→                </table>
+   401→              </div>
+   402→            </div>
+   403→          )}
+   404→
+   405→          {/* ── Company management ── */}
+   406→          {section === "companies" && (
+   407→            <div className="mt-8 space-y-3">
+   408→              <div>
+   409→                <h2 className="text-base font-semibold text-jade-ink">Company management</h2>
+   410→                <p className="mt-1 text-sm text-jade-muted">Agencies on the platform. Creation & white-label editing ship with the multi-tenant admin phase.</p>
+   411→              </div>
+   412→              {data.companies.map((a) => (
+   413→                <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+   414→                  <div className="flex items-center gap-3">
+   415→                    <span className="h-3 w-3 rounded-full" style={{ background: a.accentColor }} />
+   416→                    <div>
+   417→                      <p className="text-sm font-medium text-jade-ink">{a.name}</p>
+   418→                      <p className="text-xs text-jade-muted">slug: {a.slug} · {a.candidates} candidate(s)</p>
+   419→                    </div>
+   420→                  </div>
+   421→                  <p className="text-xs text-jade-muted">{a.creditsRemaining} of {a.creditsGranted} credits remaining</p>
+   422→                </div>
+   423→              ))}
+   424→            </div>
+   425→          )}
+   426→
+   427→          {/* ── Candidate management — Data Center ── */}
+   428→          {section === "candidates" && (
+   429→            <div className="mt-8 space-y-3">
+   430→              <div>
+   431→                <h2 className="text-base font-semibold text-jade-ink">Candidate management — Data Center</h2>
+   432→                <p className="mt-1 text-sm text-jade-muted">
+   433→                  Every candidate detail collected at onboarding, in one uniform table. Experience fields are entered once (years or calendar start date) and the platform keeps the years-of-experience columns current automatically.
+   434→                </p>
+   435→              </div>
+   436→              <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
+   437→                <table className="min-w-full text-left">
+   438→                  <thead>
+   439→                    <tr>
+   440→                      {["Name", "Number", "Email", "City", "State", "ZIP", "Profession", "Discipline", "Specialty", "Overall YOE", "Specialty YOE"].map((h) => (
+   441→                        <th key={h} className={cn(th, "whitespace-nowrap")}>{h}</th>
+   442→                      ))}
+   443→                    </tr>
+   444→                  </thead>
+   445→                  <tbody>
+   446→                    {data.candidateProfiles.map((c) => (
+   447→                      <tr key={c.id}>
+   448→                        <td className={cn(td, "whitespace-nowrap font-medium")}>{c.name}</td>
+   449→                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{c.phone || "—"}</td>
+   450→                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{c.email}</td>
+   451→                        <td className={td}>{c.city || "—"}</td>
+   452→                        <td className={td}>{c.state || "—"}</td>
+   453→                        <td className={td}>{c.zip || "—"}</td>
+   454→                        <td className={cn(td, "whitespace-nowrap")}>{c.profession ? professionLabel(c.profession) : "—"}</td>
+   455→                        <td className={cn(td, "whitespace-nowrap")}>{c.discipline ? disciplineLabel(c.discipline) : "—"}</td>
+   456→                        <td className={cn(td, "whitespace-nowrap")}>{c.specialty ? specialtyLabel(c.specialty) : "—"}</td>
+   457→                        <td className={cn(td, "whitespace-nowrap")}>
+   458→                          {c.yrsOverall} yr{c.yrsOverallStart && <span className="ml-1 text-[10px] text-[#8aa29c]">auto</span>}
+   459→                        </td>
+   460→                        <td className={cn(td, "whitespace-nowrap")}>
+   461→                          {c.yrsSpecialty} yr{c.yrsSpecialtyStart && <span className="ml-1 text-[10px] text-[#8aa29c]">auto</span>}
+   462→                        </td>
+   463→                      </tr>
+   464→                    ))}
+   465→                    {data.candidateProfiles.length === 0 && (
+   466→                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={11}>No candidate profiles yet.</td></tr>
+   467→                    )}
+   468→                  </tbody>
+   469→                </table>
+   470→              </div>
+   471→            </div>
+   472→          )}
+   473→
+   474→          {/* ── Credit management ── */}
+   475→          {section === "credits" && (
+   476→            <div className="mt-8 space-y-3">
+   477→              <div>
+   478→                <h2 className="text-base font-semibold text-jade-ink">Credit management</h2>
+   479→                <p className="mt-1 text-sm text-jade-muted">
+   480→                  Sandbox metering: 1 credit per outbound verification (reference requests + checklist invites). Swap in the billing provider of choice at launch.
+   481→                </p>
+   482→              </div>
+   483→              {data.companies.map((a) => {
+   484→                const pct = a.creditsGranted ? Math.min(100, Math.round((a.creditsUsed / a.creditsGranted) * 100)) : 0;
+   485→                return (
+   486→                  <div key={a.id} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+   487→                    <div className="flex flex-wrap items-center justify-between gap-3">
+   488→                      <div>
+   489→                        <p className="text-sm font-semibold text-jade-ink">{a.name}</p>
+   490→                        <p className="text-xs text-jade-muted">{a.creditsUsed} used of {a.creditsGranted} granted</p>
+   491→                      </div>
+   492→                      <p className={cn("text-sm font-bold", a.creditsRemaining <= 0 ? "text-rose-600" : "text-verify-ink")}>
+   493→                        {a.creditsRemaining} remaining
+   494→                      </p>
+   495→                    </div>
+   496→                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#eef4f1]">
+   497→                      <div className={cn("h-full rounded-full transition-all", pct > 85 ? "bg-rose-500" : "bg-verify-green")} style={{ width: `${pct}%` }} />
+   498→                    </div>
+   499→                  </div>
+   500→                );
+   501→              })}
+   502→              {data.companies.length === 0 && (
+   503→                <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-10 text-center text-sm text-jade-muted">No companies yet.</div>
+   504→              )}
+   505→            </div>
+   506→          )}
+   507→
+   508→          {/* ── Skills & imports ── */}
+   509→          {section === "skills" && (
+   510→            <div className="mt-8 space-y-6">
+   511→              {/* Import panel */}
+   512→              <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
+   513→                <div className="flex flex-wrap items-center justify-between gap-3">
+   514→                  <div>
+   515→                    <h2 className="text-base font-semibold text-jade-ink">Import skills checklist</h2>
+   516→                    <p className="mt-1 text-sm text-jade-muted">Upload a MyZipVault import workbook (.xlsx). Rows upsert by Profession + Job Title + Specialty + Skill Name — re-uploading is safe.</p>
+   517→                  </div>
+   518→                  <a href="/MyZipVault-Skills-Checklist-Import-Template.xlsx" download>
+   519→                    <Button variant="ghost" className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
+   520→                      <FileDown className="h-4 w-4" /> Download template
+   521→                    </Button>
+   522→                  </a>
+   523→                </div>
+   524→
+   525→                <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-vault-border bg-[#f2f7f4] px-6 py-8 text-center transition hover:border-verify-green/60">
+   526→                  <Upload className="h-6 w-6 text-verify-ink" />
+   527→                  <p className="mt-2 text-sm font-medium text-jade-ink">{pending ? pending.fileName : "Choose .xlsx workbook"}</p>
+   528→                  <p className="mt-0.5 text-xs text-jade-muted">Sheets scanned automatically for the 7-column Skills Data header</p>
+   529→                  <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+   530→                </label>
+   531→
+   532→                {pending && (
+   533→                  <div className="mt-4 rounded-xl border border-vault-border bg-[#f2f7f4] p-4">
+   534→                    <div className="flex flex-wrap items-center justify-between gap-3">
+   535→                      <p className="text-sm text-jade-ink">
+   536→                        <span className="font-semibold text-verify-ink">{pending.clean.length}</span> valid row(s)
+   537→                        {pending.errors.length > 0 && <span className="ml-2 font-semibold text-rose-600">{pending.errors.length} problem(s)</span>}
+   538→                      </p>
+   539→                      <Button onClick={runImport} disabled={importing || !pending.clean.length} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   540→                        {importing ? "Importing…" : `Import ${pending.clean.length} rows`} <Database className="ml-2 h-4 w-4" />
+   541→                      </Button>
+   542→                    </div>
+   543→                    {pending.errors.length > 0 && (
+   544→                      <ul className="mt-3 max-h-40 space-y-1 overflow-auto rounded-lg bg-rose-50 p-3 text-xs text-rose-700">
+   545→                        {pending.errors.slice(0, 50).map((e, i) => <li key={i}>• {e}</li>)}
+   546→                      </ul>
+   547→                    )}
+   548→                    <div className="mt-3 max-h-40 overflow-auto rounded-lg bg-white">
+   549→                      <table className="w-full text-left text-xs text-jade-muted">
+   550→                        <thead className="text-jade-ink/70">
+   551→                          <tr>{REQUIRED_COLS.map((h) => <th key={h} className="py-1 pr-3 font-medium">{h}</th>)}</tr>
+   552→                        </thead>
+   553→                        <tbody>
+   554→                          {pending.clean.slice(0, 12).map((r, i) => (
+   555→                            <tr key={i} className="border-t border-vault-border/50">
+   556→                              <td className="py-1 pr-3">{r.profession}</td>
+   557→                              <td className="py-1 pr-3">{r.jobTitle}</td>
+   558→                              <td className="py-1 pr-3">{r.specialty}</td>
+   559→                              <td className="py-1 pr-3">{r.category}</td>
+   560→                              <td className="py-1 pr-3 text-jade-ink">{r.skillName}</td>
+   561→                              <td className="py-1 pr-3">{r.questionType}</td>
+   562→                              <td className="py-1 pr-3">{r.hasNA ? "Yes" : "No"}</td>
+   563→                            </tr>
+   564→                          ))}
+   565→                        </tbody>
+   566→                      </table>
+   567→                      {pending.clean.length > 12 && <p className="py-1 text-xs text-[#8aa29c]">+ {pending.clean.length - 12} more…</p>}
+   568→                    </div>
+   569→                  </div>
+   570→                )}
+   571→              </div>
+   572→
+   573→              {/* Template sets */}
+   574→              <div className="space-y-3">
+   575→                <h2 className="text-base font-semibold text-jade-ink">Checklist library ({data.sets.length} sets)</h2>
+   576→                {data.sets.map((set) => {
+   577→                  const k = `${set.profession}|${set.jobTitle}|${set.specialty}`;
+   578→                  const open = openSet === k;
+   579→                  return (
+   580→                    <div key={k} className="overflow-hidden rounded-xl border border-vault-border bg-white vv-card-shadow">
+   581→                      <button type="button" onClick={() => setOpenSet(open ? null : k)} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left">
+   582→                        <div className="flex items-center gap-3">
+   583→                          <ChevronDown className={cn("h-4 w-4 text-verify-ink transition-transform", !open && "-rotate-90")} />
+   584→                          <div>
+   585→                            <p className="text-sm font-semibold text-jade-ink">
+   586→                              {specialtyLabel(set.specialty)} <span className="ml-1 text-xs font-normal text-jade-muted">· {set.jobTitle} · {set.profession}</span>
+   587→                            </p>
+   588→                            <p className="text-xs text-jade-muted">
+   589→                              {set.count} active skill(s) · {set.sources.map((src) => (src === "BUILTIN" ? "built-in" : "imported")).join(" + ")}
+   590→                            </p>
+   591→                          </div>
+   592→                        </div>
+   593→                        <span
+   594→                          role="button"
+   595→                          tabIndex={0}
+   596→                          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`)) deleteSet(set); }}
+   597→                          onKeyDown={(e) => e.key === "Enter" && confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`) && deleteSet(set)}
+   598→                          className="rounded-lg border border-transparent p-2 text-jade-muted transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
+   599→                          aria-label={`Delete ${set.specialty} set`}
+   600→                        >
+   601→                          <Trash2 className="h-4 w-4" />
+   602→                        </span>
+   603→                      </button>
+   604→                      {open && (
+   605→                        <div className="border-t border-vault-border/60 px-5 py-3">
+   606→                          {Object.entries(set.rows.reduce<Record<string, TemplateRow[]>>((acc, r) => { (acc[r.category] ??= []).push(r); return acc; }, {})).map(([cat, rows]) => (
+   607→                            <div key={cat} className="py-2">
+   608→                              <p className="text-[11px] font-semibold uppercase tracking-wider text-verify-ink/80">{cat}</p>
+   609→                              <div className="mt-1 divide-y divide-vault-border/40">
+   610→                                {rows.map((r) => (
+   611→                                  <div key={r.id} className="flex items-center justify-between gap-3 py-1.5">
+   612→                                    <p className={cn("text-sm", r.active ? "text-jade-ink" : "text-[#8aa29c] line-through")}>
+   613→                                      {r.skillName}
+   614→                                      {r.highRisk && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-700">High-risk</span>}
+   615→                                    </p>
+   616→                                    <div className="flex items-center gap-2 text-[11px] text-jade-muted">
+   617→                                      <span className="rounded bg-[#f0f6f2] px-1.5 py-0.5 font-mono">{r.questionType}</span>
+   618→                                      <span>N/A: {r.hasNA ? "Y" : "N"}</span>
+   619→                                      <button
+   620→                                        type="button"
+   621→                                        onClick={() => toggleRow(r)}
+   622→                                        className={cn("rounded-full border px-2 py-0.5 font-semibold transition", r.active ? "border-verify-green/50 text-verify-ink hover:bg-verify-green/10" : "border-vault-border text-jade-muted hover:bg-jade-ink/5")}
+   623→                                      >
+   624→                                        {r.active ? "Active" : "Off"}
+   625→                                      </button>
+   626→                                    </div>
+   627→                                  </div>
+   628→                                ))}
+   629→                              </div>
+   630→                            </div>
+   631→                          ))}
+   632→                        </div>
+   633→                      )}
+   634→                    </div>
+   635→                  );
+   636→                })}
+   637→              </div>
+   638→            </div>
+   639→          )}
+   640→
+   641→          <div className="mt-10 flex items-center gap-2 text-xs text-[#8aa29c]">
+   642→            <AgencyLogo logoText="VV" name="VaultVerify" size="sm" light />
+   643→          </div>
+   644→        </main>
+   645→      </div>
+   646→    </div>
+   647→  );
+   648→}
+   649→

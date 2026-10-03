@@ -3,13 +3,20 @@ import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
 import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
-import { LABELS } from "@/lib/bts/checklistShared";
+import { LABELS, LAST_PERFORMED } from "@/lib/bts/checklistShared";
 
 // ── POST /api/checklist/complete — save the self-assessment (once per checklist) ──
-// body: { inviteId? } | { requestId? } + { profession, jobTitle, specialty, yearsExperience, answers }
-// answers: [{ category, skill, questionType, value, na }] — one entry per active template row.
+// body: { inviteId? } | { requestId? } + { profession, jobTitle, specialty, yearsExperience,
+//         answers, additional, attestation }
+// answers: [{ category, skill, questionType, value, na, lastPerformed }] — every rating row
+//          also records WHEN the skill was last performed (3 | 6 | "6+" | na).
+// additional: [{ id, value }] — the superadmin-managed "Additional questions" snapshot.
+// attestation: { agreed, mode: "draw"|"type"|"upload", signature, printedName }
 
-interface IncomingAnswer { category: string; skill: string; questionType: string; value: number | string | null; na: boolean }
+interface IncomingAnswer { category: string; skill: string; questionType: string; value: number | string | null; na: boolean; lastPerformed?: string }
+
+const RECENCY_KEYS = LAST_PERFORMED.map((r) => r.key);
+const MAX_SIGNATURE_CHARS = 400_000; // ~300KB PNG/JPG data URL — keeps the row well under limits
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
@@ -46,16 +53,22 @@ export async function POST(req: NextRequest) {
     });
     if (!templates.length) return NextResponse.json({ ok: false, error: "No active skills found for that checklist — ask the admin to publish it" }, { status: 400 });
 
-    // validate coverage + answer shapes
+    // validate coverage + answer shapes (rating rows also require the recency dimension)
     const incoming: IncomingAnswer[] = Array.isArray(body.answers) ? body.answers : [];
     const bySkill = new Map(incoming.map((a) => [`${a.category}::${a.skill}`, a]));
-    const snapshot: IncomingAnswer[] & { highRisk?: boolean }[] = [];
-    const answers: { category: string; skill: string; questionType: string; value: number | string | null; na: boolean; highRisk: boolean }[] = [];
+    const answers: { category: string; skill: string; questionType: string; value: number | string | null; na: boolean; highRisk: boolean; lastPerformed: string | null }[] = [];
     const problems: string[] = [];
     for (const t of templates) {
       const a = bySkill.get(`${t.category}::${t.skillName}`);
       if (!a) { problems.push(`Missing answer: ${t.skillName}`); continue; }
+      let lastPerformed: string | null = null;
       if (t.questionType === "rating_1_4") {
+        const lp = typeof a.lastPerformed === "string" ? a.lastPerformed : "";
+        if (!RECENCY_KEYS.includes(lp)) {
+          problems.push(`Pick when you last performed it: ${t.skillName}`);
+        } else {
+          lastPerformed = lp;
+        }
         const v = Number(a.value);
         if (!a.na && (!Number.isInteger(v) || v < 1 || v > 4)) problems.push(`Rate 1-4 (or N/A): ${t.skillName}`);
       } else if (t.questionType === "yes_no") {
@@ -64,8 +77,45 @@ export async function POST(req: NextRequest) {
         problems.push(`Text answer required: ${t.skillName}`);
       }
       if (a.na && !t.hasNA) problems.push(`N/A not allowed: ${t.skillName}`);
-      answers.push({ category: t.category, skill: t.skillName, questionType: t.questionType, value: a.na ? null : a.value, na: a.na, highRisk: t.highRisk });
+      answers.push({ category: t.category, skill: t.skillName, questionType: t.questionType, value: a.na ? null : a.value, na: a.na, highRisk: t.highRisk, lastPerformed });
     }
+    if (problems.length) {
+      return NextResponse.json({ ok: false, error: `Incomplete: ${problems.length} item(s) need attention`, problems: problems.slice(0, 12) }, { status: 400 });
+    }
+
+    // ── Additional questions (superadmin-managed; YES/No required, notes optional) ──
+    const extrasRaw = await db.checklistExtraQuestion.findMany({
+      where: { active: true, OR: [{ specialty: "" }, ...(spec.specialty ? [{ specialty: spec.specialty }] : [])] },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+    const extraVals = new Map<string, unknown>(
+      (Array.isArray(body.additional) ? body.additional : []).map((x: { id?: unknown; value?: unknown }) => [String(x?.id ?? ""), x?.value ?? null])
+    );
+    const additional: { id: string; prompt: string; kind: string; value: string | null }[] = [];
+    for (const q of extrasRaw) {
+      const v = extraVals.get(q.id);
+      if (q.kind === "YES_NO") {
+        if (v !== "yes" && v !== "no") { problems.push(`Answer Yes/No: ${q.prompt}`); continue; }
+        additional.push({ id: q.id, prompt: q.prompt, kind: q.kind, value: v as string });
+      } else {
+        const text = String(v ?? "").trim().slice(0, 2000);
+        additional.push({ id: q.id, prompt: q.prompt, kind: q.kind, value: text || null });
+      }
+    }
+    if (problems.length) {
+      return NextResponse.json({ ok: false, error: `Incomplete: ${problems.length} item(s) need attention`, problems: problems.slice(0, 12) }, { status: 400 });
+    }
+
+    // ── Attestation — required ──
+    const att = body.attestation ?? {};
+    const attAgreed = att?.agreed === true;
+    const attMode = att?.mode === "draw" || att?.mode === "type" || att?.mode === "upload" ? att.mode : null;
+    const attSignature = typeof att?.signature === "string" ? att.signature : "";
+    const attPrinted = typeof att?.printedName === "string" ? att.printedName.trim().slice(0, 120) : "";
+    if (!attAgreed) problems.push("Confirm the candidate attestation");
+    if (!attMode) problems.push("Choose a signature method (draw, type or upload)");
+    if (!attSignature) problems.push("Add your signature");
+    else if (attSignature.length > MAX_SIGNATURE_CHARS) problems.push("Signature image is too large — try a smaller scan");
     if (problems.length) {
       return NextResponse.json({ ok: false, error: `Incomplete: ${problems.length} item(s) need attention`, problems: problems.slice(0, 12) }, { status: 400 });
     }
@@ -73,6 +123,7 @@ export async function POST(req: NextRequest) {
     const yearsExperience = Math.max(0, Math.min(60, Number(body.yearsExperience) || 0));
     const now = new Date();
     const expiresAt = new Date(now.getTime() + CHECKLIST_VALIDITY_DAYS * 24 * 60 * 60 * 1000);
+    const attestation = JSON.stringify({ agreed: true, mode: attMode, signature: attSignature, printedName: attPrinted || account.name, signedAt: now.toISOString() });
 
     const completion = await db.checklistCompletion.create({
       data: {
@@ -82,6 +133,8 @@ export async function POST(req: NextRequest) {
         specialty: spec.specialty,
         specialtyLabel: LABELS[spec.specialty] ?? spec.specialty.replace(/_/g, " "),
         answers: JSON.stringify(answers),
+        additional: JSON.stringify(additional),
+        attestation,
         yearsExperience,
         source: inviteId ? "RECRUITER" : "SELF",
         inviteId: inviteId ?? undefined,
@@ -98,7 +151,7 @@ export async function POST(req: NextRequest) {
     await logAudit({
       actorType: "CANDIDATE", actorId: account.id, action: "CHECKLIST_COMPLETED",
       entity: "checklistCompletion", entityId: completion.id,
-      detail: JSON.stringify({ specialty: spec.specialty, skills: answers.length, source: completion.source }),
+      detail: JSON.stringify({ specialty: spec.specialty, skills: answers.length, source: inviteId ? "RECRUITER" : "SELF", attested: true }),
     });
 
     return NextResponse.json({ ok: true, completionId: completion.id, expiresAt });

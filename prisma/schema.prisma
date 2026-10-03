@@ -243,8 +243,12 @@ model ChecklistCompletion {
   jobTitle     String
   specialty    String // canonical key
   specialtyLabel String @default("")
-  // answers snapshot: [{ category, skill, questionType, value, na, highRisk }]
+  // answers snapshot: [{ category, skill, questionType, value, na, highRisk, lastPerformed? }]
   answers      String
+  // additional-questions snapshot: [{ id, prompt, kind, value }] (superadmin-managed set)
+  additional  String @default("[]")
+  // attestation snapshot: { agreed, mode: "draw"|"type"|"upload", signature, printedName, signedAt }
+  attestation String @default("")
   yearsExperience Int @default(0)
   source       String @default("SELF") // SELF (own request) | RECRUITER (invite)
   requestId    String?  @unique
@@ -270,6 +274,19 @@ model ChecklistShareLink {
   viewedAt     DateTime? // set on first view for ONE_TIME
   viewCount    Int      @default(0)
   revoked      Boolean  @default(false)
+}
+
+// Superadmin-managed "Additional questions" rendered on every checklist fill + report
+model ChecklistExtraQuestion {
+  id          String   @id @default(cuid())
+  kind        String   @default("YES_NO") // YES_NO | TEXT
+  prompt      String
+  placeholder String   @default("")
+  specialty   String   @default("") // "" = applies to every checklist
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // Zipvault-compatible skill checklist templates (MyZipVault import format)

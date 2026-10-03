@@ -1,0 +1,580 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useState } from "react";
+     4→import { AnimatePresence, motion } from "framer-motion";
+     5→import { Button } from "@/components/ui/button";
+     6→import { Input } from "@/components/ui/input";
+     7→import { Label } from "@/components/ui/label";
+     8→import { cn } from "@/lib/utils";
+     9→import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
+    10→import { specialtyLabel } from "@/lib/bts/checklistShared";
+    11→import { VaultMark, Spinner } from "../brand";
+    12→import { ChecklistFill, type CatalogSet, type FillSpec } from "./ChecklistFill";
+    13→import { ChecklistOnboarding, type ProfileData } from "./ChecklistOnboarding";
+    14→import {
+    15→  BadgeCheck, CalendarClock, Check, ClipboardList, Copy, Download, ExternalLink, Hourglass,
+    16→  Inbox, Link2, Plus, ShieldCheck, X,
+    17→} from "lucide-react";
+    18→
+    19→// ── Skills Checklist candidate portal — accounts, onboarding, requests, invites, shares ──
+    20→
+    21→interface ShareLinkDto { id: string; token: string; accessType: string; durationDays: number | null; label: string; createdAt: string; expiresAt: string | null; viewedAt: string | null; viewCount: number; revoked: boolean }
+    22→interface CompletionDto { id: string; profession: string; jobTitle: string; specialty: string; specialtyLabel: string; source: string; completedAt: string; expiresAt: string; yearsExperience: number; shareLinks: ShareLinkDto[] }
+    23→interface RequestDto { id: string; profession: string; jobTitle: string; specialty: string; status: string; requestedAt: string; decidedAt: string | null; completionId: string | null }
+    24→interface InviteDto { id: string; recruiterName: string; facilityName: string; agencyName: string; profession: string; jobTitle: string; specialty: string; status: string; createdAt: string; completedAt: string | null; completionId: string | null; message: string; specialtyLabel?: string }
+    25→interface AccountDto extends ProfileData { onboardingComplete: boolean }
+    26→interface MeData { account: AccountDto | null; invites?: InviteDto[]; requests?: RequestDto[]; completions?: CompletionDto[] }
+    27→
+    28→const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    29→const monthsLeft = (d: string) => Math.max(0, Math.round((new Date(d).getTime() - Date.now()) / (30.4 * 24 * 3600 * 1000)));
+    30→
+    31→// ── Share dialog ──
+    32→function ShareDialog({ completion, onClose, onCreated }: { completion: CompletionDto; onClose: () => void; onCreated: () => void }) {
+    33→  const [preset, setPreset] = useState<string>("ONE_TIME");
+    34→  const [customDays, setCustomDays] = useState("30");
+    35→  const [label, setLabel] = useState("");
+    36→  const [created, setCreated] = useState<{ token: string; accessType: string; durationDays: number | null; expiresAt: string | null } | null>(null);
+    37→  const [busy, setBusy] = useState(false);
+    38→  const [copied, setCopied] = useState(false);
+    39→
+    40→  const create = async () => {
+    41→    setBusy(true);
+    42→    try {
+    43→      const chosen = SHARE_PRESETS.find((p) => p.key === preset)!;
+    44→      const accessType = chosen.key === "ONE_TIME" ? "ONE_TIME" : "DURATION";
+    45→      const durationDays = chosen.key === "ONE_TIME" ? null : chosen.key === "custom" ? Number(customDays) : chosen.days;
+    46→      const res = await fetch("/api/checklist/share", {
+    47→        method: "POST", headers: { "Content-Type": "application/json" },
+    48→        body: JSON.stringify({ completionId: completion.id, accessType, durationDays, label }),
+    49→      });
+    50→      const d = await res.json();
+    51→      if (d.ok) { setCreated(d.link); onCreated(); } else throw new Error(d.error);
+    52→    } catch { /* inline: button re-enables */ } finally { setBusy(false); }
+    53→  };
+    54→
+    55→  const link = created ? `${window.location.origin}/?s=${created.token}` : "";
+    56→
+    57→  return (
+    58→    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    59→      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b2b30]/45 p-4 backdrop-blur-sm" onClick={onClose}>
+    60→      <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 24 }}
+    61→        className="w-full max-w-md rounded-2xl border border-vault-border bg-white vv-card-shadow p-6" onClick={(e) => e.stopPropagation()}>
+    62→        <div className="flex items-start justify-between">
+    63→          <div>
+    64→            <h3 className="flex items-center gap-2 text-base font-semibold text-jade-ink"><Link2 className="h-4 w-4 text-verify-ink" /> Share checklist</h3>
+    65→            <p className="mt-0.5 text-xs text-jade-muted">{completion.specialtyLabel} · {completion.jobTitle}</p>
+    66→          </div>
+    67→          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"><X className="h-4 w-4" /></button>
+    68→        </div>
+    69→
+    70→        {!created ? (
+    71→          <>
+    72→            <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-jade-muted">Who can open it & for how long</p>
+    73→            <div className="mt-2 grid grid-cols-2 gap-2">
+    74→              {SHARE_PRESETS.map((p) => (
+    75→                <button key={p.key} type="button" onClick={() => setPreset(p.key)}
+    76→                  className={cn("rounded-xl border px-3 py-2.5 text-left text-sm transition",
+    77→                    preset === p.key ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+    78→                  <span className="block font-semibold">{p.label}</span>
+    79→                  <span className="mt-0.5 block text-[10px] opacity-75">
+    80→                    {p.key === "ONE_TIME" ? "Viewed once, then dead" : p.key === "custom" ? "You pick the days" : p.days === 1 ? "24 hours" : `${p.days} days from now`}
+    81→                  </span>
+    82→                </button>
+    83→              ))}
+    84→            </div>
+    85→            {preset === "custom" && (
+    86→              <div className="mt-3">
+    87→                <Label className="text-jade-ink/80">Days the link stays open</Label>
+    88→                <Input type="number" min={1} max={365} value={customDays} onChange={(e) => setCustomDays(e.target.value)}
+    89→                  className="mt-1 border-vault-border bg-white text-jade-ink" />
+    90→              </div>
+    91→            )}
+    92→            <div className="mt-3">
+    93→              <Label className="text-jade-ink/80">Note for the recipient (optional)</Label>
+    94→              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. For the SNF recruiter"
+    95→                className="mt-1 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]" />
+    96→            </div>
+    97→            <Button onClick={create} disabled={busy} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+    98→              {busy ? "Creating…" : "Create share link"}
+    99→            </Button>
+   100→          </>
+   101→        ) : (
+   102→          <>
+   103→            <div className="mt-4 rounded-xl border border-verify-green/30 bg-verify-green/10 p-4">
+   104→              <p className="flex items-center gap-2 text-sm font-semibold text-verify-ink"><BadgeCheck className="h-4 w-4" /> Link ready</p>
+   105→              <p className="mt-1 text-xs text-[#33565b]">
+   106→                Access: <span className="font-semibold">{shareAccessLabel(created)}</span>
+   107→                {created.expiresAt && created.accessType === "DURATION" ? ` — expires ${fmt(created.expiresAt)}` : created.accessType === "ONE_TIME" ? " — first view burns the link" : ""}
+   108→              </p>
+   109→            </div>
+   110→            <div className="mt-3 break-all rounded-xl border border-vault-border bg-[#eef4f1] p-3 font-mono text-xs text-jade-ink">{link}</div>
+   111→            <div className="mt-4 flex gap-2">
+   112→              <Button onClick={() => { navigator.clipboard.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); }}
+   113→                className="flex-1 bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   114→                {copied ? <><Check className="mr-1.5 h-4 w-4" /> Copied</> : <><Copy className="mr-1.5 h-4 w-4" /> Copy link</>}
+   115→              </Button>
+   116→              <Button variant="ghost" onClick={onClose} className="border border-vault-border text-jade-muted hover:text-jade-ink">Done</Button>
+   117→            </div>
+   118→            <p className="mt-3 text-[11px] leading-relaxed text-[#8aa29c]">
+   119→              Send this to any recruiter. They’ll see the access type and deadline on the page, and can download the PDF.
+   120→            </p>
+   121→          </>
+   122→        )}
+   123→      </motion.div>
+   124→    </motion.div>
+   125→  );
+   126→}
+   127→
+   128→// ── Main portal ──
+   129→export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string | null; onExit: () => void }) {
+   130→  const [me, setMe] = useState<MeData | null>(null);
+   131→  const [sets, setSets] = useState<CatalogSet[]>([]);
+   132→  const [booting, setBooting] = useState(true);
+   133→  // auth form — arriving via a recruiter invite means the candidate is new:
+   134→  // default to signup so they set a password (email is already pre-filled)
+   135→  const [mode, setMode] = useState<"login" | "signup">(inviteToken ? "signup" : "login");
+   136→  const [form, setForm] = useState({ name: "", email: "", password: "", title: "RN" });
+   137→  const [authError, setAuthError] = useState<string | null>(null);
+   138→  const [busy, setBusy] = useState(false);
+   139→  // dashboard
+   140→  const [tab, setTab] = useState<"mine" | "requests" | "invites" | "profile">("mine");
+   141→  const [showRequest, setShowRequest] = useState(false);
+   142→  const [fillSpec, setFillSpec] = useState<FillSpec | null>(null);
+   143→  const [shareFor, setShareFor] = useState<CompletionDto | null>(null);
+   144→  const [claimedInvite, setClaimedInvite] = useState<string | null>(null);
+   145→  const [inviteCtx, setInviteCtx] = useState<{ recruiterName: string; facilityName: string; agencyName: string; message: string; candidateEmail: string } | null>(null);
+   146→
+   147→  const loadMe = useCallback(async () => {
+   148→    const res = await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
+   149→    const d: MeData & { ok: boolean } = await res.json();
+   150→    setMe({ account: d.account ?? null, invites: d.invites, requests: d.requests, completions: d.completions });
+   151→    return d.account;
+   152→  }, []);
+   153→
+   154→  useEffect(() => {
+   155→    (async () => {
+   156→      try {
+   157→        const res = await fetch("/api/checklists");
+   158→        const d = await res.json();
+   159→        if (d.ok) setSets(d.checklists);
+   160→        await loadMe();
+   161→      } catch { /* portal still renders */ } finally { setBooting(false); }
+   162→    })();
+   163→  }, [loadMe]);
+   164→
+   165→  // claim an invite link after sign-in
+   166→  useEffect(() => {
+   167→    if (!me?.account || !inviteToken || claimedInvite === inviteToken) return;
+   168→    setClaimedInvite(inviteToken);
+   169→    fetch("/api/checklist/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "claim", token: inviteToken }) })
+   170→      .then(() => loadMe())
+   171→      .catch(() => undefined);
+   172→  }, [me?.account, inviteToken, claimedInvite, loadMe]);
+   173→
+   174→  // pre-fill the signup form from the invite (email is pre-set by the recruiter;
+   175→  // the candidate only sets a password, then confirms the onboarding form)
+   176→  useEffect(() => {
+   177→    if (!inviteToken || me?.account) return;
+   178→    fetch("/api/checklist/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "preview", token: inviteToken }) })
+   179→      .then((r) => r.json())
+   180→      .then((d) => {
+   181→        if (d.ok) {
+   182→          setInviteCtx(d.invite);
+   183→          setForm((f) => ({ ...f, name: d.invite.candidateName || f.name, email: d.invite.candidateEmail || f.email, title: d.invite.jobTitle || f.title }));
+   184→        }
+   185→      })
+   186→      .catch(() => undefined);
+   187→  }, [inviteToken, me?.account]);
+   188→
+   189→  const auth = async (e?: React.FormEvent) => {
+   190→    e?.preventDefault();
+   191→    setBusy(true);
+   192→    setAuthError(null);
+   193→    try {
+   194→      const res = await fetch("/api/checklist/account", {
+   195→        method: "POST", headers: { "Content-Type": "application/json" },
+   196→        body: JSON.stringify({ action: mode, ...form }),
+   197→      });
+   198→      const d = await res.json();
+   199→      if (!res.ok || !d.ok) throw new Error(d.error ?? "Something went wrong");
+   200→      await loadMe();
+   201→      if (window.history?.replaceState) window.history.replaceState({}, "", "/");
+   202→    } catch (err) {
+   203→      setAuthError(err instanceof Error ? err.message : "Something went wrong");
+   204→    } finally { setBusy(false); }
+   205→  };
+   206→
+   207→  const signOut = async () => {
+   208→    await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) });
+   209→    setMe({ account: null });
+   210→  };
+   211→
+   212→  // ── Fill flow takes over ──
+   213→  if (fillSpec) {
+   214→    return (
+   215→      <ChecklistFill
+   216→        spec={fillSpec}
+   217→        sets={sets}
+   218→        onExit={async () => { setFillSpec(null); await loadMe(); }}
+   219→        onDone={async () => { setFillSpec(null); setTab("mine"); await loadMe(); }}
+   220→      />
+   221→    );
+   222→  }
+   223→
+   224→  // ── Onboarding gate: every candidate confirms their profile once ──
+   225→  if (me?.account && !me.account.onboardingComplete) {
+   226→    return (
+   227→      <ChecklistOnboarding
+   228→        account={me.account}
+   229→        sets={sets}
+   230→        onSaved={loadMe}
+   231→        onExit={signOut}
+   232→        banner={
+   233→          (me.invites ?? []).some((i) => i.status !== "COMPLETED")
+   234→            ? "A recruiter is waiting on your checklist — confirm your details below, then complete it."
+   235→            : undefined
+   236→        }
+   237→      />
+   238→    );
+   239→  }
+   240→
+   241→  // ── Auth gate ──
+   242→  if (booting) {
+   243→    return <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]"><Spinner label="Opening your vault…" /></div>;
+   244→  }
+   245→  if (!me?.account) {
+   246→    return (
+   247→      <div className="vv-page flex min-h-screen items-center justify-center px-4 py-10">
+   248→        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+   249→          className="w-full max-w-md">
+   250→          <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-8">
+   251→            <div className="flex flex-col items-center text-center">
+   252→              <VaultMark size={44} />
+   253→              <h1 className="mt-4 text-xl font-semibold text-jade-ink">Skills Checklist</h1>
+   254→              <p className="mt-1 text-sm text-jade-muted">
+   255→                {mode === "login" ? "Sign in to your self-assessments." : "Create your account — complete a checklist once, reuse it for a year."}
+   256→              </p>
+   257→            </div>
+   258→            {inviteCtx && (
+   259→              <div className="mt-4 rounded-xl border border-verify-green/30 bg-verify-green/10 p-3 text-xs text-jade-ink">
+   260→                <p className="font-semibold text-verify-ink">{inviteCtx.recruiterName}{inviteCtx.facilityName ? ` · ${inviteCtx.facilityName}` : ""} sent you a checklist request</p>
+   261→                {inviteCtx.message && <p className="mt-0.5 italic text-jade-muted">“{inviteCtx.message}”</p>}
+   262→                <p className="mt-1 text-jade-muted">Sign up with <span className="font-semibold">{inviteCtx.candidateEmail}</span> — your email is already set; you'll pick a password next.</p>
+   263→              </div>
+   264→            )}
+   265→            {!inviteCtx && inviteToken && (
+   266→              <div className="mt-4 flex items-center gap-2 rounded-xl border border-verify-green/30 bg-verify-green/10 p-3 text-xs text-verify-ink">
+   267→                <Inbox className="h-4 w-4 shrink-0" /> A recruiter sent you a checklist — sign in or create an account with the same email to claim it.
+   268→              </div>
+   269→            )}
+   270→            <form onSubmit={auth} className="mt-6 space-y-3.5">
+   271→              {mode === "signup" && (
+   272→                <div>
+   273→                  <Label htmlFor="cp-name" className="text-jade-ink/80">Full name</Label>
+   274→                  <Input id="cp-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Emma Chen"
+   275→                    className="mt-1 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]" />
+   276→                </div>
+   277→              )}
+   278→              <div>
+   279→                <Label htmlFor="cp-email" className="text-jade-ink/80">Email</Label>
+   280→                <Input id="cp-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@example.com"
+   281→                  className="mt-1 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]" />
+   282→              </div>
+   283→              <div>
+   284→                <Label htmlFor="cp-pass" className="text-jade-ink/80">Password</Label>
+   285→                <Input id="cp-pass" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={mode === "signup" ? "At least 8 characters" : "••••••••"}
+   286→                  className="mt-1 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]" />
+   287→              </div>
+   288→              {authError && <p className="text-xs font-medium text-rose-600">{authError}</p>}
+   289→              <Button type="submit" disabled={busy} className="w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   290→                {busy ? "One moment…" : mode === "login" ? "Sign in" : "Create account"} <ShieldCheck className="ml-2 h-4 w-4" />
+   291→              </Button>
+   292→            </form>
+   293→            <button type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setAuthError(null); }}
+   294→              className="mt-4 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
+   295→              {mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
+   296→            </button>
+   297→            <div className="mt-4 rounded-xl bg-[#f0f6f2] p-3 text-center text-[11px] text-jade-muted">
+   298→              Demo account: <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => { setMode("login"); setForm({ ...form, email: "emma.chen@example.com", password: "demo1234" }); }}>emma.chen@example.com / demo1234</button>
+   299→            </div>
+   300→            <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-[#8aa29c] hover:text-jade-muted">← Back to site</button>
+   301→          </div>
+   302→        </motion.div>
+   303→      </div>
+   304→    );
+   305→  }
+   306→
+   307→  const acc = me.account;
+   308→  const completions = me.completions ?? [];
+   309→  const requests = me.requests ?? [];
+   310→  const invites = me.invites ?? [];
+   311→  const openInvites = invites.filter((i) => i.status !== "COMPLETED");
+   312→  const pendingRequests = requests.filter((r) => r.status === "PENDING");
+   313→  const approvedRequests = requests.filter((r) => r.status === "APPROVED" && !r.completionId);
+   314→
+   315→  const startFill = (spec: FillSpec) => setFillSpec(spec);
+   316→
+   317→  return (
+   318→    <div className="vv-page min-h-screen">
+   319→      <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-white/85 backdrop-blur-xl">
+   320→        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+   321→          <div className="flex items-center gap-3">
+   322→            <VaultMark size={32} />
+   323→            <div className="leading-tight">
+   324→              <p className="text-sm font-semibold text-jade-ink">Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Skills Checklist</span></p>
+   325→              <p className="text-[11px] text-jade-muted">{acc.name} · {acc.email}</p>
+   326→            </div>
+   327→          </div>
+   328→          <div className="flex items-center gap-2">
+   329→            <Button size="sm" onClick={() => setShowRequest(true)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   330→              <Plus className="mr-1 h-3.5 w-3.5" /> Request checklist
+   331→            </Button>
+   332→            <Button variant="ghost" size="sm" onClick={signOut} className="text-jade-muted hover:text-jade-ink">Sign out</Button>
+   333→          </div>
+   334→        </div>
+   335→      </header>
+   336→
+   337→      <main className="mx-auto max-w-5xl px-4 pb-16 pt-8 sm:px-6">
+   338→        {/* summary strip */}
+   339→        <div className="grid grid-cols-3 gap-3">
+   340→          {[
+   341→            ["My checklists", completions.length, ClipboardList],
+   342→            ["Awaiting approval", pendingRequests.length, Hourglass],
+   343→            ["Requests from recruiters", openInvites.length, Inbox],
+   344→          ].map(([label, value, Icon]) => {
+   345→            const I = Icon as typeof ClipboardList;
+   346→            return (
+   347→              <div key={label as string} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-4">
+   348→                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-jade-muted"><I className="h-3.5 w-3.5" /> {label as string}</p>
+   349→                <p className="mt-1 text-2xl font-bold text-jade-ink">{value as number}</p>
+   350→              </div>
+   351→            );
+   352→          })}
+   353→        </div>
+   354→
+   355→        {/* tabs */}
+   356→        <div className="mt-8 flex gap-2">
+   357→          {([["mine", "My checklists"], ["requests", "Requests"], ["invites", `Invites${openInvites.length ? ` (${openInvites.length})` : ""}`], ["profile", "Profile"]] as const).map(([k, lb]) => (
+   358→            <button key={k} type="button" onClick={() => setTab(k)}
+   359→              className={cn("rounded-full border px-4 py-1.5 text-sm font-medium transition",
+   360→                tab === k ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+   361→              {lb}
+   362→            </button>
+   363→          ))}
+   364→        </div>
+   365→
+   366→        {/* My checklists */}
+   367→        {tab === "mine" && (
+   368→          <div className="mt-6 space-y-4">
+   369→            {completions.length === 0 && (
+   370→              <div className="rounded-2xl border border-dashed border-vault-border bg-white/60 p-10 text-center">
+   371→                <ClipboardList className="mx-auto h-8 w-8 text-verify-ink/60" />
+   372→                <p className="mt-3 text-sm text-jade-muted">No completed checklists yet. Request one from the library, or wait for a recruiter invite.</p>
+   373→                <Button size="sm" onClick={() => setShowRequest(true)} className="mt-4 bg-verify-green text-vault-dark hover:bg-verify-green/90"><Plus className="mr-1 h-3.5 w-3.5" /> Request checklist</Button>
+   374→              </div>
+   375→            )}
+   376→            {completions.map((c) => {
+   377→              const expired = new Date(c.expiresAt) < new Date();
+   378→              return (
+   379→                <motion.div key={c.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}
+   380→                  className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
+   381→                  <div className="flex flex-wrap items-start justify-between gap-3">
+   382→                    <div>
+   383→                      <p className="flex items-center gap-2 text-base font-semibold text-jade-ink">
+   384→                        {c.specialtyLabel} <span className="rounded bg-[#eef4f1] px-2 py-0.5 text-[11px] font-normal text-jade-muted">{c.jobTitle} · {c.profession}</span>
+   385→                      </p>
+   386→                      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-jade-muted">
+   387→                        <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold",
+   388→                          expired ? "border-rose-300 text-rose-600" : "border-verify-green/40 text-verify-ink")}>
+   389→                          <CalendarClock className="h-3 w-3" />
+   390→                          {expired ? "Expired — retake to share again" : `Valid for ${monthsLeft(c.expiresAt)} more month(s) · until ${fmt(c.expiresAt)}`}
+   391→                        </span>
+   392→                        <span>Completed {fmt(c.completedAt)}</span>
+   393→                        <span>· {c.yearsExperience} yr experience · {c.source === "RECRUITER" ? "via recruiter request" : "self-requested"}</span>
+   394→                      </p>
+   395→                    </div>
+   396→                    <div className="flex gap-2">
+   397→                      <a href={`/api/checklist/pdf?completion=${c.id}`} download>
+   398→                        <Button size="sm" variant="ghost" className="border border-vault-border text-jade-muted hover:text-jade-ink"><Download className="mr-1.5 h-3.5 w-3.5" /> PDF</Button>
+   399→                      </a>
+   400→                      <Button size="sm" disabled={expired} onClick={() => setShareFor(c)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   401→                        <Link2 className="mr-1.5 h-3.5 w-3.5" /> Share
+   402→                      </Button>
+   403→                    </div>
+   404→                  </div>
+   405→                  {c.shareLinks.length > 0 && (
+   406→                    <div className="mt-4 border-t border-vault-border/60 pt-3">
+   407→                      <p className="text-[11px] font-semibold uppercase tracking-wider text-jade-muted">Shared links</p>
+   408→                      <div className="mt-2 space-y-1.5">
+   409→                        {c.shareLinks.map((s) => {
+   410→                          const dead = s.revoked || (s.accessType === "ONE_TIME" && s.viewedAt) || (s.expiresAt && new Date(s.expiresAt) < new Date());
+   411→                          return (
+   412→                            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#f0f6f2] px-3 py-2">
+   413→                              <p className="text-xs text-[#33565b]">
+   414→                                <span className="font-mono text-verify-ink">/?s={s.token.slice(0, 10)}…</span>
+   415→                                {s.label && <span className="ml-2 italic text-jade-muted">“{s.label}”</span>}
+   416→                              </p>
+   417→                              <p className="flex items-center gap-2 text-[11px]">
+   418→                                <span className={cn("rounded-full border px-2 py-0.5 font-semibold", dead ? "border-vault-border text-[#8aa29c] line-through" : "border-verify-green/40 text-verify-ink")}>
+   419→                                  {shareAccessLabel(s)}
+   420→                                </span>
+   421→                                {s.accessType === "ONE_TIME" ? (s.viewedAt ? "viewed" : "unopened") : s.expiresAt ? `until ${fmt(s.expiresAt)}` : ""}
+   422→                                <button type="button" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/?s=${s.token}`)}
+   423→                                  className="rounded p-1 text-jade-muted hover:text-jade-ink" aria-label="Copy link"><Copy className="h-3 w-3" /></button>
+   424→                              </p>
+   425→                            </div>
+   426→                          );
+   427→                        })}
+   428→                      </div>
+   429→                    </div>
+   430→                  )}
+   431→                </motion.div>
+   432→              );
+   433→            })}
+   434→          </div>
+   435→        )}
+   436→
+   437→        {/* Requests */}
+   438→        {tab === "requests" && (
+   439→          <div className="mt-6 space-y-4">
+   440→            {approvedRequests.map((r) => (
+   441→              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verify-green/30 bg-verify-green/10 p-5">
+   442→                <div>
+   443→                  <p className="text-sm font-semibold text-jade-ink">{specialtyLabel(r.specialty)} · {r.jobTitle}</p>
+   444→                  <p className="text-xs text-verify-ink">Approved — ready to complete</p>
+   445→                </div>
+   446→                <Button size="sm" onClick={() => startFill({ requestId: r.id, profession: r.profession, jobTitle: r.jobTitle, specialty: r.specialty })}
+   447→                  className="bg-verify-green text-vault-dark hover:bg-verify-green/90">Complete now</Button>
+   448→              </div>
+   449→            ))}
+   450→            {requests.map((r) => (
+   451→              <div key={r.id + r.status} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
+   452→                <div>
+   453→                  <p className="text-sm font-semibold text-jade-ink">{specialtyLabel(r.specialty)} · {r.jobTitle} <span className="ml-1 text-xs font-normal text-jade-muted">{r.profession}</span></p>
+   454→                  <p className="mt-0.5 text-xs text-jade-muted">Requested {fmt(r.requestedAt)}{r.decidedAt ? ` · decided ${fmt(r.decidedAt)}` : ""}</p>
+   455→                </div>
+   456→                <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
+   457→                  r.status === "PENDING" ? "border-amber-300 text-amber-600" : r.status === "APPROVED" ? "border-verify-green/40 text-verify-ink" : "border-rose-300 text-rose-600")}>
+   458→                  {r.status === "PENDING" ? "Awaiting superadmin approval" : r.status === "APPROVED" ? "Approved" : "Declined"}
+   459→                </span>
+   460→              </div>
+   461→            ))}
+   462→            {requests.length === 0 && (
+   463→              <div className="rounded-2xl border border-dashed border-vault-border bg-white/60 p-10 text-center">
+   464→                <p className="text-sm text-jade-muted">No requests yet. Browse the library and request the checklist you need — a superadmin approves it, then it lands here.</p>
+   465→                <Button size="sm" onClick={() => setShowRequest(true)} className="mt-4 bg-verify-green text-vault-dark hover:bg-verify-green/90"><Plus className="mr-1 h-3.5 w-3.5" /> Request checklist</Button>
+   466→              </div>
+   467→            )}
+   468→          </div>
+   469→        )}
+   470→
+   471→        {/* Profile (edit onboarding details) */}
+   472→        {tab === "profile" && (
+   473→          <div className="mt-6">
+   474→            <ChecklistOnboarding account={acc} sets={sets} onSaved={loadMe} embedded />
+   475→          </div>
+   476→        )}
+   477→
+   478→        {/* Invites */}
+   479→        {tab === "invites" && (
+   480→          <div className="mt-6 space-y-4">
+   481→            {openInvites.map((i) => (
+   482→              <div key={i.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verify-green/30 bg-verify-green/10 p-5">
+   483→                <div>
+   484→                  <p className="text-sm font-semibold text-jade-ink">
+   485→                    {i.specialty ? specialtyLabel(i.specialty) : "Specialty: your choice"} <span className="text-xs font-normal text-jade-muted">· {i.jobTitle || "job title TBD"}</span>
+   486→                  </p>
+   487→                  <p className="mt-0.5 text-xs text-jade-muted">From {i.recruiterName}{i.facilityName ? ` · ${i.facilityName}` : ""} · {fmt(i.createdAt)}</p>
+   488→                  {i.message && <p className="mt-1 text-xs italic text-jade-muted">“{i.message}”</p>}
+   489→                </div>
+   490→                <Button size="sm" onClick={() => startFill({ inviteId: i.id, profession: i.profession || "Nursing", jobTitle: i.jobTitle || "RN", specialty: i.specialty, recruiterName: i.recruiterName, facilityName: i.facilityName, message: i.message })}
+   491→                  className="bg-verify-green text-vault-dark hover:bg-verify-green/90">Complete now</Button>
+   492→              </div>
+   493→            ))}
+   494→            {invites.filter((i) => i.status === "COMPLETED").map((i) => (
+   495→              <div key={i.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-vault-border bg-white vv-card-shadow p-5 opacity-80">
+   496→                <div>
+   497→                  <p className="text-sm font-semibold text-jade-ink">{i.specialtyLabel || i.specialty.replace(/_/g, " ")}</p>
+   498→                  <p className="mt-0.5 text-xs text-jade-muted">For {i.recruiterName} · completed {i.completedAt ? fmt(i.completedAt) : ""}</p>
+   499→                </div>
+   500→                <span className="flex items-center gap-1 rounded-full border border-verify-green/40 px-3 py-1 text-xs font-semibold text-verify-ink"><Check className="h-3 w-3" /> Done</span>
+   501→              </div>
+   502→            ))}
+   503→            {invites.length === 0 && (
+   504→              <div className="rounded-2xl border border-dashed border-vault-border bg-white/60 p-10 text-center">
+   505→                <Inbox className="mx-auto h-8 w-8 text-verify-ink/60" />
+   506→                <p className="mt-3 text-sm text-jade-muted">No recruiter invites yet. When a recruiter sends you a checklist request, it shows up here.</p>
+   507→              </div>
+   508→            )}
+   509→          </div>
+   510→        )}
+   511→      </main>
+   512→
+   513→      {/* Request-new panel */}
+   514→      <AnimatePresence>
+   515→        {showRequest && (
+   516→          <RequestPanel sets={sets} onClose={() => setShowRequest(false)} onRequested={async () => { setShowRequest(false); setTab("requests"); await loadMe(); }} />
+   517→        )}
+   518→      </AnimatePresence>
+   519→
+   520→      {/* Share dialog */}
+   521→      <AnimatePresence>
+   522→        {shareFor && <ShareDialog completion={shareFor} onClose={() => setShareFor(null)} onCreated={loadMe} />}
+   523→      </AnimatePresence>
+   524→    </div>
+   525→  );
+   526→}
+   527→
+   528→// ── Catalog picker (candidate requests a checklist → superadmin approves) ──
+   529→function RequestPanel({ sets, onClose, onRequested }: { sets: CatalogSet[]; onClose: () => void; onRequested: () => void }) {
+   530→  const [busyId, setBusyId] = useState<string | null>(null);
+   531→  const [error, setError] = useState<string | null>(null);
+   532→
+   533→  const request = async (s: CatalogSet) => {
+   534→    setBusyId(s.key);
+   535→    setError(null);
+   536→    try {
+   537→      const res = await fetch("/api/checklist/request", {
+   538→        method: "POST", headers: { "Content-Type": "application/json" },
+   539→        body: JSON.stringify({ profession: s.profession, jobTitle: s.jobTitle, specialty: s.specialty }),
+   540→      });
+   541→      const d = await res.json();
+   542→      if (!res.ok || !d.ok) throw new Error(d.error ?? "Request failed");
+   543→      onRequested();
+   544→    } catch (e) {
+   545→      setError(e instanceof Error ? e.message : "Request failed");
+   546→    } finally { setBusyId(null); }
+   547→  };
+   548→
+   549→  return (
+   550→    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+   551→      className="fixed inset-0 z-50 flex items-end justify-center bg-[#0b2b30]/45 p-4 backdrop-blur-sm sm:items-center" onClick={onClose}>
+   552→      <motion.div initial={{ y: 24, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 24, opacity: 0 }} transition={{ type: "spring", stiffness: 300, damping: 26 }}
+   553→        className="max-h-[80vh] w-full max-w-lg overflow-auto rounded-2xl border border-vault-border bg-white vv-card-shadow p-6" onClick={(e) => e.stopPropagation()}>
+   554→        <div className="flex items-start justify-between">
+   555→          <div>
+   556→            <h3 className="flex items-center gap-2 text-base font-semibold text-jade-ink"><Plus className="h-4 w-4 text-verify-ink" /> Request a checklist</h3>
+   557→            <p className="mt-1 text-xs text-jade-muted">Pick from the library. A superadmin approves your request, then you complete it once — it stays valid for a year.</p>
+   558→          </div>
+   559→          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"><X className="h-4 w-4" /></button>
+   560→        </div>
+   561→        <div className="mt-4 space-y-2">
+   562→          {sets.map((s) => (
+   563→            <div key={s.key} className="flex items-center justify-between gap-3 rounded-xl border border-vault-border bg-[#f2f7f4] p-4">
+   564→              <div>
+   565→                <p className="text-sm font-semibold text-jade-ink">{s.label} <span className="text-xs font-normal text-jade-muted">· {s.jobTitle} · {s.profession}</span></p>
+   566→                <p className="mt-0.5 text-xs text-jade-muted">{s.skills.length} skill(s) · {new Set(s.skills.map((k) => k.category)).size} categor{s.skills.length === 1 ? "y" : "ies"}</p>
+   567→              </div>
+   568→              <Button size="sm" disabled={busyId === s.key} onClick={() => request(s)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   569→                {busyId === s.key ? <Spinner size={14} /> : <><ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Request</>}
+   570→              </Button>
+   571→            </div>
+   572→          ))}
+   573→          {sets.length === 0 && <p className="py-6 text-center text-sm text-jade-muted">The library is empty — a superadmin needs to publish checklists first.</p>}
+   574→        </div>
+   575→        {error && <p className="mt-3 text-xs font-medium text-rose-600">{error}</p>}
+   576→      </motion.div>
+   577→    </motion.div>
+   578→  );
+   579→}
+   580→

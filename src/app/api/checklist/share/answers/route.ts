@@ -11,7 +11,12 @@ export async function GET(req: NextRequest) {
     if (!link || link.revoked) return NextResponse.json({ ok: false }, { status: 404 });
     if (link.accessType === "ONE_TIME" && link.viewedAt) return NextResponse.json({ ok: false }, { status: 403 });
     if (link.expiresAt && link.expiresAt < new Date()) return NextResponse.json({ ok: false }, { status: 403 });
-    return NextResponse.json({ ok: true, answers: JSON.parse(link.completion.answers || "[]") });
+    return NextResponse.json({
+      ok: true,
+      answers: JSON.parse(link.completion.answers || "[]"),
+      additional: JSON.parse(link.completion.additional || "[]"),
+      attestation: link.completion.attestation ? JSON.parse(link.completion.attestation) : null,
+    });
   } catch (e) {
     console.error("[checklist/share/answers]", e);
     return NextResponse.json({ ok: false }, { status: 500 });

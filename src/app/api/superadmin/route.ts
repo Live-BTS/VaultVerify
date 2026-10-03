@@ -28,7 +28,7 @@ function yearsFrom(manual: number, start: Date | null): number {
 }
 
 async function overview() {
-  const [agencies, candidates, requests, responses, templates, flags, notifications, accounts, invites, refRequests] = await Promise.all([
+  const [agencies, candidates, requests, responses, templates, flags, notifications, accounts, invites, refRequests, extras] = await Promise.all([
     db.agency.findMany({ include: { _count: { select: { candidates: true } } }, orderBy: { createdAt: "asc" } }),
     db.candidate.count(),
     db.referenceRequest.count(),
@@ -42,6 +42,7 @@ async function overview() {
     }),
     db.checklistInvite.count(),
     db.referenceRequest.count(),
+    db.checklistExtraQuestion.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
   ]);
   const completed = await db.referenceRequest.count({ where: { status: "COMPLETED" } });
   const checklistRequests = await db.checklistRequest.count({ where: { status: "PENDING" } });
@@ -92,6 +93,7 @@ async function overview() {
     users,
     candidateProfiles,
     companies,
+    extras: extras.map((q) => ({ id: q.id, kind: q.kind, prompt: q.prompt, placeholder: q.placeholder, specialty: q.specialty, active: q.active, sortOrder: q.sortOrder })),
   };
 }
 
@@ -178,6 +180,51 @@ export async function POST(req: NextRequest) {
           detail: JSON.stringify({ specialty: body.specialty, deleted: del.count }),
         });
         return NextResponse.json({ ok: true, deleted: del.count });
+      }
+
+      // ── Additional questions (the PDF's extra section) — full CRUD ──
+      case "extra.create": {
+        const kind = body.kind === "TEXT" ? "TEXT" : "YES_NO";
+        const prompt = String(body.prompt ?? "").trim();
+        if (prompt.length < 4) return NextResponse.json({ ok: false, error: "Question text is too short" }, { status: 400 });
+        const q = await db.checklistExtraQuestion.create({
+          data: {
+            kind,
+            prompt: prompt.slice(0, 300),
+            placeholder: String(body.placeholder ?? "").slice(0, 200),
+            specialty: String(body.specialty ?? ""),
+            sortOrder: Number(body.sortOrder) || (kind === "YES_NO" ? 10 : 50),
+          },
+        });
+        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_CREATED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ kind }) });
+        return NextResponse.json({ ok: true, question: q });
+      }
+
+      case "extra.update": {
+        const prompt = String(body.prompt ?? "").trim();
+        if (prompt.length < 4) return NextResponse.json({ ok: false, error: "Question text is too short" }, { status: 400 });
+        const q = await db.checklistExtraQuestion.update({
+          where: { id: String(body.id ?? "") },
+          data: {
+            prompt: prompt.slice(0, 300),
+            placeholder: String(body.placeholder ?? "").slice(0, 200),
+            specialty: String(body.specialty ?? ""),
+          },
+        });
+        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_UPDATED", entity: "checklistExtraQuestion", entityId: q.id });
+        return NextResponse.json({ ok: true, question: q });
+      }
+
+      case "extra.toggle": {
+        const q = await db.checklistExtraQuestion.update({ where: { id: String(body.id ?? "") }, data: { active: !!body.active } });
+        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_TOGGLED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ active: q.active }) });
+        return NextResponse.json({ ok: true, question: q });
+      }
+
+      case "extra.delete": {
+        await db.checklistExtraQuestion.delete({ where: { id: String(body.id ?? "") } });
+        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_DELETED", entity: "checklistExtraQuestion", entityId: String(body.id ?? "") });
+        return NextResponse.json({ ok: true });
       }
 
       default:

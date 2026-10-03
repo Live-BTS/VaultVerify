@@ -7,19 +7,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
-import { specialtyLabel } from "@/lib/bts/checklistShared";
+import { RATING_META, specialtyLabel, summarizeAnswers, type SkillAnswer } from "@/lib/bts/checklistShared";
 import { VaultMark, Spinner } from "../brand";
 import { ChecklistFill, type CatalogSet, type FillSpec } from "./ChecklistFill";
 import { ChecklistOnboarding, type ProfileData } from "./ChecklistOnboarding";
 import {
-  BadgeCheck, CalendarClock, Check, ClipboardList, Copy, Download, ExternalLink, Hourglass,
+  AdditionalQuestionsView, AttestationView, AvgRing, CategoryBars, MixDonut, RecentDonut,
+  RatingLegend, RecencyLegend, RecencyStrip, SectionHeading, SkillReportRow,
+  type AdditionalAnswer, type AttestationData,
+} from "./ReportBits";
+import {
+  BadgeCheck, CalendarClock, Check, ChevronDown, ClipboardList, Copy, Download, ExternalLink, Hourglass,
   Inbox, Link2, Plus, ShieldCheck, X,
 } from "lucide-react";
 
 // ── Skills Checklist candidate portal — accounts, onboarding, requests, invites, shares ──
 
 interface ShareLinkDto { id: string; token: string; accessType: string; durationDays: number | null; label: string; createdAt: string; expiresAt: string | null; viewedAt: string | null; viewCount: number; revoked: boolean }
-interface CompletionDto { id: string; profession: string; jobTitle: string; specialty: string; specialtyLabel: string; source: string; completedAt: string; expiresAt: string; yearsExperience: number; shareLinks: ShareLinkDto[] }
+interface CompletionDto { id: string; profession: string; jobTitle: string; specialty: string; specialtyLabel: string; source: string; completedAt: string; expiresAt: string; yearsExperience: number; shareLinks: ShareLinkDto[]; answers: SkillAnswer[]; additional: AdditionalAnswer[]; attestation: AttestationData | null }
 interface RequestDto { id: string; profession: string; jobTitle: string; specialty: string; status: string; requestedAt: string; decidedAt: string | null; completionId: string | null }
 interface InviteDto { id: string; recruiterName: string; facilityName: string; agencyName: string; profession: string; jobTitle: string; specialty: string; status: string; createdAt: string; completedAt: string | null; completionId: string | null; message: string; specialtyLabel?: string }
 interface AccountDto extends ProfileData { onboardingComplete: boolean }
@@ -141,6 +146,7 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
   const [showRequest, setShowRequest] = useState(false);
   const [fillSpec, setFillSpec] = useState<FillSpec | null>(null);
   const [shareFor, setShareFor] = useState<CompletionDto | null>(null);
+  const [openReport, setOpenReport] = useState<string | null>(null);
   const [claimedInvite, setClaimedInvite] = useState<string | null>(null);
   const [inviteCtx, setInviteCtx] = useState<{ recruiterName: string; facilityName: string; agencyName: string; message: string; candidateEmail: string } | null>(null);
 
@@ -375,6 +381,9 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
             )}
             {completions.map((c) => {
               const expired = new Date(c.expiresAt) < new Date();
+              const summary = summarizeAnswers(c.answers ?? []);
+              const grouped = (c.answers ?? []).reduce<Record<string, SkillAnswer[]>>((acc, a) => { (acc[a.category] ??= []).push(a); return acc; }, {});
+              const expanded = openReport === c.id;
               return (
                 <motion.div key={c.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}
                   className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
@@ -402,6 +411,63 @@ export function ChecklistPortal({ inviteToken, onExit }: { inviteToken?: string 
                       </Button>
                     </div>
                   </div>
+
+                  {/* summary at a glance — same language as the PDF report */}
+                  <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-vault-border/60 pt-4">
+                    <div className="flex items-center gap-4">
+                      <AvgRing avg={summary.avg} size={68} thickness={7} />
+                      <RecentDonut summary={summary} size={68} thickness={7} />
+                      <div className="hidden flex-col gap-1 sm:flex">
+                        {([1, 2, 3, 4] as const).map((n) => (
+                          <span key={n} className="inline-flex items-center gap-1.5 text-[11px] text-jade-muted">
+                            <span className="h-2 w-2 rounded-full" style={{ background: RATING_META[n].dot }} />
+                            <b className="text-jade-ink">{summary.mix[n]}</b> · {RATING_META[n].short}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="min-w-[220px] flex-1">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">Category overview</p>
+                      <div className="mt-2"><CategoryBars summary={summary} max={4} /></div>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => setOpenReport(expanded ? null : c.id)}
+                      className="border border-vault-border text-jade-muted hover:text-jade-ink">
+                      <ChevronDown className={cn("mr-1 h-3.5 w-3.5 transition-transform", !expanded && "-rotate-90")} />
+                      {expanded ? "Hide report" : "View report"}
+                    </Button>
+                  </div>
+
+                  {expanded && (
+                    <div className="mt-4 space-y-5 border-t border-vault-border/60 pt-4">
+                      <div className="flex flex-wrap items-center justify-around gap-5">
+                        <div className="text-center">
+                          <MixDonut summary={summary} size={96} />
+                          <p className="mt-1.5 text-[11px] font-semibold text-jade-muted">Rating mix</p>
+                        </div>
+                        <div className="w-56"><RecencyStrip summary={summary} /></div>
+                      </div>
+                      <div className="space-y-2">
+                        <RatingLegend />
+                        <RecencyLegend />
+                      </div>
+                      {Object.entries(grouped).map(([cat, items]) => (
+                        <div key={cat}>
+                          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">{cat}</p>
+                          <div className="overflow-hidden rounded-xl border border-vault-border">
+                            {items.map((a, i) => <SkillReportRow key={a.skill} a={a} first={i === 0} />)}
+                          </div>
+                        </div>
+                      ))}
+                      {(c.additional ?? []).length > 0 && (
+                        <div>
+                          <SectionHeading className="mb-2">Additional questions</SectionHeading>
+                          <AdditionalQuestionsView items={c.additional} />
+                        </div>
+                      )}
+                      {c.attestation && <AttestationView att={c.attestation} fallbackName={acc.name} />}
+                    </div>
+                  )}
+
                   {c.shareLinks.length > 0 && (
                     <div className="mt-4 border-t border-vault-border/60 pt-3">
                       <p className="text-[11px] font-semibold uppercase tracking-wider text-jade-muted">Shared links</p>
