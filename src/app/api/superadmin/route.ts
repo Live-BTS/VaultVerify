@@ -946,6 +946,10 @@ export async function POST(req: NextRequest) {
     }
   } catch (e) {
     console.error("[superadmin]", e);
-    return NextResponse.json({ ok: false, error: "Superadmin request failed" }, { status: 500 });
+    const msg = e instanceof Error ? e.message : "";
+    const dbHint = /P1001|P1013|P1017|Authentication|Can't reach|Timed out fetching|doesn't exist|Invalid/i.test(msg)
+      ? " The deployment's database connection is failing — verify DATABASE_URL in Vercel → Settings → Environment Variables and redeploy."
+      : "";
+    return NextResponse.json({ ok: false, error: `Superadmin request failed.${dbHint}` }, { status: 500 });
   }
 }

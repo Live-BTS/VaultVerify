@@ -39,8 +39,20 @@ export const maintenanceMode = async (): Promise<boolean> =>
 
 // Guard for mutating user-facing routes while the platform is upgrading.
 // Superadmin routes deliberately bypass this check.
+// A failing flag lookup (e.g. unreachable DATABASE_URL on a fresh deploy)
+// must read as an owner action item, never as an unhandled 500.
 export async function assertPlatformWritable(): Promise<{ ok: boolean; error?: string }> {
-  if (await maintenanceMode()) {
+  let maintenance: boolean;
+  try {
+    maintenance = await maintenanceMode();
+  } catch (e) {
+    console.error("[platform] flag lookup failed — database unreachable?", e);
+    return {
+      ok: false,
+      error: "Database unreachable — the deployment cannot read its configuration store. Verify DATABASE_URL (host, password, sslmode) under Vercel → Settings → Environment Variables, then redeploy.",
+    };
+  }
+  if (maintenance) {
     return { ok: false, error: "VaultVerify is briefly upgrading — the platform is in maintenance mode. Try again in a few minutes." };
   }
   return { ok: true };
