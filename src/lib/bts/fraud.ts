@@ -4,7 +4,7 @@ import { RAPID_COMPLETION_SECONDS } from "./constants";
 // ── Fraud & pattern detection (runs on every submission) ──────
 // Rules from Phase 1 plan:
 //  1. Free email address matching the candidate's surname
-//  2. Duplicate IPs across both references for the same candidate
+//  2. Duplicate signer IP across a candidate's references
 //  3. Completion in under 60 seconds
 //  4. Employer-domain identity check failed / skipped
 
@@ -52,7 +52,7 @@ export async function runFraudChecks(ctx: FraudContext): Promise<FlagResult[]> {
     }
   }
 
-  // 2. Duplicate IPs across both references of the same candidate
+  // 2. Duplicate signer IP across the same candidate's references
   const request = await db.referenceRequest.findUnique({
     where: { id: ctx.requestId },
     include: { candidate: { include: { requests: { include: { response: true } } } } },
@@ -62,7 +62,7 @@ export async function runFraudChecks(ctx: FraudContext): Promise<FlagResult[]> {
     if (sibling) {
       flags.push({
         type: "DUPLICATE_IP",
-        detail: `Same IP (${ctx.signerIp}) was used by both references — matches "${sibling.refName}'s" submission.`,
+        detail: `Same IP (${ctx.signerIp}) was also used by "${sibling.refName}'s" reference submission for this candidate.`,
         severity: "HIGH",
       });
     }

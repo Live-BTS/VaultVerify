@@ -17,13 +17,13 @@ import { ArrowLeft, ArrowRight, Send, CheckCircle2, Wand2, Lock, UserRound, User
 interface RefDraft {
   refName: string; refTitle: string; refEmail: string; refPhone: string;
   facilityName: string; facilityCity: string; facilityState: string;
-  relationship: string; workStartDate: string; workEndDate: string;
+  relationship: string; relationshipOther?: string; workStartDate: string; workEndDate: string;
 }
 
 const emptyRef = (): RefDraft => ({
   refName: "", refTitle: "", refEmail: "", refPhone: "",
   facilityName: "", facilityCity: "", facilityState: "",
-  relationship: "", workStartDate: "", workEndDate: "",
+  relationship: "", relationshipOther: "", workStartDate: "", workEndDate: "",
 });
 
 const RELATIONSHIPS = ["Direct supervisor", "Charge nurse / team lead", "Peer colleague on same unit", "Educator / preceptor", "Other working relationship"];
@@ -46,11 +46,13 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
   const [profile, setProfile] = useState({ fullName: initial?.name ?? "", email: initial?.email ?? "", phone: "", role: initial?.role ?? "RN", specialty: "", yearsExperience: "3", city: "", state: "", licenseNumber: "" });
   // NOTE: skills are NOT collected here — the skills checklist is a separate
   // self-assessment feature completed in the Skills Checklist portal.
-  const [refs, setRefs] = useState<RefDraft[]>([emptyRef(), emptyRef()]);
+  // References are requested ONE AT A TIME — a single referee per request.
+  // Candidates add more (no limit) from the portal's References section.
+  const [ref, setRef] = useState<RefDraft>(emptyRef());
   const [consent, setConsent] = useState({ agreed: false, signature: "" });
 
   const setP = (k: keyof typeof profile, v: string) => setProfile((p) => ({ ...p, [k]: v }));
-  const setR = (i: number, k: keyof RefDraft, v: string) => setRefs((rs) => rs.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+  const setF = (k: keyof RefDraft, v: string) => setRef((r) => ({ ...r, [k]: v }));
 
   const validateProfile = () => {
     if (!profile.fullName.trim() || !profile.email.trim() || !profile.specialty) return "Name, email, and specialty are required.";
@@ -58,11 +60,8 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
     return null;
   };
   const validateRefs = () => {
-    for (let i = 0; i < 2; i++) {
-      const r = refs[i];
-      if (!r.refName.trim() || !r.refTitle.trim() || !r.refEmail.trim() || !r.facilityName.trim() || !r.relationship) return `Reference ${i + 1}: name, title, email, facility, and relationship are required.`;
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.refEmail)) return `Reference ${i + 1}: enter a valid email.`;
-    }
+    if (!ref.refName.trim() || !ref.refTitle.trim() || !ref.refEmail.trim() || !ref.facilityName.trim() || !ref.relationship) return "Name, title, email, facility, and relationship are required.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ref.refEmail)) return "Enter a valid email for the reference.";
     return null;
   };
 
@@ -80,10 +79,7 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
 
   const demoFill = () => {
     setProfile({ fullName: "Dana Whitfield", email: `dana.whitfield+${Math.floor(Math.random() * 9000 + 1000)}@example.com`, phone: "(720) 555-0134", role: "RN", specialty: "ICU", yearsExperience: "4", city: "Denver", state: "CO", licenseNumber: "CO-RN-77120" });
-    setRefs([
-      { refName: "Marcus Bell", refTitle: "ICU Nurse Manager", refEmail: "mbell@denverhealth.org", refPhone: "(720) 555-0161", facilityName: "Denver Health", facilityCity: "Denver", facilityState: "CO", relationship: "Direct supervisor", workStartDate: "2022-08", workEndDate: "" },
-      { refName: "Sofia Andres", refTitle: "Charge Nurse, SICU", refEmail: "s.andres@uchealth.org", refPhone: "(720) 555-0188", facilityName: "UCHealth", facilityCity: "Aurora", facilityState: "CO", relationship: "Charge nurse / team lead", workStartDate: "2020-03", workEndDate: "2022-06" },
-    ]);
+    setRef({ ...emptyRef(), refName: "Marcus Bell", refTitle: "ICU Nurse Manager", refEmail: "mbell@denverhealth.org", refPhone: "(720) 555-0161", facilityName: "Denver Health", facilityCity: "Denver", facilityState: "CO", relationship: "Direct supervisor", workStartDate: "2022-08", workEndDate: "" });
     setConsent({ agreed: true, signature: "Dana Whitfield" });
     toast({ title: "Demo data filled", description: "Review each step and continue." });
   };
@@ -94,6 +90,12 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
     }
     setSubmitting(true);
     try {
+      // merge the free-text "Other" working relationship into the stored value
+      const refPayload = { ...ref };
+      if (refPayload.relationship === "Other working relationship" && refPayload.relationshipOther?.trim()) {
+        refPayload.relationship = `Other — ${refPayload.relationshipOther.trim()}`;
+      }
+      delete refPayload.relationshipOther;
       const res = await fetch("/api/candidate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -102,13 +104,13 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
           yearsExperience: Number(profile.yearsExperience) || 0,
           consentSignature: consent.signature.trim(),
           skills: [],
-          references: refs,
+          references: [refPayload],
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Submission failed");
       setCreated(data.candidate);
-      toast({ title: "Requests sent", description: "Your references received a secure SMS + email invite." });
+      toast({ title: "Request sent", description: "Your reference received a secure SMS + email invite." });
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Something went wrong", variant: "destructive" });
     } finally {
@@ -123,15 +125,15 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
         <Card className="border-teal-200">
           <CardContent className="p-8 text-center">
             <CheckCircle2 className="mx-auto h-12 w-12 text-teal-600" />
-            <h2 className="mt-4 text-2xl font-bold text-slate-900">Requests are on their way</h2>
+            <h2 className="mt-4 text-2xl font-bold text-slate-900">Your request is on its way</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              {created.fullName}, both references received a branded SMS + email with a secure link (expires in 14 days).
-              Reminders go out automatically at day 2, 5, and 9. In the sandbox, notifications are simulated — use the links below to play the reference.
+              {created.fullName}, your reference{created.requests.length > 1 ? "s" : ""} received a branded SMS + email with a secure link (expires in 14 days).
+              Reminders go out automatically at day 2, 5, and 9. In the sandbox, notifications are simulated — use the link{created.requests.length > 1 ? "s" : ""} below to play the reference.
             </p>
             <div className="mt-6 space-y-3 text-left">
               {created.requests.map((r, i) => (
                 <div key={r.id} className="rounded-lg border bg-slate-50 p-4">
-                  <p className="text-sm font-semibold text-slate-900">Reference {i + 1}: {r.refName}</p>
+                  <p className="text-sm font-semibold text-slate-900">{created.requests.length > 1 ? `Reference ${i + 1}: ` : ""}{r.refName}</p>
                   <p className="mt-1 break-all text-xs text-slate-500">Secure link: {r.refLink}</p>
                   <p className="mt-0.5 text-xs text-slate-500">Phone callback code: <span className="font-mono font-semibold text-teal-700">{r.callbackCode}</span></p>
                   <Button asChild variant="outline" size="sm" className="mt-3">
@@ -140,7 +142,10 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
                 </div>
               ))}
             </div>
-            <Button className="mt-8 w-full bg-teal-700 hover:bg-teal-800" onClick={() => onDone(created)}>
+            <p className="mt-5 rounded-lg border border-teal-100 bg-teal-50 p-3 text-xs leading-relaxed text-teal-800">
+              Collecting more references? There&apos;s no limit — request them one at a time from your dashboard&apos;s References section.
+            </p>
+            <Button className="mt-6 w-full bg-teal-700 hover:bg-teal-800" onClick={() => onDone(created)}>
               Go to my dashboard
             </Button>
           </CardContent>
@@ -151,7 +156,7 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
 
   const steps = [
     { label: "Profile", icon: UserRound },
-    { label: "References", icon: Users },
+    { label: "Reference", icon: Users },
     { label: "Consent & send", icon: FileSignature },
   ];
 
@@ -244,61 +249,68 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
             </div>
           )}
 
-          {/* ── Step 1: References ── */}
+          {/* ── Step 1: Reference — one referee per request ── */}
           {step === 1 && (
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">Add 2 professional references</h2>
-              <p className="mt-1 text-sm text-slate-600">Pick managers or charge nurses who saw your clinical work directly. They can correct details if anything is off.</p>
-              {refs.map((r, i) => (
-                <div key={i} className="mt-5 rounded-lg border border-slate-200 p-4">
-                  <p className="text-sm font-semibold text-teal-800">Reference {i + 1}</p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <Label>Name *</Label>
-                      <Input value={r.refName} onChange={(e) => setR(i, "refName", e.target.value)} placeholder="Daniel Okafor" className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>Title *</Label>
-                      <Input value={r.refTitle} onChange={(e) => setR(i, "refTitle", e.target.value)} placeholder="ICU Nurse Manager" className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>Work email *</Label>
-                      <Input type="email" value={r.refEmail} onChange={(e) => setR(i, "refEmail", e.target.value)} placeholder="d.okafor@hospital.org" className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>Phone</Label>
-                      <Input value={r.refPhone} onChange={(e) => setR(i, "refPhone", e.target.value)} placeholder="(312) 555-0177" className="mt-1" />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Label>Facility *</Label>
-                      <Input value={r.facilityName} onChange={(e) => setR(i, "facilityName", e.target.value)} placeholder="St. Mary's Medical Center" className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>City</Label>
-                      <Input value={r.facilityCity} onChange={(e) => setR(i, "facilityCity", e.target.value)} className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>State</Label>
-                      <Input value={r.facilityState} onChange={(e) => setR(i, "facilityState", e.target.value)} className="mt-1" />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Label>Working relationship *</Label>
-                      <Select value={r.relationship} onValueChange={(v) => setR(i, "relationship", v)}>
-                        <SelectTrigger className="mt-1"><SelectValue placeholder="How do/did you work together?" /></SelectTrigger>
-                        <SelectContent>{RELATIONSHIPS.map((rel) => <SelectItem key={rel} value={rel}>{rel}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Start (month/year)</Label>
-                      <Input value={r.workStartDate} onChange={(e) => setR(i, "workStartDate", e.target.value)} placeholder="2023-06" className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>End (blank = current)</Label>
-                      <Input value={r.workEndDate} onChange={(e) => setR(i, "workEndDate", e.target.value)} placeholder="present" className="mt-1" />
-                    </div>
+              <h2 className="text-lg font-semibold text-slate-900">Request a reference</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                One request per referee — pick a supervisor or charge nurse who saw your clinical work directly. They can correct details if anything is off.
+                Once this one is sent, you can request as many more as you like, one at a time, from your dashboard — there&apos;s no limit.
+              </p>
+              <div className="mt-5 rounded-lg border border-slate-200 p-4">
+                <p className="text-sm font-semibold text-teal-800">Who are you asking?</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label>Name *</Label>
+                    <Input value={ref.refName} onChange={(e) => setF("refName", e.target.value)} placeholder="Daniel Okafor" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Title *</Label>
+                    <Input value={ref.refTitle} onChange={(e) => setF("refTitle", e.target.value)} placeholder="ICU Nurse Manager" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Work email *</Label>
+                    <Input type="email" value={ref.refEmail} onChange={(e) => setF("refEmail", e.target.value)} placeholder="d.okafor@hospital.org" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Phone</Label>
+                    <Input value={ref.refPhone} onChange={(e) => setF("refPhone", e.target.value)} placeholder="(312) 555-0177" className="mt-1" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label>Facility *</Label>
+                    <Input value={ref.facilityName} onChange={(e) => setF("facilityName", e.target.value)} placeholder="St. Mary's Medical Center" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>City</Label>
+                    <Input value={ref.facilityCity} onChange={(e) => setF("facilityCity", e.target.value)} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>State</Label>
+                    <Input value={ref.facilityState} onChange={(e) => setF("facilityState", e.target.value)} className="mt-1" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label>Working relationship *</Label>
+                    <Select value={ref.relationship} onValueChange={(v) => setF("relationship", v)}>
+                      <SelectTrigger className="mt-1"><SelectValue placeholder="How do/did you work together?" /></SelectTrigger>
+                      <SelectContent>{RELATIONSHIPS.map((rel) => <SelectItem key={rel} value={rel}>{rel}</SelectItem>)}</SelectContent>
+                    </Select>
+                    {ref.relationship === "Other working relationship" && (
+                      <div className="mt-2">
+                        <Label className="text-xs text-slate-500">Describe the working relationship</Label>
+                        <Input value={ref.relationshipOther ?? ""} onChange={(e) => setF("relationshipOther", e.target.value)} placeholder="e.g. HR director overseeing their contract" className="mt-1" />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Start (month/year)</Label>
+                    <Input value={ref.workStartDate} onChange={(e) => setF("workStartDate", e.target.value)} placeholder="2023-06" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>End (blank = current)</Label>
+                    <Input value={ref.workEndDate} onChange={(e) => setF("workEndDate", e.target.value)} placeholder="present" className="mt-1" />
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
           )}
 
@@ -309,9 +321,9 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
                 <p className="font-semibold text-slate-900">Reference Request Authorization & Release</p>
                 <p className="mt-2">
-                  I authorize {agency.name} to contact the professional references listed above regarding my employment history, clinical performance, and professional conduct.
-                  I understand the completed references are used to verify my employment and capabilities. I release all parties from liability for information
-                  provided in good faith. This consent is stored with my profile before any outreach is made.
+                  I authorize {agency.name} to contact the professional reference listed above — and any others I request through VaultVerify — regarding my employment
+                  history, clinical performance, and professional conduct. I understand the completed references are used to verify my employment and capabilities.
+                  I release all parties from liability for information provided in good faith. This consent is stored with my profile before any outreach is made.
                 </p>
               </div>
               <div className="mt-4 flex items-start gap-3">

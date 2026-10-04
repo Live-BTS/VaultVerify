@@ -411,7 +411,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
                 <button type="button" onClick={() => setSection("references")} className="rounded-xl border border-vault-border bg-white p-4 text-left vv-card-shadow transition hover:border-verify-green/50">
                   <Users className="h-4 w-4 text-verify-ink" />
                   <p className="mt-2 text-sm font-semibold text-jade-ink">{refStats ? "Manage references" : "Set up references"}</p>
-                  <p className="mt-0.5 text-xs text-jade-muted">{refStats ? "Nudge, swap, or add a reference" : "Verify your employment with 2 referees"}</p>
+                  <p className="mt-0.5 text-xs text-jade-muted">{refStats ? "Nudge, swap, or add a reference" : "Request references one at a time — no limit"}</p>
                 </button>
                 <button type="button" onClick={() => setSection("checklists")} className="rounded-xl border border-vault-border bg-white p-4 text-left vv-card-shadow transition hover:border-verify-green/50">
                   <ClipboardList className="h-4 w-4 text-verify-ink" />

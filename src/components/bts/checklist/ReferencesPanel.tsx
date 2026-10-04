@@ -162,12 +162,12 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
         <Users className="mx-auto h-8 w-8 text-verify-ink/60" />
         <p className="mt-3 text-sm font-semibold text-jade-ink">No reference profile yet</p>
         <p className="mx-auto mt-1 max-w-md text-sm text-jade-muted">
-          VaultVerify verifies your experience with two professional references. Launch setup, add your references, and each one
-          receives a secure SMS + email link — they sign off within 14 days and the verified results land right here in your vault.
+          VaultVerify verifies your experience and capabilities through professional references. Request them one at a time — there&apos;s no limit — and each
+          referee receives a secure SMS + email link. They sign off within 14 days and the verified results land right here in your vault.
         </p>
         <div className="mx-auto mt-5 grid max-w-lg gap-2 text-left text-xs text-jade-muted sm:grid-cols-3">
           {[
-            ["1", "Add 2 references", "Supervisor or charge nurse who saw your practice firsthand"],
+            ["1", "Request a reference", "One referee per request — a supervisor or charge nurse who saw your practice firsthand"],
             ["2", "They sign securely", "Identity-checked form with a signature and audit trail"],
             ["3", "Results land here", "Verified references live next to your skill checklists"],
           ].map(([n, t, d]) => (
@@ -178,7 +178,7 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
           ))}
         </div>
         <Button onClick={onLaunchSetup} className="mt-6 bg-verify-green text-vault-dark hover:bg-verify-green/90">
-          <UserRound className="mr-1.5 h-4 w-4" /> Set up references
+          <UserRound className="mr-1.5 h-4 w-4" /> Request your first reference
         </Button>
         <p className="mt-3 text-[11px] text-[#8aa29c]">Setup pre-fills your details from this account ({email}).</p>
       </div>

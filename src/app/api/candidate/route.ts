@@ -79,8 +79,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Missing field: ${k}` }, { status: 400 });
     }
   }
-  if (!body.references || body.references.length < 2) {
-    return NextResponse.json({ error: "At least 2 references are required" }, { status: 400 });
+  // References are requested ONE AT A TIME — a single referee is enough to
+  // onboard; candidates add as many as they like from the portal afterward.
+  if (!body.references || body.references.length < 1) {
+    return NextResponse.json({ error: "At least 1 reference is required" }, { status: 400 });
   }
   // NOTE: the skills checklist is a SEPARATE, self-reported feature — it is NOT
   // required for (or verified by) reference verification. Optional self-reported

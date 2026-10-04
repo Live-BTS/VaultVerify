@@ -265,3 +265,21 @@ Work Log:
 Stage Summary:
 - The reference flow is now a true two-sided product loop: candidates pre-fill everything, referrers answer 10 questions on one page and (by default) leave with their own VaultVerify candidate account; candidates view/download/share every completed reference via controlled, revocable, extendable links (/?rs=) surfaced in Controlled Sharing alongside checklist links.
 - Screenshots: download/screens/rf1..rf10-*.png.
+
+---
+Task ID: REF-UNLIMITED-1
+Agent: Super Z (main agent)
+Task: User directive — candidates can collect AS MANY references as they want (not just 2); requests are made ONE BY ONE, never a bundle.
+
+Work Log:
+- CandidateWizard.tsx: replaced the hardcoded 2-referee bundle (refs[2], "Add 2 professional references") with a SINGLE-referee step — "Request a reference" / "Who are you asking?" with copy explaining one request per referee and unlimited one-at-a-time additions from the dashboard. RefDraft now carries optional relationshipOther (Other → free-text box, merged to "Other — <text>" at submit, matching the dialogs); stepper label "References" → "Reference"; demoFill seeds one ref; consent copy reworded count-neutral ("the professional reference listed above — and any others I request through VaultVerify"); success screen now singular-aware ("your reference received…", unnumbered card) + new teal hint "Collecting more references? There's no limit — request them one at a time from your dashboard's References section."
+- POST /api/candidate: minimum references 2 → 1 ("At least 1 reference is required") — API still accepts an array, UI sends exactly one.
+- ReferencesPanel.tsx empty state: "verifies your experience with two professional references" → "Request them one at a time — there's no limit"; explainer step 1 "Add 2 references" → "Request a reference — one referee per request"; CTA "Set up references" → "Request your first reference". Add-a-reference dialog (already one-per-submit) is the growth loop.
+- ChecklistPortal dashboard quick action: "Verify your employment with 2 referees" → "Request references one at a time — no limit".
+- fraud.ts: duplicate-IP comment/message wording count-neutral (logic already generalized to N siblings).
+- Verified: add_reference flow added Elena Vasquez (4th) + Tom Okafor (5th) to Priya's vault via portal dialog — badge 3/3 → 3/5, both cards appear (ur1-references-unlimited.png); public wizard (landing "Start the reference flow") shows ONE referee form with demo prefill (ur2-wizard-single-reference.png), submits, success screen singular + no-limit hint (ur3-wizard-success.png); POST /api/candidate with references:[] → 400 "At least 1 reference is required".
+- bun run lint clean (twice).
+
+Stage Summary:
+- The 2-reference cap is gone everywhere: onboarding requests exactly ONE referee per submission, and the References panel's Add-a-reference dialog is the repeatable, unlimited path. No bundle UI remains; fraud checks and all user-facing copy are count-neutral.
+- Screenshots: download/screens/ur1..ur3-*.png.

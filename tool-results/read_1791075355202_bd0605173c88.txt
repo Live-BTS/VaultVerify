@@ -1,0 +1,597 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useCallback, useEffect, useState } from "react";
+     4→     4→import { motion } from "framer-motion";
+     5→     5→import { Button } from "@/components/ui/button";
+     6→     6→import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+     7→     7→import { Input } from "@/components/ui/input";
+     8→     8→import { Label } from "@/components/ui/label";
+     9→     9→import { useToast } from "@/hooks/use-toast";
+    10→    10→import { cn } from "@/lib/utils";
+    11→    11→import { specialtyLabel } from "@/lib/bts/constants";
+    12→    12→import { QUESTIONS } from "@/lib/bts/questions";
+    13→    13→import { Spinner, StatusBadge } from "../brand";
+    14→    14→import { BellRing, Copy, Download, ExternalLink, Eye, EyeOff, FileDown, Link2, RefreshCcw, Send, Share2, ShieldCheck, UserPlus, UserRound, Users } from "lucide-react";
+    15→    15→import type { ChangeEvent } from "react";
+    16→    16→
+    17→    17→const RELATIONSHIPS = ["Direct supervisor", "Charge nurse / team lead", "Peer colleague on same unit", "Educator / preceptor", "Other working relationship"];
+    18→    18→
+    19→    19→// ── References section of the nurse portal ──
+    20→    20→// Bridges the reference-verification half of the product (Candidate + ReferenceRequest)
+    21→    21→// into the signed-in nurse vault, matched by the account email.
+    22→    22→
+    23→    23→interface RefAnswer { key: string; type: string; value: string | number | null; unableToObserve?: boolean }
+    24→    24→
+    25→    25→interface RefResponse {
+    26→    26→  overallRating: number | null;
+    27→    27→  skillsVerified: boolean;
+    28→    28→  remarks: string;
+    29→    29→  signatureName: string;
+    30→    30→  signedAt: string;
+    31→    31→  confirmedRelationship: string;
+    32→    32→  confirmedFacility: string;
+    33→    33→  confirmedDates: string;
+    34→    34→  answers: string; // JSON RefAnswer[]
+    35→    35→}
+    36→    36→
+    37→    37→interface RefReq {
+    38→    38→  id: string;
+    39→    39→  refName: string;
+    40→    40→  refTitle: string;
+    41→    41→  refEmail: string;
+    42→    42→  refPhone: string;
+    43→    43→  facilityName: string;
+    44→    44→  relationship: string;
+    45→    45→  status: string;
+    46→    46→  sentAt: string;
+    47→    47→  completedAt: string | null;
+    48→    48→  expiresAt: string;
+    49→    49→  reminderCount: number;
+    50→    50→  refLink: string;
+    51→    51→  callbackCode: string;
+    52→    52→  response: RefResponse | null;
+    53→    53→}
+    54→    54→
+    55→    55→interface RefCandidate {
+    56→    56→  id: string;
+    57→    57→  fullName: string;
+    58→    58→  role: string;
+    59→    59→  specialty: string;
+    60→    60→  yearsExperience: number;
+    61→    61→  city: string;
+    62→    62→  state: string;
+    63→    63→  requests: RefReq[];
+    64→    64→}
+    65→    65→
+    66→    66→const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    67→    67→const daysSince = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    68→    68→const tokenFromLink = (link: string) => link.split("?r=")[1] ?? "";
+    69→    69→
+    70→    70→export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, onShared }: {
+    71→    71→  email: string;
+    72→    72→  fallbackName: string;
+    73→    73→  onLaunchSetup: () => void;
+    74→    74→  onStats?: (s: { total: number; completed: number } | null) => void;
+    75→    75→  onShared?: () => void; // notify Controlled Sharing that a new reference link exists
+    76→    76→}) {
+    77→    77→  const { toast } = useToast();
+    78→    78→  const [candidate, setCandidate] = useState<RefCandidate | null>(null);
+    79→    79→  const [state, setState] = useState<"loading" | "none" | "ready" | "error">("loading");
+    80→    80→  const [error, setError] = useState<string | null>(null);
+    81→    81→  const [openReport, setOpenReport] = useState<string | null>(null);
+    82→    82→
+    83→    83→  const load = useCallback(async () => {
+    84→    84→    setState("loading");
+    85→    85→    setError(null);
+    86→    86→    try {
+    87→    87→      const res = await fetch(`/api/candidate?email=${encodeURIComponent(email)}`);
+    88→    88→      const d = await res.json();
+    89→    89→      if (res.status === 404) {
+    90→    90→        setCandidate(null);
+    91→    91→        setState("none");
+    92→    92→        onStats?.(null);
+    93→    93→        return;
+    94→    94→      }
+    95→    95→      if (!res.ok) throw new Error(d.error ?? "Could not load references");
+    96→    96→      const c: RefCandidate = d.candidate;
+    97→    97→      setCandidate(c);
+    98→    98→      setState("ready");
+    99→    99→      onStats?.({ total: c.requests.length, completed: c.requests.filter((r) => r.status === "COMPLETED" || r.status === "FLAGGED").length });
+   100→   100→    } catch (e) {
+   101→   101→      setError(e instanceof Error ? e.message : "Could not load references");
+   102→   102→      setState("error");
+   103→   103→    }
+   104→   104→  }, [email, onStats]);
+   105→   105→
+   106→   106→  useEffect(() => { load(); }, [load]);
+   107→   107→
+   108→   108→  const nudge = async (requestId: string, refName: string) => {
+   109→   109→    const res = await fetch("/api/candidate/actions", {
+   110→   110→      method: "POST", headers: { "Content-Type": "application/json" },
+   111→   111→      body: JSON.stringify({ action: "nudge", requestId }),
+   112→   112→    });
+   113→   113→    const d = await res.json();
+   114→   114→    if (res.ok) toast({ title: d.message ?? `Nudge sent to ${refName}` });
+   115→   115→    else toast({ title: d.error ?? "Failed to send nudge", variant: "destructive" });
+   116→   116→  };
+   117→   117→
+   118→   118→  const swap = async (requestId: string, replacement: Record<string, string>) => {
+   119→   119→    const res = await fetch("/api/candidate/actions", {
+   120→   120→      method: "POST", headers: { "Content-Type": "application/json" },
+   121→   121→      body: JSON.stringify({ action: "swap", requestId, replacement }),
+   122→   122→    });
+   123→   123→    const d = await res.json();
+   124→   124→    if (res.ok) {
+   125→   125→      toast({ title: d.message ?? "Replacement request sent" });
+   126→   126→      load();
+   127→   127→    } else {
+   128→   128→      toast({ title: d.error ?? "Swap failed", variant: "destructive" });
+   129→   129→    }
+   130→   130→  };
+   131→   131→
+   132→   132→  const addRef = async (reference: Record<string, string>) => {
+   133→   133→    const res = await fetch("/api/candidate/actions", {
+   134→   134→      method: "POST", headers: { "Content-Type": "application/json" },
+   135→   135→      body: JSON.stringify({ action: "add_reference", email, reference }),
+   136→   136→    });
+   137→   137→    const d = await res.json();
+   138→   138→    if (res.ok) {
+   139→   139→      toast({ title: d.message ?? "Request sent" });
+   140→   140→      load();
+   141→   141→    } else {
+   142→   142→      toast({ title: d.error ?? "Could not add reference", variant: "destructive" });
+   143→   143→    }
+   144→   144→  };
+   145→   145→
+   146→   146→  if (state === "loading") {
+   147→   147→    return <div className="flex justify-center py-16"><Spinner label="Loading your references…" /></div>;
+   148→   148→  }
+   149→   149→
+   150→   150→  if (state === "error") {
+   151→   151→    return (
+   152→   152→      <div className="mt-6 rounded-2xl border border-dashed border-vault-border bg-white/60 p-10 text-center">
+   153→   153→        <p className="text-sm font-medium text-rose-600">{error}</p>
+   154→   154→        <Button size="sm" variant="outline" onClick={load} className="mt-4">Try again</Button>
+   155→   155→      </div>
+   156→   156→    );
+   157→   157→  }
+   158→   158→
+   159→   159→  if (state === "none") {
+   160→   160→    return (
+   161→   161→      <div className="mt-6 rounded-2xl border border-dashed border-vault-border bg-white/60 p-10 text-center">
+   162→   162→        <Users className="mx-auto h-8 w-8 text-verify-ink/60" />
+   163→   163→        <p className="mt-3 text-sm font-semibold text-jade-ink">No reference profile yet</p>
+   164→   164→        <p className="mx-auto mt-1 max-w-md text-sm text-jade-muted">
+   165→   165→          VaultVerify verifies your experience with two professional references. Launch setup, add your references, and each one
+   166→   166→          receives a secure SMS + email link — they sign off within 14 days and the verified results land right here in your vault.
+   167→   167→        </p>
+   168→   168→        <div className="mx-auto mt-5 grid max-w-lg gap-2 text-left text-xs text-jade-muted sm:grid-cols-3">
+   169→   169→          {[
+   170→   170→            ["1", "Add 2 references", "Supervisor or charge nurse who saw your practice firsthand"],
+   171→   171→            ["2", "They sign securely", "Identity-checked form with a signature and audit trail"],
+   172→   172→            ["3", "Results land here", "Verified references live next to your skill checklists"],
+   173→   173→          ].map(([n, t, d]) => (
+   174→   174→            <div key={n} className="rounded-xl border border-vault-border bg-white p-3">
+   175→   175→              <p className="flex items-center gap-1.5 font-semibold text-verify-ink"><span className="flex h-4 w-4 items-center justify-center rounded-full bg-verify-green/20 text-[10px] font-bold">{n}</span> {t}</p>
+   176→   176→              <p className="mt-1 leading-relaxed">{d}</p>
+   177→   177→            </div>
+   178→   178→          ))}
+   179→   179→        </div>
+   180→   180→        <Button onClick={onLaunchSetup} className="mt-6 bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   181→   181→          <UserRound className="mr-1.5 h-4 w-4" /> Set up references
+   182→   182→        </Button>
+   183→   183→        <p className="mt-3 text-[11px] text-[#8aa29c]">Setup pre-fills your details from this account ({email}).</p>
+   184→   184→      </div>
+   185→   185→    );
+   186→   186→  }
+   187→   187→
+   188→   188→  const done = candidate!.requests.filter((r) => r.status === "COMPLETED" || r.status === "FLAGGED").length;
+   189→   189→
+   190→   190→  const parseAnswers = (raw: string): RefAnswer[] => { try { return JSON.parse(raw || "[]"); } catch { return []; } };
+   191→   191→  const fmtValue = (a: RefAnswer): string => {
+   192→   192→    if (a.unableToObserve) return "Unable to observe";
+   193→   193→    if (a.type === "rating" && typeof a.value === "number") return `${a.value} / 5`;
+   194→   194→    if (a.type === "boolean") return a.value === "YES" ? "Yes" : a.value === "NO" ? "No" : "Prefer not to say";
+   195→   195→    return String(a.value ?? "");
+   196→   196→  };
+   197→   197→  const valueClass = (a: RefAnswer): string => {
+   198→   198→    const v = fmtValue(a);
+   199→   199→    if (v.startsWith("5") || v === "Yes") return "border-verify-green/40 bg-verify-green/10 text-verify-ink";
+   200→   200→    if (v.startsWith("1") || v.startsWith("2") || v === "No") return "border-rose-200 bg-rose-50 text-rose-600";
+   201→   201→    if (v.startsWith("3") || v.startsWith("4")) return "border-[#5f87ae]/40 bg-[#5f87ae]/10 text-[#123c54]";
+   202→   202→    return "border-vault-border bg-jade-ink/5 text-jade-muted";
+   203→   203→  };
+   204→   204→
+   205→   205→  return (
+   206→   206→    <div className="mt-6 space-y-4">
+   207→   207→      {/* profile strip */}
+   208→   208→      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
+   209→   209→        <div>
+   210→   210→          <p className="text-base font-semibold text-jade-ink">
+   211→   211→            {candidate!.fullName} <span className="font-normal text-jade-muted">· {candidate!.role}{candidate!.specialty ? `, ${specialtyLabel(candidate!.specialty)}` : ""}</span>
+   212→   212→          </p>
+   213→   213→          <p className="mt-1 text-xs text-jade-muted">
+   214→   214→            {candidate!.yearsExperience} yrs experience{candidate!.city ? ` · ${candidate!.city}, ${candidate!.state}` : ""} · {done}/{candidate!.requests.length} references completed
+   215→   215→          </p>
+   216→   216→        </div>
+   217→   217→        <span className="rounded-lg border border-verify-green/30 bg-verify-green/10 px-3 py-1.5 text-[11px] font-medium text-verify-ink">
+   218→   218→          Auto-reminders at day 2 · 5 · 9
+   219→   219→        </span>
+   220→   220→      </div>
+   221→   221→
+   222→   222→      <div className="flex justify-end">
+   223→   223→        <AddReferenceDialog onAdd={addRef} />
+   224→   224→      </div>
+   225→   225→
+   226→   226→      {/* request cards */}
+   227→   227→      {candidate!.requests.map((r) => {
+   228→   228→        const open = daysSince(r.sentAt);
+   229→   229→        const isDone = r.status === "COMPLETED" || r.status === "FLAGGED";
+   230→   230→        return (
+   231→   231→          <motion.div key={r.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}
+   232→   232→            className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
+   233→   233→            <div className="flex flex-wrap items-start justify-between gap-3">
+   234→   234→              <div>
+   235→   235→                <p className="font-semibold text-jade-ink">{r.refName} <span className="font-normal text-jade-muted">· {r.refTitle}</span></p>
+   236→   236→                <p className="mt-0.5 text-sm text-jade-muted">{r.facilityName} · {r.refEmail}{r.relationship ? ` · ${r.relationship}` : ""}</p>
+   237→   237→              </div>
+   238→   238→              <div className="flex items-center gap-2">
+   239→   239→                <StatusBadge status={r.status} />
+   240→   240→                {!isDone && <span className="rounded-full border border-vault-border px-2.5 py-0.5 text-xs text-jade-muted">Day {open}</span>}
+   241→   241→              </div>
+   242→   242→            </div>
+   243→   243→
+   244→   244→            {isDone && r.response && (
+   245→   245→              <div className="mt-3">
+   246→   246→                <p className="text-sm text-jade-ink">
+   247→   247→                  Completed{r.response.overallRating != null && <> — average rating <strong>{r.response.overallRating.toFixed(1)}/5</strong></>}
+   248→   248→                  {r.response.skillsVerified && <span className="ml-2 rounded-full border border-verify-green/40 bg-verify-green/10 px-2 py-0.5 text-[11px] font-semibold text-verify-ink">Skills verified</span>}
+   249→   249→                  {r.status === "FLAGGED" && <span className="ml-1 text-rose-600">(under review)</span>}
+   250→   250→                  <span className="block text-xs text-jade-muted">Signed {r.completedAt ? fmt(r.completedAt) : ""} · view it, download the PDF, or share it with anyone below.</span>
+   251→   251→                </p>
+   252→   252→                <div className="mt-3 flex flex-wrap items-center gap-2">
+   253→   253→                  <Button size="sm" variant="outline" className="border-vault-border text-jade-ink hover:bg-verify-green/10"
+   254→   254→                    onClick={() => setOpenReport(openReport === r.id ? null : r.id)}>
+   255→   255→                    {openReport === r.id ? <EyeOff className="mr-1.5 h-3.5 w-3.5" /> : <Eye className="mr-1.5 h-3.5 w-3.5" />}
+   256→   256→                    {openReport === r.id ? "Hide report" : "View report"}
+   257→   257→                  </Button>
+   258→   258→                  <a href={`/api/pdf/${r.id}`} target="_blank" rel="noreferrer">
+   259→   259→                    <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink">
+   260→   260→                      <FileDown className="mr-1.5 h-3.5 w-3.5" /> PDF
+   261→   261→                    </Button>
+   262→   262→                  </a>
+   263→   263→                  <RefShareDialog request={{ id: r.id, refName: r.refName }} onCreated={() => { onShared?.(); load(); }} />
+   264→   264→                </div>
+   265→   265→                {openReport === r.id && (
+   266→   266→                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+   267→   267→                    className="mt-4 space-y-4 rounded-xl border border-vault-border bg-[#f7fbf8] p-4">
+   268→   268→                    <div>
+   269→   269→                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">Verification answers</p>
+   270→   270→                      <div className="mt-2 divide-y divide-vault-border/60">
+   271→   271→                        {parseAnswers(r.response.answers).map((a, i) => {
+   272→   272→                          const q = QUESTIONS.find((qq) => qq.key === a.key);
+   273→   273→                          return (
+   274→   274→                            <div key={a.key} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 py-2">
+   275→   275→                              <p className="min-w-0 flex-1 text-xs text-jade-ink"><span className="mr-1 text-jade-muted">{i + 1}.</span>{q?.title ?? a.key}</p>
+   276→   276→                              <span className={cn("rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", valueClass(a))}>{fmtValue(a)}</span>
+   277→   277→                            </div>
+   278→   278→                          );
+   279→   279→                        })}
+   280→   280→                      </div>
+   281→   281→                    </div>
+   282→   282→                    {r.response.remarks && (
+   283→   283→                      <div className="rounded-lg border border-vault-border bg-white p-3">
+   284→   284→                        <p className="text-[11px] font-bold uppercase tracking-wider text-verify-ink/90">Reference remarks</p>
+   285→   285→                        <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-jade-ink">{r.response.remarks}</p>
+   286→   286→                      </div>
+   287→   287→                    )}
+   288→   288→                    <div className="flex flex-wrap items-end justify-between gap-2 border-t border-vault-border/60 pt-3">
+   289→   289→                      <div>
+   290→   290→                        <p className="font-serif text-lg italic text-jade-ink">{r.response.signatureName}</p>
+   291→   291→                        <p className="text-[11px] text-jade-muted">{r.refName}, {r.refTitle} · signed {r.response.signedAt ? fmt(r.response.signedAt) : ""}</p>
+   292→   292→                      </div>
+   293→   293→                      <p className="rounded-md bg-[#f0f6f2] px-2.5 py-1 text-[10px] font-medium text-[#33565b]"><ShieldCheck className="mr-1 inline h-3 w-3" /> Typed e-signature · audit-trailed</p>
+   294→   294→                    </div>
+   295→   295→                  </motion.div>
+   296→   296→                )}
+   297→   297→              </div>
+   298→   298→            )}
+   299→   299→
+   300→   300→            {!isDone && open >= 10 && (
+   301→   301→              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+   302→   302→                It&apos;s been {open} days. Consider nudging {r.refName.split(" ")[0]} or swapping in a different reference.
+   303→   303→              </p>
+   304→   304→            )}
+   305→   305→
+   306→   306→            <div className="mt-4 flex flex-wrap items-center gap-2">
+   307→   307→              {!isDone && (
+   308→   308→                <>
+   309→   309→                  <Button size="sm" variant="outline" onClick={() => nudge(r.id, r.refName)} className="border-vault-border text-jade-ink hover:bg-verify-green/10">
+   310→   310→                    <BellRing className="mr-1.5 h-3.5 w-3.5" /> Nudge
+   311→   311→                  </Button>
+   312→   312→                  <SwapDialog onSwap={(repl) => swap(r.id, repl)} />
+   313→   313→                </>
+   314→   314→              )}
+   315→   315→              {!isDone && (
+   316→   316→                <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink"
+   317→   317→                  onClick={() => navigator.clipboard?.writeText(r.refLink).then(() => toast({ title: "Link copied" }))}>
+   318→   318→                  <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy link
+   319→   319→                </Button>
+   320→   320→              )}
+   321→   321→              {!isDone && (
+   322→   322→                <Button size="sm" variant="ghost" className="text-verify-ink hover:text-verify-deep"
+   323→   323→                  onClick={() => window.open(`/?r=${tokenFromLink(r.refLink)}`, "_blank")}>
+   324→   324→                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Open form
+   325→   325→                </Button>
+   326→   326→              )}
+   327→   327→              {!isDone && (
+   328→   328→                <span className="ml-auto rounded-md bg-[#f0f6f2] px-2.5 py-1 font-mono text-xs text-[#33565b]" title="Reference uses this over the phone for identity verification">
+   329→   329→                  Callback code: {r.callbackCode}
+   330→   330→                </span>
+   331→   331→              )}
+   332→   332→            </div>
+   333→   333→            {!isDone && r.reminderCount > 0 && (
+   334→   334→              <p className="mt-2 text-xs text-[#8aa29c]">{r.reminderCount} automated reminder{r.reminderCount > 1 ? "s" : ""} sent · link expires {fmt(r.expiresAt)}</p>
+   335→   335→            )}
+   336→   336→          </motion.div>
+   337→   337→        );
+   338→   338→      })}
+   339→   339→
+   340→   340→      <p className="text-center text-[11px] text-[#8aa29c]">
+   341→   341→        References are matched to this vault by your account email ({email}).
+   342→   342→      </p>
+   343→   343→    </div>
+   344→   344→  );
+   345→   345→}
+   346→   346→
+   347→   347→// ── Share a completed reference: one-time or duration link, candidate-controlled ──
+   348→   348→function RefShareDialog({ request, onCreated }: { request: { id: string; refName: string }; onCreated: () => void }) {
+   349→   349→  const { toast } = useToast();
+   350→   350→  const [open, setOpen] = useState(false);
+   351→   351→  const [busy, setBusy] = useState(false);
+   352→   352→  const [accessType, setAccessType] = useState<"ONE_TIME" | "DURATION">("DURATION");
+   353→   353→  const [days, setDays] = useState(14);
+   354→   354→  const [label, setLabel] = useState("");
+   355→   355→  const [created, setCreated] = useState<{ token: string; expiresAt: string | null } | null>(null);
+   356→   356→
+   357→   357→  const create = async () => {
+   358→   358→    setBusy(true);
+   359→   359→    try {
+   360→   360→      const res = await fetch("/api/reference/share", {
+   361→   361→        method: "POST", headers: { "Content-Type": "application/json" },
+   362→   362→        body: JSON.stringify({ action: "create", requestId: request.id, accessType, durationDays: accessType === "DURATION" ? days : undefined, label }),
+   363→   363→      });
+   364→   364→      const d = await res.json();
+   365→   365→      if (!res.ok || !d.ok) throw new Error(d.error ?? "Could not create the link");
+   366→   366→      setCreated({ token: d.link.token, expiresAt: d.link.expiresAt });
+   367→   367→      toast({ title: `Share link ready for ${request.refName}'s report` });
+   368→   368→      onCreated();
+   369→   369→    } catch (e) {
+   370→   370→      toast({ title: e instanceof Error ? e.message : "Could not create the link", variant: "destructive" });
+   371→   371→    } finally {
+   372→   372→      setBusy(false);
+   373→   373→    }
+   374→   374→  };
+   375→   375→
+   376→   376→  const link = created ? `${typeof window !== "undefined" ? window.location.origin : ""}/?rs=${created.token}` : "";
+   377→   377→
+   378→   378→  return (
+   379→   379→    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setCreated(null); }}>
+   380→   380→      <DialogTrigger asChild>
+   381→   381→        <Button size="sm" className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   382→   382→          <Share2 className="mr-1.5 h-3.5 w-3.5" /> Share
+   383→   383→        </Button>
+   384→   384→      </DialogTrigger>
+   385→   385→      <DialogContent className="sm:max-w-md">
+   386→   386→        <DialogHeader>
+   387→   387→          <DialogTitle>Share {request.refName}&apos;s verified reference</DialogTitle>
+   388→   388→        </DialogHeader>
+   389→   389→        {!created ? (
+   390→   390→          <>
+   391→   391→            <p className="text-sm text-jade-muted">Anyone with the link sees the signed report — you keep control and can revoke it anytime from Controlled sharing.</p>
+   392→   392→            <div className="mt-1 space-y-2">
+   393→   393→              <p className="text-xs font-semibold uppercase tracking-wider text-jade-muted">Access rule</p>
+   394→   394→              <div className="grid grid-cols-2 gap-2">
+   395→   395→                <button type="button" onClick={() => setAccessType("DURATION")}
+   396→   396→                  className={cn("rounded-xl border p-3 text-left text-xs transition", accessType === "DURATION" ? "border-verify-green bg-verify-green/10 text-verify-ink" : "border-vault-border text-jade-muted hover:border-verify-green/40")}>
+   397→   397→                  <p className="text-sm font-semibold">Open for a period</p>
+   398→   398→                  <p className="mt-0.5">Stays open until the expiry you pick</p>
+   399→   399→                </button>
+   400→   400→                <button type="button" onClick={() => setAccessType("ONE_TIME")}
+   401→   401→                  className={cn("rounded-xl border p-3 text-left text-xs transition", accessType === "ONE_TIME" ? "border-verify-green bg-verify-green/10 text-verify-ink" : "border-vault-border text-jade-muted hover:border-verify-green/40")}>
+   402→   402→                  <p className="text-sm font-semibold">One-time view</p>
+   403→   403→                  <p className="mt-0.5">Closes after the first opening</p>
+   404→   404→                </button>
+   405→   405→              </div>
+   406→   406→              {accessType === "DURATION" && (
+   407→   407→                <div className="flex flex-wrap items-center gap-2">
+   408→   408→                  {[1, 7, 14, 30].map((d) => (
+   409→   409→                    <button key={d} type="button" onClick={() => setDays(d)}
+   410→   410→                      className={cn("rounded-full border px-3.5 py-1.5 text-xs font-medium transition", days === d ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+   411→   411→                      {d === 1 ? "1 day" : `${d} days`}
+   412→   412→                    </button>
+   413→   413→                  ))}
+   414→   414→                </div>
+   415→   415→              )}
+   416→   416→              <div>
+   417→   417→                <Label htmlFor="ref-share-label" className="text-xs">Note (optional)</Label>
+   418→   418→                <Input id="ref-share-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. For the UCSF hiring manager" className="mt-1" />
+   419→   419→              </div>
+   420→   420→            </div>
+   421→   421→            <Button disabled={busy} onClick={create} className="w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   422→   422→              <Link2 className="mr-1.5 h-4 w-4" /> {busy ? "Creating…" : "Create share link"}
+   423→   423→            </Button>
+   424→   424→          </>
+   425→   425→        ) : (
+   426→   426→          <>
+   427→   427→            <div className="rounded-xl border border-verify-green/40 bg-verify-green/10 p-3">
+   428→   428→              <p className="break-all font-mono text-xs text-verify-ink">{link}</p>
+   429→   429→              <p className="mt-1.5 text-[11px] text-jade-muted">
+   430→   430→                {created.expiresAt ? `Open until ${fmt(created.expiresAt)}` : "One-time — closes after the first view"}
+   431→   431→              </p>
+   432→   432→            </div>
+   433→   433→            <Button className="w-full" variant="outline" onClick={() => { navigator.clipboard.writeText(link); toast({ title: "Link copied" }); }}>
+   434→   434→              <Copy className="mr-1.5 h-4 w-4" /> Copy link
+   435→   435→            </Button>
+   436→   436→            <p className="text-center text-[11px] text-jade-muted">Manage (revoke / extend) from Controlled sharing.</p>
+   437→   437→          </>
+   438→   438→        )}
+   439→   439→      </DialogContent>
+   440→   440→    </Dialog>
+   441→   441→  );
+   442→   442→}
+   443→   443→
+   444→   444→function SwapDialog({ onSwap }: { onSwap: (replacement: Record<string, string>) => void }) {
+   445→   445→  const [open, setOpen] = useState(false);
+   446→   446→  const [repl, setRepl] = useState({ refName: "", refTitle: "", refEmail: "", refPhone: "", facilityName: "", relationship: "Direct supervisor", relationshipOther: "" });
+   447→   447→  const submit = () => {
+   448→   448→    const payload = { ...repl };
+   449→   449→    if (payload.relationship === "Other working relationship" && payload.relationshipOther.trim()) {
+   450→   450→      payload.relationship = `Other — ${payload.relationshipOther.trim()}`;
+   451→   451→    }
+   452→   452→    delete (payload as Record<string, unknown>).relationshipOther;
+   453→   453→    onSwap(payload);
+   454→   454→    setOpen(false);
+   455→   455→  };
+   456→   456→  return (
+   457→   457→    <Dialog open={open} onOpenChange={setOpen}>
+   458→   458→      <DialogTrigger asChild>
+   459→   459→        <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
+   460→   460→          <RefreshCcw className="mr-1.5 h-3.5 w-3.5" /> Swap reference
+   461→   461→        </Button>
+   462→   462→      </DialogTrigger>
+   463→   463→      <DialogContent className="sm:max-w-md">
+   464→   464→        <DialogHeader>
+   465→   465→          <DialogTitle>Swap in a new reference</DialogTitle>
+   466→   466→        </DialogHeader>
+   467→   467→        <p className="text-sm text-jade-muted">The old request is withdrawn (they get a polite no-action notice) and a fresh secure link goes out to this person.</p>
+   468→   468→        <div className="grid gap-3 sm:grid-cols-2">
+   469→   469→          <div>
+   470→   470→            <Label>Name</Label>
+   471→   471→            <Input value={repl.refName} onChange={(e) => setRepl({ ...repl, refName: e.target.value })} className="mt-1" />
+   472→   472→          </div>
+   473→   473→          <div>
+   474→   474→            <Label>Title</Label>
+   475→   475→            <Input value={repl.refTitle} onChange={(e) => setRepl({ ...repl, refTitle: e.target.value })} className="mt-1" />
+   476→   476→          </div>
+   477→   477→          <div>
+   478→   478→            <Label>Email</Label>
+   479→   479→            <Input type="email" value={repl.refEmail} onChange={(e) => setRepl({ ...repl, refEmail: e.target.value })} className="mt-1" />
+   480→   480→          </div>
+   481→   481→          <div>
+   482→   482→            <Label>Phone</Label>
+   483→   483→            <Input value={repl.refPhone} onChange={(e) => setRepl({ ...repl, refPhone: e.target.value })} className="mt-1" />
+   484→   484→          </div>
+   485→   485→          <div className="sm:col-span-2">
+   486→   486→            <Label>Facility</Label>
+   487→   487→            <Input value={repl.facilityName} onChange={(e) => setRepl({ ...repl, facilityName: e.target.value })} className="mt-1" />
+   488→   488→          </div>
+   489→   489→          <div className="sm:col-span-2">
+   490→   490→            <Label>Working relationship</Label>
+   491→   491→            <select value={repl.relationship} onChange={(e) => setRepl({ ...repl, relationship: e.target.value })}
+   492→   492→              className="mt-1 w-full rounded-md border border-vault-border bg-white px-3 py-2 text-sm text-jade-ink">
+   493→   493→              {RELATIONSHIPS.map((r) => <option key={r} value={r}>{r}</option>)}
+   494→   494→            </select>
+   495→   495→            {repl.relationship === "Other working relationship" && (
+   496→   496→              <Input value={repl.relationshipOther} onChange={(e) => setRepl({ ...repl, relationshipOther: e.target.value })}
+   497→   497→                placeholder="Describe the working relationship" className="mt-2" />
+   498→   498→            )}
+   499→   499→          </div>
+   500→   500→        </div>
+   501→   501→        <Button className="w-full bg-verify-green text-vault-dark hover:bg-verify-green/90"
+   502→   502→          onClick={submit}>
+   503→   503→          Send replacement request
+   504→   504→        </Button>
+   505→   505→      </DialogContent>
+   506→   506→    </Dialog>
+   507→   507→  );
+   508→   508→}
+   509→   509→
+   510→   510→function AddReferenceDialog({ onAdd }: { onAdd: (reference: Record<string, string>) => void }) {
+   511→   511→  const [open, setOpen] = useState(false);
+   512→   512→  const [ref, setRef] = useState({ refName: "", refTitle: "", refEmail: "", refPhone: "", facilityName: "", facilityCity: "", facilityState: "", relationship: "Direct supervisor", relationshipOther: "", workStartDate: "", workEndDate: "" });
+   513→   513→  const field = (k: keyof typeof ref) => ({
+   514→   514→    value: ref[k],
+   515→   515→    onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setRef((r) => ({ ...r, [k]: e.target.value })),
+   516→   516→  });
+   517→   517→  const submit = () => {
+   518→   518→    const payload = { ...ref };
+   519→   519→    if (payload.relationship === "Other working relationship" && payload.relationshipOther.trim()) {
+   520→   520→      payload.relationship = `Other — ${payload.relationshipOther.trim()}`;
+   521→   521→    }
+   522→   522→    delete (payload as Record<string, unknown>).relationshipOther;
+   523→   523→    onAdd(payload);
+   524→   524→    setOpen(false);
+   525→   525→    setRef({ ...ref, refName: "", refTitle: "", refEmail: "", refPhone: "" });
+   526→   526→  };
+   527→   527→  return (
+   528→   528→    <Dialog open={open} onOpenChange={setOpen}>
+   529→   529→      <DialogTrigger asChild>
+   530→   530→        <Button size="sm" className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+   531→   531→          <UserPlus className="mr-1.5 h-3.5 w-3.5" /> Add a reference
+   532→   532→        </Button>
+   533→   533→      </DialogTrigger>
+   534→   534→      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+   535→   535→        <DialogHeader>
+   536→   536→          <DialogTitle>Add another reference</DialogTitle>
+   537→   537→        </DialogHeader>
+   538→   538→        <p className="text-sm text-jade-muted">They&apos;ll receive a branded SMS + email with a secure link that expires in 14 days.</p>
+   539→   539→        <div className="grid gap-3 sm:grid-cols-2">
+   540→   540→          <div>
+   541→   541→            <Label>Name *</Label>
+   542→   542→            <Input {...field("refName")} placeholder="Daniel Okafor" className="mt-1" />
+   543→   543→          </div>
+   544→   544→          <div>
+   545→   545→            <Label>Title *</Label>
+   546→   546→            <Input {...field("refTitle")} placeholder="ICU Nurse Manager" className="mt-1" />
+   547→   547→          </div>
+   548→   548→          <div>
+   549→   549→            <Label>Work email *</Label>
+   550→   550→            <Input type="email" {...field("refEmail")} placeholder="d.okafor@hospital.org" className="mt-1" />
+   551→   551→          </div>
+   552→   552→          <div>
+   553→   553→            <Label>Phone</Label>
+   554→   554→            <Input {...field("refPhone")} placeholder="(312) 555-0177" className="mt-1" />
+   555→   555→          </div>
+   556→   556→          <div className="sm:col-span-2">
+   557→   557→            <Label>Facility *</Label>
+   558→   558→            <Input {...field("facilityName")} placeholder="St. Mary's Medical Center" className="mt-1" />
+   559→   559→          </div>
+   560→   560→          <div>
+   561→   561→            <Label>City</Label>
+   562→   562→            <Input {...field("facilityCity")} className="mt-1" />
+   563→   563→          </div>
+   564→   564→          <div>
+   565→   565→            <Label>State</Label>
+   566→   566→            <Input {...field("facilityState")} className="mt-1" />
+   567→   567→          </div>
+   568→   568→          <div className="sm:col-span-2">
+   569→   569→            <Label>Working relationship *</Label>
+   570→   570→            <select {...field("relationship")} className="mt-1 w-full rounded-md border border-vault-border bg-white px-3 py-2 text-sm text-jade-ink">
+   571→   571→              {RELATIONSHIPS.map((r) => <option key={r} value={r}>{r}</option>)}
+   572→   572→            </select>
+   573→   573→            {ref.relationship === "Other working relationship" && (
+   574→   574→              <div className="mt-2">
+   575→   575→                <Label className="text-xs text-jade-muted">Describe the working relationship</Label>
+   576→   576→                <Input {...field("relationshipOther")} placeholder="e.g. HR director overseeing their contract" className="mt-1" />
+   577→   577→              </div>
+   578→   578→            )}
+   579→   579→          </div>
+   580→   580→          <div>
+   581→   581→            <Label>Start (month/year)</Label>
+   582→   582→            <Input {...field("workStartDate")} placeholder="2023-06" className="mt-1" />
+   583→   583→          </div>
+   584→   584→          <div>
+   585→   585→            <Label>End (blank = current)</Label>
+   586→   586→            <Input {...field("workEndDate")} placeholder="present" className="mt-1" />
+   587→   587→          </div>
+   588→   588→        </div>
+   589→   589→        <Button className="w-full bg-verify-green text-vault-dark hover:bg-verify-green/90"
+   590→   590→          onClick={submit}>
+   591→   591→          <Send className="mr-1.5 h-4 w-4" /> Send secure request
+   592→   592→        </Button>
+   593→   593→      </DialogContent>
+   594→   594→    </Dialog>
+   595→   595→  );
+   596→   596→}
+   597→   597→
