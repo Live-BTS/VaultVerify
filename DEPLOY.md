@@ -44,8 +44,9 @@ Set these in **Vercel → Project → Settings → Environment Variables** (mirr
 | `BREVO_API_KEY` | `xkeysib-…` | activates real email sending |
 | `BREVO_SENDER_EMAIL` | a **verified sender** in your Brevo account | e.g. `noreply@yourdomain.com` |
 | `BREVO_SENDER_NAME` | `VaultVerify` | display name |
-| `SUPERADMIN_CODE` | your superadmin access code | change from default |
-| `RECRUITER_CODE` | your recruiter access code | change from default |
+| `SUPERADMIN_EMAIL` | **your inbox for admin login codes** | OTP is emailed here — required for the superadmin OTP flow |
+| `SUPERADMIN_CODE` | your superadmin BACKUP access code | recovery path when email is down |
+| `RECRUITER_CODE` | your legacy agency access code | optional — recruiters now sign up with accounts |
 
 Local only (never needed on Vercel): `DATABASE_URL=file:./db/custom.db`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — add the Supabase trio to Vercel too if/when client features use Supabase directly.
 
@@ -84,7 +85,9 @@ vercel link                     # inside the repo
 5. Deploy. First deploy after the §1 switch: run `bunx prisma db push` locally against the production `DATABASE_URL` (or from a one-off Vercel job) so tables exist.
 6. Post-deploy smoke test:
    - `/` — landing renders
-   - Nurse portal sign-in + References panel
+   - Recruiter: **Sign up** → confirmation email → verify → profile form → dashboard
+   - Candidate: **Create account** → confirmation email → verify → onboarding → portal
+   - Superadmin: **Email me a login code** → OTP arrives at `SUPERADMIN_EMAIL` → console unlocks
    - Submit a reference with a **real** referee email → Brevo transactional log shows the send
    - PDF export `/api/pdf/<requestId>`
 
@@ -102,8 +105,8 @@ Layered hardening baked into the build:
 | Content-Security-Policy | `default-src 'self'` + `connect-src 'self'` — browsers can only load/talk to this origin; `object-src 'none'`, `frame-ancestors 'none'` |
 | `poweredByHeader: false` | No `X-Powered-By: Next.js` fingerprint |
 | Security headers | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, strict `Referrer-Policy`, restrictive `Permissions-Policy`, COOP |
-| `SecurityGuard` (client, prod-only) | Blocks F12 / Ctrl+U / Ctrl+Shift+I·J·C / right-click; geometry-based devtools detection shows a full-screen "Protected session" shield until devtools close |
-| Fail-closed access codes | Superadmin + recruiter gates read env-only codes; unset codes lock the console |
+| Devtools left open | F12 / view-source are intentionally NOT blocked — owners can debug; nothing sensitive is client-side to find (keys, DB, third-party calls are all server-side) |
+| Fail-closed access | Superadmin: emailed OTP (hashed at rest, 5-min expiry, 5-attempt lock) + backup static code; recruiter/candidate: scrypt-hashed passwords, email verification gate; unset config locks everything |
 | Demo-data guard | Demo credential quick-fills render in `development` only — production bundles dead-code-eliminate them |
 | Brevo demo-domain guard | `example.com` / `example.org` recipients never receive real email, even with live keys |
 

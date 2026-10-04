@@ -12,6 +12,8 @@ import { AgencyLogo, StatusBadge, SkillBadge, FlagChip, RatingPips, Spinner } fr
 import { specialtyLabel, STATUS_META } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { RecruiterChecklists } from "./checklist/RecruiterChecklists";
+import { AuthPanel } from "./AuthPanel";
+import { RecruiterOnboarding } from "./RecruiterOnboarding";
 import { PortalShell } from "./shell/PortalShell";
 import { cn } from "@/lib/utils";
 import { LogIn, RefreshCcw, Download, ShieldAlert, Activity, Inbox, Users, Clock3, Star, Flag, Database, LayoutDashboard, ClipboardList, BellRing, FileSearch } from "lucide-react";
@@ -64,6 +66,8 @@ interface RecruiterData {
 export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () => void; onSuperAdmin?: () => void }) {
   const { toast } = useToast();
   const [code, setCode] = useState("");
+  const [me, setMe] = useState<{ name: string; email: string; onboardingComplete: boolean } | null>(null);
+  const [showLegacy, setShowLegacy] = useState(false);
   const [data, setData] = useState<RecruiterData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +79,12 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
     setLoading(true);
     setError(null);
     try {
+      // c === "" → account session (cookie); a code uses the legacy path.
       const res = await fetch(`/api/recruiter?code=${encodeURIComponent(c)}`);
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? "Sign-in failed");
       setData(d);
-      sessionStorage.setItem("bts_recruiter_code", c);
+      if (c) sessionStorage.setItem("bts_recruiter_code", c);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sign-in failed");
     } finally {
@@ -88,11 +93,27 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
   }, []);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("bts_recruiter_code");
-    if (stored) {
-      setCode(stored);
-      load(stored);
-    }
+    let alive = true;
+    (async () => {
+      // 1) Legacy agency-code path (demo / previously issued codes).
+      const stored = sessionStorage.getItem("bts_recruiter_code");
+      if (stored) {
+        setCode(stored);
+        load(stored);
+        return;
+      }
+      // 2) Account session probe — verified recruiters land straight on the dashboard.
+      try {
+        const res = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
+        const d = await res.json();
+        if (alive && d.ok && d.account && d.role === "RECRUITER") {
+          const account = d.account;
+          setMe(account);
+          if (account.onboardingComplete) load("");
+        }
+      } catch { /* gate renders */ }
+    })();
+    return () => { alive = false; };
   }, [load]);
 
   const sweep = async () => {
@@ -127,7 +148,52 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
     } else toast({ title: d.error ?? "Failed", variant: "destructive" });
   };
 
-  if (!data) {
+  const signOut = async () => {
+    try { await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "signout" }) }); } catch { /* session may already be gone */ }
+    sessionStorage.removeItem("bts_recruiter_code");
+    setMe(null);
+    setData(null);
+    setCode("");
+    onSignOut();
+  };
+
+  if (data) {
+    // (dashboard renders below)
+  } else if (me && !me.onboardingComplete) {
+    return (
+      <RecruiterOnboarding
+        me={{ name: me.name, email: me.email }}
+        onSaved={async () => { setMe({ ...me, onboardingComplete: true }); await load(""); }}
+        onSignOut={signOut}
+      />
+    );
+  } else if (!showLegacy) {
+    return (
+      <AuthPanel
+        onAuthenticated={(info) => {
+          const account = { name: info.name, email: info.email, onboardingComplete: info.onboardingComplete };
+          setMe(account);
+          if (account.onboardingComplete) load("");
+        }}
+        onExit={onSignOut}
+        footer={
+          <div className="space-y-2">
+            <button type="button" onClick={() => setShowLegacy(true)} className="text-xs text-slate-500 underline hover:text-teal-700">
+              Have an agency access code instead?
+            </button>
+            {onSuperAdmin && (
+              <>
+                <br />
+                <button type="button" onClick={onSuperAdmin} className="text-xs text-slate-500 underline hover:text-teal-700">
+                  Platform admin? Open Super Admin console
+                </button>
+              </>
+            )}
+          </div>
+        }
+      />
+    );
+  } else {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-12">
         <Card className="border-slate-200">
@@ -136,9 +202,9 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
               <Database className="h-5 w-5" />
               <span className="text-sm font-semibold uppercase tracking-wide">Recruiter access</span>
             </div>
-            <h1 className="mt-3 text-2xl font-bold text-slate-900">Pipeline dashboard</h1>
+            <h1 className="mt-3 text-2xl font-bold text-slate-900">Agency access code</h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              Enter the recruiter access code you received from VaultVerify.
+              Enter the access code issued by VaultVerify.
               {process.env.NODE_ENV === "development" && (
                 <> Sandbox demo code: <button type="button" className="font-mono font-semibold text-teal-700 underline" onClick={() => { setCode("meds2026"); load("meds2026"); }}>meds2026</button></>
               )}
@@ -154,8 +220,11 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
                 Enter dashboard
               </Button>
             </form>
+            <button type="button" onClick={() => setShowLegacy(false)} className="mt-4 w-full text-center text-xs text-slate-500 underline hover:text-teal-700">
+              Sign up or sign in with an account instead
+            </button>
             {onSuperAdmin && (
-              <button type="button" onClick={onSuperAdmin} className="mt-4 w-full text-center text-xs text-slate-500 underline hover:text-teal-700">
+              <button type="button" onClick={onSuperAdmin} className="mt-2 w-full text-center text-xs text-slate-500 underline hover:text-teal-700">
                 Platform admin? Open Super Admin console
               </button>
             )}
@@ -176,12 +245,12 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
           <AgencyLogo logoText={data.agency.logoText} name={data.agency.name} />
         </div>
       }
-      userName={`Recruiter · ${data.agency.name}`}
-      userEmail="Access-code sign-in"
+      userName={me ? me.name : `Recruiter · ${data.agency.name}`}
+      userEmail={me ? me.email : "Access-code sign-in"}
       wide
       active={section}
       onNavigate={(k) => setSection(k as "dashboard" | "references" | "checklists" | "notifications" | "audit")}
-      onSignOut={() => { sessionStorage.removeItem("bts_recruiter_code"); onSignOut(); }}
+      onSignOut={signOut}
       headerActions={
         <Button size="sm" variant="outline" onClick={sweep} disabled={sweeping} className="border-verify-green/40 text-verify-ink hover:bg-verify-green/10">
           <RefreshCcw className={cn("mr-1.5 h-3.5 w-3.5", sweeping && "animate-spin")} /> Run reminder sweep
@@ -301,7 +370,7 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
 
       {/* ── Checklists (self-assessments — separate from references) ── */}
       {section === "checklists" && (
-        <RecruiterChecklists code={code} recruiterName={`Recruiter · ${data.agency.name}`} />
+        <RecruiterChecklists code={code} recruiterName={me ? me.name : `Recruiter · ${data.agency.name}`} />
       )}
 
       {/* ── Notifications ── */}

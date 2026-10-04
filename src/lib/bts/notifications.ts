@@ -15,7 +15,7 @@ import { db } from "@/lib/db";
 // Every message — sent or simulated — is persisted to NotificationLog.
 
 export type Channel = "SMS" | "EMAIL";
-export type Kind = "INVITE" | "REMINDER" | "SWAP_NOTICE" | "COMPLETION" | "CONSENT";
+export type Kind = "INVITE" | "REMINDER" | "SWAP_NOTICE" | "COMPLETION" | "CONSENT" | "AUTH" | "OTP";
 
 export interface SendPayload {
   channel: Channel;

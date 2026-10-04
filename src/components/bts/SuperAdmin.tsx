@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import { professionLabel, disciplineLabel } from "@/lib/bts/catalog";
 import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
-  Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server,
+  Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server, Mail,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -109,7 +109,12 @@ const td = "px-3 py-2.5 text-sm text-jade-ink border-t border-vault-border/60";
 
 export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const { toast } = useToast();
-  const [code, setCode] = useState("");
+  const [token, setToken] = useState("");              // OTP session token (sas_…)
+  const [code, setCode] = useState("");                // backup static access code
+  const [gateMode, setGateMode] = useState<"otp" | "backup">("otp");
+  const [otp, setOtp] = useState("");
+  const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+  const [otpSimulated, setOtpSimulated] = useState(false);
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(false);
   const [section, setSection] = useState<Section>("requests");
@@ -121,22 +126,75 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const call = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, ...payload }) });
+    const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: token || undefined, code: code || undefined, ...payload }) });
     const d = await res.json();
+    if (res.status === 401) {
+      // Session expired or revoked — drop back to the gate.
+      sessionStorage.removeItem("bts_sa_token");
+      sessionStorage.removeItem("bts_sa_code");
+      setToken(""); setCode(""); setData(null);
+    }
     if (!res.ok || !d.ok) throw new Error(d.error ?? "Request failed");
     return d;
-  }, [code]);
+  }, [token, code]);
 
-  const auth = async (c?: string) => {
-    const useCode = (c ?? code).trim();
-    if (!useCode) return toast({ title: "Enter the superadmin code.", variant: "destructive" });
+  // Restore an unexpired session (token first, backup code second) on mount.
+  useEffect(() => {
+    const t = sessionStorage.getItem("bts_sa_token") ?? "";
+    const c = sessionStorage.getItem("bts_sa_code") ?? "";
+    if (!t && !c) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", token: t || undefined, code: c || undefined }) });
+        const d = await res.json();
+        if (res.ok && d.ok) { setToken(t); setCode(c); setData(d); }
+        else { sessionStorage.removeItem("bts_sa_token"); sessionStorage.removeItem("bts_sa_code"); }
+      } catch { /* stay on gate */ }
+    })();
+  }, []);
+
+  const requestOtp = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request_otp" }) });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error ?? "Could not send the code");
+      setOtpSentTo(d.sentTo ?? "your email");
+      setOtpSimulated(!!d.simulated);
+      toast({ title: d.simulated ? "Sandbox mode — code written to NotificationLog" : `Login code sent to ${d.sentTo}` });
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Could not send the code", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!/^\d{6}$/.test(otp.trim())) return toast({ title: "Enter the 6-digit code from your email.", variant: "destructive" });
+    setLoading(true);
+    try {
+      const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "verify_otp", otp: otp.trim() }) });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error ?? "Verification failed");
+      sessionStorage.setItem("bts_sa_token", d.token);
+      setToken(d.token); setOtp(""); setData(d);
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Verification failed", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const backupAuth = async () => {
+    const useCode = code.trim();
+    if (!useCode) return toast({ title: "Enter the backup access code.", variant: "destructive" });
     setLoading(true);
     try {
       const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", code: useCode }) });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Invalid code");
-      setCode(useCode);
-      setData(d);
+      sessionStorage.setItem("bts_sa_code", useCode);
+      setCode(useCode); setToken(""); setData(d);
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Sign-in failed", variant: "destructive" });
     } finally {
@@ -238,34 +296,79 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
             <h1 className="mt-4 text-xl font-semibold text-jade-ink">Super Admin</h1>
             <p className="mt-1 text-sm text-jade-muted">Platform control: users, companies, candidate data, credits, skills.</p>
           </div>
-          <div className="mt-6">
-            <Label htmlFor="sa-code" className="text-jade-ink/80">Access code</Label>
-            <Input
-              id="sa-code"
-              type="password"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && auth()}
-              autoCapitalize="none"
-              autoCorrect="off"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Superadmin code"
-              className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
-            />
-            {process.env.NODE_ENV === "development" && (
-              <p className="mt-2 text-xs text-jade-muted">
-                Sandbox demo code:{" "}
-                <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => auth("zipvault2026")}>
-                  zipvault2026
+
+          {gateMode === "otp" ? (
+            otpSentTo ? (
+              <div className="mt-6">
+                <Label htmlFor="sa-otp" className="text-jade-ink/80">Login code</Label>
+                <Input
+                  id="sa-otp"
+                  inputMode="numeric"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onKeyDown={(e) => e.key === "Enter" && verifyOtp()}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="one-time-code"
+                  spellCheck={false}
+                  placeholder="6-digit code"
+                  className="mt-1.5 border-vault-border bg-white text-center font-mono text-lg tracking-[0.4em] text-jade-ink placeholder:text-[#8aa29c] placeholder:tracking-normal placeholder:font-sans placeholder:text-sm"
+                />
+                <p className="mt-2 text-xs text-jade-muted">
+                  Sent to <span className="font-semibold text-jade-ink">{otpSentTo}</span> — it expires in 5 minutes.
+                  {otpSimulated && " (Sandbox: the code is in Superadmin → System → Notification log.)"}
+                </p>
+                <Button onClick={verifyOtp} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                  {loading ? "Checking…" : "Verify & unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
+                </Button>
+                <button type="button" onClick={requestOtp} disabled={loading} className="mt-3 w-full text-center text-xs text-jade-muted underline hover:text-jade-ink">
+                  Resend code
                 </button>
-              </p>
-            )}
-          </div>
-          <Button onClick={() => auth()} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
-            {loading ? "Checking…" : "Unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
-          </Button>
-          <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
+              </div>
+            ) : (
+              <div className="mt-6">
+                <p className="text-sm leading-relaxed text-jade-muted">
+                  We&apos;ll email a one-time login code to the admin address saved in the platform configuration. The code expires in 5 minutes.
+                </p>
+                <Button onClick={requestOtp} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                  {loading ? "Sending…" : "Email me a login code"} <Mail className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            )
+          ) : (
+            <div className="mt-6">
+              <Label htmlFor="sa-code" className="text-jade-ink/80">Backup access code</Label>
+              <Input
+                id="sa-code"
+                type="password"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && backupAuth()}
+                autoCapitalize="none"
+                autoCorrect="off"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Backup code"
+                className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
+              />
+              {process.env.NODE_ENV === "development" && (
+                <p className="mt-2 text-xs text-jade-muted">
+                  Sandbox demo code:{" "}
+                  <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => { setCode("zipvault2026"); }}>
+                    zipvault2026
+                  </button>
+                </p>
+              )}
+              <Button onClick={backupAuth} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                {loading ? "Checking…" : "Unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          <button type="button" onClick={() => { setGateMode(gateMode === "otp" ? "backup" : "otp"); setOtpSentTo(null); setOtp(""); }} className="mt-4 w-full text-center text-xs text-jade-muted underline hover:text-jade-ink">
+            {gateMode === "otp" ? "Use backup access code instead" : "Email me a login code instead"}
+          </button>
+          <button type="button" onClick={onExit} className="mt-3 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
             ← Back to site
           </button>
         </div>

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, reminderBody } from "@/lib/bts/notifications";
 import { REMINDER_DAYS, LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
+import { getRecruiterSessionAccount, recruiterAuthed } from "@/lib/bts/auth";
 
 // Access code lives ONLY in environment variables — never in source.
 // Fail-closed: if RECRUITER_CODE is unset, no code can match.
@@ -21,7 +22,7 @@ function baseUrl(req: NextRequest): string {
 // ── GET /api/recruiter?code=... — full pipeline dashboard ──
 export async function GET(req: NextRequest) {
   const code = (req.nextUrl.searchParams.get("code") ?? "").trim();
-  if (!RECRUITER_CODE || code !== RECRUITER_CODE.trim()) {
+  if (!(await recruiterAuthed(code))) {
     return NextResponse.json({ error: "Invalid access code" }, { status: 401 });
   }
 

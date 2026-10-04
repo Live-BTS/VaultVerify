@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
+import { recruiterAuthed } from "@/lib/bts/auth";
 import { specialtyLabel } from "@/lib/bts/checklistShared";
 import { renderSkillsChecklistPdf, type ChecklistData, type LastPerformed, type Rating } from "@/lib/pdf/skills-checklist-pdf";
 import type { ChecklistCompletion, ChecklistAccount } from "@prisma/client";
@@ -132,8 +133,8 @@ export async function GET(req: NextRequest) {
       account = acc;
       accessClause = "Accessed by the candidate from their VaultVerify portal.";
     } else if (inviteId) {
-      const recruiterCode = process.env.RECRUITER_CODE ?? "";
-      if (!recruiterCode || (sp.get("code") ?? "").trim() !== recruiterCode.trim()) return new NextResponse("Invalid code", { status: 401 });
+      // Agency access code OR verified recruiter account session.
+      if (!(await recruiterAuthed(sp.get("code") ?? ""))) return new NextResponse("Invalid code", { status: 401 });
       const invite = await db.checklistInvite.findUnique({ where: { id: inviteId } });
       if (!invite?.completionId) return new NextResponse("Not completed yet", { status: 404 });
       completion = await db.checklistCompletion.findUnique({ where: { id: invite.completionId } });

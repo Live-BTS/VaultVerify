@@ -200,6 +200,7 @@ model ChecklistAccount {
   yrsSpecialty Int      @default(0)    // manual entry — experience in current specialty
   yrsSpecialtyStart DateTime?          // calendar entry
   onboardingComplete Boolean @default(false)
+  emailVerified      Boolean @default(false)
   createdAt    DateTime @default(now())
 
   sessions    ChecklistSession[]
@@ -353,5 +354,71 @@ model AuditEvent {
   entityId  String   @default("")
   detail    String   @default("{}") // JSON
   ip        String   @default("")
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────
+// PORTAL AUTH — recruiter accounts, email verification, superadmin OTP.
+// Candidates already authenticate via ChecklistAccount (above).
+// Flow for BOTH recruiter and candidate: signup → verify email →
+// onboarding (name, phone, email, location) → dashboard.
+// ─────────────────────────────────────────────────────────────
+
+model RecruiterAccount {
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  passwordHash       String
+  name               String
+  // onboarding profile — "all the details": name, number, email, location
+  phone              String   @default("")
+  company            String   @default("") // agency / facility they recruit for
+  jobTitle           String   @default("") // e.g. "Senior Recruiter"
+  city               String   @default("")
+  state              String   @default("")
+  zip                String   @default("")
+  emailVerified      Boolean  @default(false)
+  onboardingComplete Boolean  @default(false)
+  createdAt          DateTime @default(now())
+
+  sessions RecruiterSession[]
+}
+
+model RecruiterSession {
+  id         String           @id @default(cuid())
+  accountId  String
+  account    RecruiterAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt  DateTime         @default(now())
+  expiresAt  DateTime
+}
+
+// One-time email-verification tokens for candidate AND recruiter signups.
+// The emailed link is /?verify=<token>; consuming it flips emailVerified.
+model EmailVerification {
+  id         String    @id @default(cuid())
+  token      String    @unique @default(cuid())
+  role       String    // CANDIDATE | RECRUITER
+  email      String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// Superadmin OTP login: a 6-digit code is emailed to SUPERADMIN_EMAIL.
+// Codes are hashed at rest, expire fast, and die after 5 wrong tries.
+model SuperAdminOtp {
+  id         String    @id @default(cuid())
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+}
+
+// Issued after a correct OTP (or the static backup code). The console
+// then authenticates every call with this bearer token.
+model SuperAdminSession {
+  id        String   @id @default(cuid())
+  token     String   @unique @default(cuid())
+  expiresAt DateTime
   createdAt DateTime @default(now())
 }

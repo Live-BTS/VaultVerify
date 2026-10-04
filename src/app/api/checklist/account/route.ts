@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createSession, destroySession, getAccount, hashPassword, verifyPassword } from "@/lib/bts/checklistAuth";
+import { createVerification, sendVerificationEmail, maskEmail } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 
 // ── /api/checklist/account — candidate account for the skills checklist ──
-// actions: signup | login | logout | me | profile
+// actions: signup | login | logout | me | profile | resend
+// Verification gate: signup creates an UNVERIFIED account and emails a
+// confirmation link (/?verify=<token>); login and profile saves stay locked
+// until the address is confirmed.
 
 const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+function originOf(req: NextRequest): string {
+  const proto = req.headers.get("x-forwarded-proto") ?? "http";
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "localhost:3000";
+  return `${proto}://${host}`;
+}
 
 // Derived years of experience: calendar start dates win over manual entry,
 // so the platform keeps computing continuously after the one-time entry.
@@ -55,14 +65,25 @@ export async function POST(req: NextRequest) {
       if (!emailOk(email)) return NextResponse.json({ ok: false, error: "Enter a valid email" }, { status: 400 });
       if (password.length < 8) return NextResponse.json({ ok: false, error: "Password needs at least 8 characters" }, { status: 400 });
       const exists = await db.checklistAccount.findUnique({ where: { email } });
-      if (exists) return NextResponse.json({ ok: false, error: "An account with this email already exists — sign in instead" }, { status: 400 });
-      const account = await db.checklistAccount.create({ data: { name, email, title, passwordHash: hashPassword(password) } });
-      await createSession(account.id);
+      if (exists?.emailVerified) {
+        return NextResponse.json({ ok: false, error: "An account with this email already exists — sign in instead" }, { status: 400 });
+      }
+      if (exists) {
+        // Unverified duplicate — refresh credentials and resend the link.
+        await db.checklistAccount.update({ where: { id: exists.id }, data: { name, title, passwordHash: hashPassword(password) } });
+      } else {
+        await db.checklistAccount.create({ data: { name, email, title, passwordHash: hashPassword(password) } });
+      }
       // claim recruiter invites addressed to this email right away
-      await db.checklistInvite.updateMany({ where: { candidateEmail: email, accountId: null }, data: { accountId: account.id } });
-      await backfillFromInvites(account.id, email);
-      await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "CHECKLIST_ACCOUNT_CREATED", entity: "checklistAccount", entityId: account.id });
-      return NextResponse.json({ ok: true, account: { name: account.name, email: account.email, title: account.title } });
+      const claimed = await db.checklistAccount.findUnique({ where: { email } });
+      if (claimed) {
+        await db.checklistInvite.updateMany({ where: { candidateEmail: email, accountId: null }, data: { accountId: claimed.id } });
+        await backfillFromInvites(claimed.id, email);
+        await logAudit({ actorType: "CANDIDATE", actorId: claimed.id, action: "CHECKLIST_ACCOUNT_CREATED", entity: "checklistAccount", entityId: claimed.id });
+      }
+      const token = await createVerification("CANDIDATE", email);
+      await sendVerificationEmail("CANDIDATE", email, token, originOf(req));
+      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email) });
     }
 
     if (action === "login") {
@@ -72,11 +93,26 @@ export async function POST(req: NextRequest) {
       if (!account || !verifyPassword(password, account.passwordHash)) {
         return NextResponse.json({ ok: false, error: "Wrong email or password" }, { status: 401 });
       }
+      if (!account.emailVerified) {
+        const token = await createVerification("CANDIDATE", email);
+        await sendVerificationEmail("CANDIDATE", email, token, originOf(req));
+        return NextResponse.json({ ok: false, needsVerification: true, sentTo: maskEmail(email) });
+      }
       await createSession(account.id);
       // claim any recruiter invites addressed to this email
       await db.checklistInvite.updateMany({ where: { candidateEmail: email, accountId: null }, data: { accountId: account.id } });
       await backfillFromInvites(account.id, email);
       return NextResponse.json({ ok: true, account: { name: account.name, email: account.email, title: account.title } });
+    }
+
+    if (action === "resend") {
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const account = await db.checklistAccount.findUnique({ where: { email } });
+      if (account && !account.emailVerified) {
+        const token = await createVerification("CANDIDATE", email);
+        await sendVerificationEmail("CANDIDATE", email, token, originOf(req));
+      }
+      return NextResponse.json({ ok: true, sentTo: maskEmail(email) });
     }
 
     if (action === "logout") {
@@ -87,6 +123,7 @@ export async function POST(req: NextRequest) {
     if (action === "profile") {
       const account = await getAccount();
       if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
+      if (!account.emailVerified) return NextResponse.json({ ok: false, error: "Verify your email before saving your profile" }, { status: 403 });
       const str = (v: unknown, max = 80) => String(v ?? "").trim().slice(0, max);
       const int = (v: unknown) => Math.max(0, Math.min(60, Number(v) || 0));
       const dateOrNull = (v: unknown) => {
@@ -122,7 +159,11 @@ export async function POST(req: NextRequest) {
 
     if (action === "me") {
       const account = await getAccount();
-      if (!account) return NextResponse.json({ ok: true, account: null });
+      if (!account || !account.emailVerified) {
+        // Unverified accounts are invisible to the portal until confirmed.
+        if (account) await destroySession();
+        return NextResponse.json({ ok: true, account: null });
+      }
       // auto-claim invites by email on every load (covers signups after invite was sent)
       const unclaimed = await db.checklistInvite.count({ where: { candidateEmail: account.email, accountId: null } });
       if (unclaimed) await db.checklistInvite.updateMany({ where: { candidateEmail: account.email, accountId: null }, data: { accountId: account.id } });

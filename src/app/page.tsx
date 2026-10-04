@@ -10,9 +10,11 @@ import { SuperAdmin } from "@/components/bts/SuperAdmin";
 import { ChecklistPortal } from "@/components/bts/checklist/ChecklistPortal";
 import { ShareView } from "@/components/bts/checklist/ShareView";
 import { ReferenceShareView } from "@/components/bts/checklist/ReferenceShareView";
-import { Spinner } from "@/components/bts/brand";
+import { Spinner, VaultMark } from "@/components/bts/brand";
 
 type View = "home" | "wizard" | "candidate" | "recruiter" | "super" | "checklist" | "share" | "refshare";
+
+interface VerifyState { status: "pending" | "ok" | "error"; message?: string; role?: "CANDIDATE" | "RECRUITER"; onboardingComplete?: boolean }
 
 export default function Page() {
   const [view, setView] = useState<View>("home");
@@ -23,6 +25,7 @@ export default function Page() {
   const [wizardPrefill, setWizardPrefill] = useState<{ name: string; email: string; role: string } | undefined>(undefined);
   const [agency, setAgency] = useState<AgencyInfo | null>(null);
   const [booted, setBooted] = useState(false);
+  const [verify, setVerify] = useState<VerifyState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +36,7 @@ export default function Page() {
       const rs = params.get("rs");
       const invite = params.get("invite");
       const view = params.get("view");
+      const verifyToken = params.get("verify");
       try {
         const res = await fetch("/api/bootstrap");
         const d = await res.json();
@@ -41,6 +45,32 @@ export default function Page() {
         /* fall back to default branding */
       }
       if (cancelled) return;
+      // ── Email-verification deep link (/?verify=<token>) ──
+      if (verifyToken) {
+        setVerify({ status: "pending" });
+        try {
+          const res = await fetch("/api/auth", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "verify", token: verifyToken }),
+          });
+          const d = await res.json();
+          if (d.ok) {
+            setVerify({ status: "ok", role: d.role, onboardingComplete: d.onboardingComplete });
+            setTimeout(() => {
+              if (cancelled) return;
+              setVerify(null);
+              setView(d.role === "RECRUITER" ? "recruiter" : "checklist");
+            }, 1600);
+          } else {
+            setVerify({ status: "error", message: d.error ?? "This link is invalid or has expired." });
+          }
+        } catch {
+          setVerify({ status: "error", message: "Could not reach the server — try the link again." });
+        }
+        if (window.history?.replaceState) window.history.replaceState({}, "", "/");
+        setBooted(true);
+        return;
+      }
       if (r) setRefToken(r);
       if (s) setShareToken(s);
       if (rs) setRefShareToken(rs);
@@ -50,6 +80,16 @@ export default function Page() {
       if (view === "recruiter") setView("recruiter");
       if (s) setView("share");
       if (rs) setView("refshare");
+      // ── Signed-in users land directly in their portal ──
+      if (!r && !s && !rs && !invite && !view && !verifyToken) {
+        try {
+          const res = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
+          const d = await res.json();
+          if (!cancelled && d.ok && d.account) {
+            setView(d.role === "RECRUITER" ? "recruiter" : "checklist");
+          }
+        } catch { /* landing stays */ }
+      }
       setBooted(true);
       if ((r || s || rs) && window.history?.replaceState) {
         window.history.replaceState({}, "", "/");
@@ -85,6 +125,38 @@ export default function Page() {
 
   const goHome = () => setView("home");
 
+  // ── Email verification interstitial ──
+  if (verify) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5] px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-[#d8e6da] bg-white p-8 text-center vv-card-shadow">
+          <VaultMark size={44} />
+          {verify.status === "pending" && (
+            <>
+              <p className="mt-4 text-base font-semibold text-jade-ink">Verifying your email…</p>
+              <div className="mt-5"><Spinner label="One moment" /></div>
+            </>
+          )}
+          {verify.status === "ok" && (
+            <>
+              <p className="mt-4 text-base font-semibold text-jade-ink">Email verified</p>
+              <p className="mt-2 text-sm text-jade-muted">Taking you to your portal…</p>
+            </>
+          )}
+          {verify.status === "error" && (
+            <>
+              <p className="mt-4 text-base font-semibold text-jade-ink">Link problem</p>
+              <p className="mt-2 text-sm leading-relaxed text-jade-muted">{verify.message}</p>
+              <button type="button" onClick={() => { setVerify(null); setView("home"); }} className="mt-5 text-sm font-semibold text-verify-ink underline">
+                Back to the site
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const fallbackAgency: AgencyInfo = agency ?? { id: "demo", name: "VaultVerify", logoText: "VV", tagline: "References, verified. Skills, proven.", primaryColor: "#03363d", accentColor: "#7cc118" };
 
   switch (view) {
@@ -119,7 +191,7 @@ export default function Page() {
       return (
         <LandingView
           agency={agency}
-          onRole={(r: Role) => setView(r === "candidate" ? "wizard" : r === "checklist" ? "checklist" : "recruiter")}
+          onRole={(r: Role) => setView(r === "checklist" || r === "candidate" ? "checklist" : "recruiter")}
           stats={{ completionRate: 86, avgTimeHours: 31 }}
         />
       );

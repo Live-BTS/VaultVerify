@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
+import { recruiterAuthed } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification } from "@/lib/bts/notifications";
 
@@ -10,9 +11,6 @@ import { sendNotification } from "@/lib/bts/notifications";
 // lookup  : { code, email }        -> auto-fetch candidate details if they already have an account
 // preview : { token }              -> public invite info so the signup form can pre-fill
 // claim   : { token }  (candidate session) — attach an invite link to the signed-in account
-
-// Env-only, fail-closed (empty never matches).
-const RECRUITER_CODE = process.env.RECRUITER_CODE ?? "";
 
 const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
@@ -63,8 +61,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const supplied = typeof body.code === "string" ? body.code.trim() : "";
-  if (!RECRUITER_CODE || supplied !== RECRUITER_CODE.trim()) return NextResponse.json({ ok: false, error: "Invalid recruiter code" }, { status: 401 });
+  // Agency access code OR verified recruiter account session.
+  if (!(await recruiterAuthed(typeof body.code === "string" ? body.code : ""))) {
+    return NextResponse.json({ ok: false, error: "Invalid recruiter code" }, { status: 401 });
+  }
 
   // recruiter asks: does this candidate already have an account? auto-fetch their details
   if (body.action === "lookup") {

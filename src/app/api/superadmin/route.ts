@@ -1,25 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomInt, randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
+import { sha256 } from "@/lib/bts/auth";
+import { sendNotification } from "@/lib/bts/notifications";
 
-// ── POST /api/superadmin — platform administration (sandbox: passcode) ──
+// ── POST /api/superadmin — platform administration (OTP + backup code) ──
+// Auth model:
+//   1. PRIMARY — emailed OTP: `request_otp` emails a 6-digit code to the
+//      address in SUPERADMIN_EMAIL; `verify_otp` exchanges it for an 8h
+//      session token that authenticates every subsequent call.
+//   2. BACKUP — the static SUPERADMIN_CODE still works (recovery path when
+//      email is down). Fail-closed: neither configured → nobody gets in.
 // Actions:
-//   auth       { code }                              -> overview payload (+users, candidateProfiles, companies w/ credits)
-//   import     { code, rows: ImportRow[] }           -> upsert validated templates
-//   toggle     { code, id, active }                  -> enable/disable a template row
-//   deleteSet  { code, profession, jobTitle, specialty } -> remove a whole checklist set
-//   requests   { code }                              -> candidate checklist requests queue
-//   decide     { code, id, approve }                 -> approve/reject a checklist request
-// In production, replace the passcode with NextAuth/Supabase role claims.
+//   request_otp {}                           -> OTP emailed to SUPERADMIN_EMAIL
+//   verify_otp { otp }                       -> { token, ...overview }
+//   auth       { code|token }                -> overview payload
+//   import     { code|token, rows }          -> upsert validated templates
+//   toggle / deleteSet / requests / decide / extras* ...
 
-// Access code lives ONLY in environment variables — never in source.
-// Fail-closed: if SUPERADMIN_CODE is unset, no code can match.
 const SUPERADMIN_CODE = process.env.SUPERADMIN_CODE ?? "";
+const SUPERADMIN_EMAIL = (process.env.SUPERADMIN_EMAIL ?? "").trim().toLowerCase();
+const OTP_TTL_MS = 5 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+const SESSION_HOURS = 8;
 
-function unauthorized() {
-  return NextResponse.json({ ok: false, error: "Invalid superadmin code" }, { status: 401 });
+function unauthorized(msg = "Invalid superadmin code") {
+  return NextResponse.json({ ok: false, error: msg }, { status: 401 });
+}
+
+async function sessionIsValid(token: unknown): Promise<boolean> {
+  if (typeof token !== "string" || !token.startsWith("sas_")) return false;
+  const session = await db.superAdminSession.findUnique({ where: { token } });
+  return !!session && session.expiresAt > new Date();
+}
+
+async function codeMatches(body: Record<string, unknown>): Promise<boolean> {
+  if (await sessionIsValid(body.token)) return true;
+  const supplied = typeof body.code === "string" ? body.code.trim() : "";
+  return !!SUPERADMIN_CODE && supplied === SUPERADMIN_CODE.trim();
 }
 
 function yearsFrom(manual: number, start: Date | null): number {
@@ -103,10 +124,67 @@ async function overview() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    // Trim both sides: paste-whitespace or autocapitalize must not lock the owner out.
-    // Fail-closed stays intact: if SUPERADMIN_CODE is unset, no supplied code can match.
-    const supplied = typeof body.code === "string" ? body.code.trim() : "";
-    if (!SUPERADMIN_CODE || supplied !== SUPERADMIN_CODE.trim()) return unauthorized();
+
+    // ── OTP flow — no prior auth required, heavily rate-limited ──
+    if (body.action === "request_otp") {
+      if (!SUPERADMIN_EMAIL) {
+        return NextResponse.json({ ok: false, error: "No admin email configured. Set SUPERADMIN_EMAIL in the environment." }, { status: 503 });
+      }
+      // Rate limit: at most 3 live codes per 10 minutes.
+      const recent = await db.superAdminOtp.count({
+        where: { createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) }, consumedAt: null },
+      });
+      if (recent >= 3) {
+        return NextResponse.json({ ok: false, error: "Too many codes requested. Wait a few minutes and try again." }, { status: 429 });
+      }
+      const otp = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      await db.superAdminOtp.create({
+        data: { codeHash: sha256(otp), expiresAt: new Date(Date.now() + OTP_TTL_MS) },
+      });
+      const result = await sendNotification({
+        channel: "EMAIL",
+        kind: "OTP",
+        to: SUPERADMIN_EMAIL,
+        subject: "VaultVerify admin login code",
+        body: `Your VaultVerify admin login code is:\n\n${otp}\n\nIt expires in 5 minutes. Never share this code.`,
+      });
+      await logAudit({ actorType: "SYSTEM", action: "ADMIN_OTP_REQUESTED", entity: "superAdminOtp", entityId: result.id, detail: { status: result.status } });
+      const masked = SUPERADMIN_EMAIL.replace(/^(.{2}).*(@.*)$/, "$1•••$2");
+      if (result.status === "FAILED") {
+        return NextResponse.json({ ok: false, error: "Email delivery failed — use the backup access code." });
+      }
+      return NextResponse.json({ ok: true, sentTo: masked, simulated: result.status === "SIMULATED" });
+    }
+
+    if (body.action === "verify_otp") {
+      const otp = typeof body.otp === "string" ? body.otp.trim() : "";
+      if (!/^\d{6}$/.test(otp)) return NextResponse.json({ ok: false, error: "Enter the 6-digit code from your email." });
+      const row = await db.superAdminOtp.findFirst({
+        where: { consumedAt: null, expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!row) return NextResponse.json({ ok: false, error: "No active code — request a new one." });
+      if (row.attempts >= OTP_MAX_ATTEMPTS) {
+        await db.superAdminOtp.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
+        return NextResponse.json({ ok: false, error: "Too many wrong attempts — request a new code." });
+      }
+      if (row.codeHash !== sha256(otp)) {
+        await db.superAdminOtp.update({ where: { id: row.id }, data: { attempts: { increment: 1 } } });
+        return NextResponse.json({ ok: false, error: "That code is not right — check your email and retry." });
+      }
+      await db.superAdminOtp.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
+      // consume any older live codes too
+      await db.superAdminOtp.updateMany({ where: { consumedAt: null, id: { not: row.id } }, data: { consumedAt: new Date() } });
+      const token = `sas_${randomBytes(24).toString("hex")}`;
+      await db.superAdminSession.create({
+        data: { token, expiresAt: new Date(Date.now() + SESSION_HOURS * 3600 * 1000) },
+      });
+      await logAudit({ actorType: "SYSTEM", action: "ADMIN_OTP_LOGIN", entity: "superAdminSession" });
+      return NextResponse.json({ ok: true, token, ...(await overview()) });
+    }
+
+    // Every other action requires a live session token or the backup code.
+    if (!(await codeMatches(body))) return unauthorized();
 
     switch (body.action) {
       case "auth": {

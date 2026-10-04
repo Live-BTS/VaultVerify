@@ -100,8 +100,8 @@ export const SYSTEM_PROTECTIONS: SystemProtection[] = [
   { label: "Console stripped in production", detail: "removeConsole compiler pass drops client-side logs; console.error survives for diagnostics." },
   { label: "Content-Security-Policy", detail: "default-src 'self'; connect-src 'self' — browsers may only load and talk to this origin." },
   { label: "Framework fingerprint hidden", detail: "poweredByHeader: false removes the X-Powered-By response header." },
-  { label: "Devtools & view-source deterrent", detail: "SecurityGuard blocks F12 / Ctrl+U / right-click and shields the page while devtools are open (production only)." },
-  { label: "Access codes fail-closed", detail: "Superadmin and recruiter gates read env-only codes; unset codes lock the console." },
+  { label: "Devtools left open by design", detail: "F12 / view-source are NOT blocked so owners can debug; nothing sensitive is client-side to find — keys, DB and third-party calls live only on the server and source maps are off." },
+  { label: "Access codes fail-closed", detail: "Superadmin uses emailed OTP (SUPERADMIN_EMAIL) with a static backup code; recruiter/candidate accounts use hashed-password sign-in; unset config locks the console." },
   { label: "Security headers", detail: "X-Frame-Options DENY, nosniff, strict Referrer-Policy, restrictive Permissions-Policy, COOP same-origin." },
 ];
 

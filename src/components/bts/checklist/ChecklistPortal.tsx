@@ -225,6 +225,9 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
       .catch(() => undefined);
   }, [inviteToken, me?.account]);
 
+  const [checkEmail, setCheckEmail] = useState<string | null>(null); // masked address shown on the verify screen
+  const [resent, setResent] = useState(false);
+
   const auth = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setBusy(true);
@@ -235,6 +238,12 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
         body: JSON.stringify({ action: mode, ...form }),
       });
       const d = await res.json();
+      // Verification gate: signup (and login of an unverified account) stops
+      // here and shows the "confirm your email" screen instead of the portal.
+      if (d.checkEmail || d.needsVerification) {
+        setCheckEmail(d.sentTo ?? form.email);
+        return;
+      }
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Something went wrong");
       await loadMe();
       if (window.history?.replaceState) window.history.replaceState({}, "", "/");
@@ -243,9 +252,26 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
     } finally { setBusy(false); }
   };
 
+  const resendVerification = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/checklist/account", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resend", email: form.email }),
+      });
+      const d = await res.json();
+      if (d.sentTo) setCheckEmail(d.sentTo);
+      setResent(true);
+    } catch {
+      setResent(false);
+      setAuthError("Could not resend right now — try again in a minute.");
+    } finally { setBusy(false); }
+  };
+
   const signOut = async () => {
     await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) });
     setMe({ account: null });
+    setCheckEmail(null);
   };
 
   // ── Fill flow takes over ──
@@ -282,6 +308,35 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
     return <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]"><Spinner label="Opening your vault…" /></div>;
   }
   if (!me?.account) {
+    // ── Check-your-email screen (signup / unverified login) ──
+    if (checkEmail) {
+      return (
+        <div className="vv-page flex min-h-screen items-center justify-center px-4 py-10">
+          <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            className="w-full max-w-md">
+            <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-8 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-verify-green/10">
+                <Inbox className="h-6 w-6 text-verify-ink" />
+              </div>
+              <h1 className="mt-4 text-xl font-semibold text-jade-ink">Confirm your email</h1>
+              <p className="mt-2 text-sm leading-relaxed text-jade-muted">
+                We sent a verification link to <span className="font-semibold text-jade-ink">{checkEmail}</span>.
+                Open it to activate your account — your vault continues automatically once confirmed.
+              </p>
+              <p className="mt-2 text-xs text-jade-muted">The link expires in 24 hours. Didn&apos;t get it? Check spam, then resend below.</p>
+              {resent && <p className="mt-3 rounded-lg bg-verify-green/10 px-3 py-2 text-xs font-medium text-verify-ink">Verification email resent.</p>}
+              {authError && <p className="mt-3 text-sm text-rose-600">{authError}</p>}
+              <Button onClick={resendVerification} disabled={busy} variant="outline" className="mt-5 w-full border-verify-green/40 text-verify-ink hover:bg-verify-green/10">
+                {busy ? "Sending…" : "Resend verification email"}
+              </Button>
+              <button type="button" onClick={() => { setCheckEmail(null); setResent(false); setAuthError(null); }} className="mt-4 w-full text-center text-xs text-jade-muted underline hover:text-jade-ink">
+                ← Back to sign in
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      );
+    }
     return (
       <div className="vv-page flex min-h-screen items-center justify-center px-4 py-10">
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
