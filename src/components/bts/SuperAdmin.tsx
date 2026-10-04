@@ -316,6 +316,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                 />
                 <p className="mt-2 text-xs text-jade-muted">
                   Sent to <span className="font-semibold text-jade-ink">{otpSentTo}</span> — it expires in 5 minutes.
+                  Always use the code from the <span className="font-semibold text-jade-ink">most recent</span> email; requesting a new code voids the old one.
                   {otpSimulated && " (Sandbox: the code is in Superadmin → System → Notification log.)"}
                 </p>
                 <Button onClick={verifyOtp} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">

@@ -130,13 +130,18 @@ export async function POST(req: NextRequest) {
       if (!SUPERADMIN_EMAIL) {
         return NextResponse.json({ ok: false, error: "No admin email configured. Set SUPERADMIN_EMAIL in the environment." }, { status: 503 });
       }
-      // Rate limit: at most 3 live codes per 10 minutes.
+      // Rate limit: at most 3 codes per 10 minutes — counts EVERY request,
+      // consumed or not, so resends can't bypass it.
       const recent = await db.superAdminOtp.count({
-        where: { createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) }, consumedAt: null },
+        where: { createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } },
       });
       if (recent >= 3) {
         return NextResponse.json({ ok: false, error: "Too many codes requested. Wait a few minutes and try again." }, { status: 429 });
       }
+      // Void every earlier code BEFORE issuing the new one: exactly ONE live
+      // code exists at any moment, so the code in the most recent email is
+      // always the valid one — older emails can never mislead again.
+      await db.superAdminOtp.updateMany({ where: { consumedAt: null }, data: { consumedAt: new Date() } });
       const otp = String(randomInt(0, 1_000_000)).padStart(6, "0");
       await db.superAdminOtp.create({
         data: { codeHash: sha256(otp), expiresAt: new Date(Date.now() + OTP_TTL_MS) },
@@ -170,7 +175,8 @@ export async function POST(req: NextRequest) {
       }
       if (row.codeHash !== sha256(otp)) {
         await db.superAdminOtp.update({ where: { id: row.id }, data: { attempts: { increment: 1 } } });
-        return NextResponse.json({ ok: false, error: "That code is not right — check your email and retry." });
+        const left = Math.max(0, OTP_MAX_ATTEMPTS - row.attempts - 1);
+        return NextResponse.json({ ok: false, error: `That code is not right. Use the code from the most recent email — ${left} attempt${left === 1 ? "" : "s"} left.` });
       }
       await db.superAdminOtp.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
       // consume any older live codes too
