@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createSession, destroySession, getAccount, hashPassword, verifyPassword } from "@/lib/bts/checklistAuth";
 import { createVerification, sendVerificationEmail, maskEmail, dbConfigured, emailLive } from "@/lib/bts/auth";
+import { assertPlatformWritable } from "@/lib/bts/platform";
 import { logAudit } from "@/lib/bts/audit";
 
 // ── /api/checklist/account — candidate account for the skills checklist ──
@@ -63,6 +64,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Maintenance mode pauses all account writes (superadmin bypasses).
+  const writable = await assertPlatformWritable();
+  if (!writable.ok) {
+    return NextResponse.json({ ok: false, error: writable.error ?? "Platform is in maintenance mode." }, { status: 503 });
+  }
+
   try {
     if (action === "signup") {
       const name = String(body.name ?? "").trim();
@@ -100,6 +107,10 @@ export async function POST(req: NextRequest) {
       const account = await db.checklistAccount.findUnique({ where: { email } });
       if (!account || !verifyPassword(password, account.passwordHash)) {
         return NextResponse.json({ ok: false, error: "Wrong email or password" }, { status: 401 });
+      }
+      if (account.status === "SUSPENDED") {
+        await logAudit({ actorType: "SYSTEM", actorId: email, action: "SIGNIN_BLOCKED_SUSPENDED", entity: "checklistAccount", entityId: account.id, ip: req.headers.get("x-forwarded-for")?.split(",")[0] ?? "" });
+        return NextResponse.json({ ok: false, error: "This account is suspended. Contact VaultVerify support." }, { status: 403 });
       }
       if (!account.emailVerified) {
         const token = await createVerification("CANDIDATE", email);
@@ -167,6 +178,10 @@ export async function POST(req: NextRequest) {
 
     if (action === "me") {
       const account = await getAccount();
+      if (account?.status === "SUSPENDED") {
+        await destroySession();
+        return NextResponse.json({ ok: true, account: null, suspended: true });
+      }
       if (!account || !account.emailVerified) {
         // Unverified accounts are invisible to the portal until confirmed.
         if (account) await destroySession();

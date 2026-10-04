@@ -6,6 +6,9 @@ import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTe
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
 import { sha256 } from "@/lib/bts/auth";
 import { sendNotification } from "@/lib/bts/notifications";
+import { creditAdjust, creditBalance } from "@/lib/bts/credits";
+import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
+import { getPlatformFlag, setPlatformFlag, deletePlatformFlag, MAINTENANCE_KEY } from "@/lib/bts/platform";
 
 // ── POST /api/superadmin — platform administration (OTP + backup code) ──
 // Auth model:
@@ -52,13 +55,13 @@ function yearsFrom(manual: number, start: Date | null): number {
 }
 
 async function overview() {
-  const [agencies, candidates, requests, responses, templates, flags, notifications, accounts, invites, refRequests, extras] = await Promise.all([
+  const [agencies, candidates, requests, responses, templates, flags, notifications, accounts, invites, refRequests, extras, flagRows] = await Promise.all([
     db.agency.findMany({ include: { _count: { select: { candidates: true } } }, orderBy: { createdAt: "asc" } }),
     db.candidate.count(),
     db.referenceRequest.count(),
     db.referenceResponse.count(),
     db.skillTemplate.count(),
-    db.fraudFlag.count({ where: { resolved: false } }),
+    db.fraudFlag.count({ where: { status: { in: ["OPEN", "ESCALATED"] } } }),
     db.notificationLog.count(),
     db.checklistAccount.findMany({
       orderBy: { createdAt: "desc" },
@@ -67,6 +70,11 @@ async function overview() {
     db.checklistInvite.count(),
     db.referenceRequest.count(),
     db.checklistExtraQuestion.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+    db.fraudFlag.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      include: { request: { include: { candidate: true } } },
+    }),
   ]);
   const completed = await db.referenceRequest.count({ where: { status: "COMPLETED" } });
   const checklistRequests = await db.checklistRequest.count({ where: { status: "PENDING" } });
@@ -85,7 +93,7 @@ async function overview() {
   // ── Data Center + user management payloads (from checklist accounts) ──
   const users = accounts.map((a) => ({
     id: a.id, name: a.name, email: a.email, title: a.discipline || a.title,
-    onboardingComplete: a.onboardingComplete,
+    onboardingComplete: a.onboardingComplete, status: a.status,
     completions: a._count.completions, requests: a._count.requests, invites: a._count.invites,
     joinedAt: a.createdAt,
   }));
@@ -100,15 +108,27 @@ async function overview() {
   }));
 
   // ── Company management + credit management ──
-  // Sandbox metering: 1 credit per outbound verification (reference request or checklist invite).
-  const companies = agencies.map((a) => {
-    const used = refRequests + invites; // sandbox-level metering (per-platform until per-tenant counters ship)
+  // Authoritative metering: balance comes from the immutable CreditLedger
+  // (opening grant + spends + superadmin adjustments), not row counts.
+  const companies = await Promise.all(agencies.map(async (a) => {
+    const balance = await creditBalance(a.id);
+    const spentAgg = await db.creditLedger.aggregate({ where: { agencyId: a.id, delta: { lt: 0 } }, _sum: { delta: true } });
+    const used = Math.abs(spentAgg._sum.delta ?? 0);
     return {
       id: a.id, name: a.name, slug: a.slug, logoText: a.logoText,
       candidates: a._count.candidates, primaryColor: a.primaryColor, accentColor: a.accentColor,
-      creditsGranted: a.creditsGranted, creditsUsed: used, creditsRemaining: Math.max(0, a.creditsGranted - used),
+      status: a.status, allowOverage: a.allowOverage,
+      creditsGranted: a.creditsGranted, creditsUsed: used, creditsRemaining: balance,
     };
-  });
+  }));
+
+  const threatFlags = flagRows.map((f) => ({
+    id: f.id, type: f.type, detail: f.detail, severity: f.severity,
+    status: f.status, resolution: f.resolution, createdAt: f.createdAt,
+    requestId: f.requestId,
+    candidate: f.request.candidate.fullName, candidateEmail: f.request.candidate.email,
+    referee: f.request.refName, refEmail: f.request.refEmail,
+  }));
 
   return {
     stats: { agencies: agencies.length, candidates, requests, completed, responses, templates, openFlags: flags, notifications, pendingChecklistRequests: checklistRequests },
@@ -117,6 +137,8 @@ async function overview() {
     users,
     candidateProfiles,
     companies,
+    threatFlags,
+    platform: { maintenance: (await getPlatformFlag(MAINTENANCE_KEY)) === "1" },
     extras: extras.map((q) => ({ id: q.id, kind: q.kind, prompt: q.prompt, placeholder: q.placeholder, specialty: q.specialty, active: q.active, sortOrder: q.sortOrder })),
   };
 }
@@ -200,6 +222,141 @@ export async function POST(req: NextRequest) {
       case "system_config": {
         // CONFIGURED FLAGS ONLY — values never leave the server.
         return NextResponse.json({ ok: true, ...buildSystemStatus() });
+      }
+
+      // ── Phase 1 command layer ─────────────────────────────────
+      case "set_company_status": {
+        const status = String(body.status ?? "");
+        if (!["ACTIVE", "SUSPENDED", "READ_ONLY"].includes(status)) return NextResponse.json({ ok: false, error: "Unknown status" }, { status: 400 });
+        const agency = await db.agency.update({ where: { id: String(body.id) }, data: { status } });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "COMPANY_STATUS_SET", entity: "agency", entityId: agency.id, detail: { status } });
+        return NextResponse.json({ ok: true, company: agency });
+      }
+
+      case "set_company_overage": {
+        const agency = await db.agency.update({ where: { id: String(body.id) }, data: { allowOverage: !!body.allow } });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "COMPANY_OVERAGE_SET", entity: "agency", entityId: agency.id, detail: { allowOverage: !!body.allow } });
+        return NextResponse.json({ ok: true, company: agency });
+      }
+
+      case "credit_adjust": {
+        const delta = Number(body.delta);
+        const result = await creditAdjust(String(body.id), delta, String(body.reason ?? ""), "superadmin");
+        if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "CREDIT_ADJUSTED", entity: "agency", entityId: String(body.id), detail: { delta, reason: body.reason ?? "", balanceAfter: result.balance } });
+        return NextResponse.json({ ok: true, balance: result.balance });
+      }
+
+      case "set_user_status": {
+        const status = body.status === "SUSPENDED" ? "SUSPENDED" : "ACTIVE";
+        const kind = body.kind === "RECRUITER" ? "RECRUITER" : "CANDIDATE";
+        const id = String(body.id);
+        let killed = 0;
+        if (kind === "RECRUITER") {
+          await db.recruiterAccount.update({ where: { id }, data: { status } });
+          if (status === "SUSPENDED") killed = await killRecruiterSessions(id);
+        } else {
+          await db.checklistAccount.update({ where: { id }, data: { status } });
+          if (status === "SUSPENDED") killed = await killCandidateSessions(id);
+        }
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: status === "SUSPENDED" ? "USER_SUSPENDED" : "USER_REACTIVATED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: id, detail: { status, sessionsKilled: killed } });
+        return NextResponse.json({ ok: true, status, sessionsKilled: killed });
+      }
+
+      case "revoke_request": {
+        const id = String(body.id);
+        const reason = String(body.reason ?? "").slice(0, 300) || "Revoked by platform admin";
+        const request = await db.checklistRequest.update({
+          where: { id },
+          data: { status: "REVOKED", decidedAt: new Date(), note: reason },
+        });
+        // A completed report loses its validity immediately (expiry machinery reused).
+        await db.checklistCompletion.updateMany({ where: { requestId: id }, data: { expiresAt: new Date() } });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "CHECKLIST_REQUEST_REVOKED", entity: "checklistRequest", entityId: id, detail: { reason } });
+        return NextResponse.json({ ok: true, request });
+      }
+
+      case "flag_decide": {
+        const decision = String(body.decision ?? "");
+        if (!["RESOLVED", "ESCALATED", "DISMISSED"].includes(decision)) return NextResponse.json({ ok: false, error: "Unknown decision" }, { status: 400 });
+        const flag = await db.fraudFlag.update({
+          where: { id: String(body.id) },
+          data: {
+            status: decision,
+            resolved: decision === "RESOLVED" || decision === "DISMISSED",
+            resolution: String(body.note ?? "").slice(0, 300),
+            resolvedAt: new Date(),
+          },
+        });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "FRAUD_FLAG_DECIDED", entity: "fraudFlag", entityId: flag.id, detail: { decision, note: body.note ?? "" } });
+        return NextResponse.json({ ok: true, flag });
+      }
+
+      case "ledger_query": {
+        const agencyId = typeof body.agencyId === "string" && body.agencyId ? body.agencyId : null;
+        const rows = await db.creditLedger.findMany({
+          where: agencyId ? { agencyId } : {},
+          orderBy: { createdAt: "desc" },
+          take: 50,
+          include: { agency: { select: { name: true } } },
+        });
+        return NextResponse.json({
+          ok: true,
+          ledger: rows.map((l) => ({ id: l.id, at: l.createdAt, agency: l.agency.name, delta: l.delta, reason: l.reason, actorType: l.actorType, actorId: l.actorId, balanceAfter: l.balanceAfter })),
+        });
+      }
+
+      case "audit_query": {
+        const days = Math.max(1, Math.min(365, Number(body.days) || 30));
+        const actorType = typeof body.actorType === "string" && body.actorType ? body.actorType : null;
+        const q = typeof body.q === "string" ? body.q.trim() : "";
+        const rows = await db.auditEvent.findMany({
+          where: {
+            createdAt: { gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) },
+            ...(actorType ? { actorType: actorType as "CANDIDATE" | "REFERENCE" | "RECRUITER" | "SYSTEM" } : {}),
+            ...(q ? { OR: [{ action: { contains: q } }, { actorId: { contains: q } }, { entityId: { contains: q } }, { entity: { contains: q } }] } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take: 200,
+        });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "AUDIT_VIEWED", detail: { q, actorType, days } });
+        return NextResponse.json({
+          ok: true,
+          events: rows.map((r) => ({ id: r.id, at: r.createdAt, actorType: r.actorType, actorId: r.actorId, action: r.action, entity: r.entity, entityId: r.entityId, detail: r.detail, ip: r.ip })),
+        });
+      }
+
+      case "set_platform": {
+        const key = String(body.key ?? "");
+        if (key !== MAINTENANCE_KEY) return NextResponse.json({ ok: false, error: "Unknown platform flag" }, { status: 400 });
+        const on = !!body.value;
+        if (on) await setPlatformFlag(key, "1");
+        else await deletePlatformFlag(key);
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "PLATFORM_FLAG_SET", entity: "platformConfig", entityId: key, detail: { on } });
+        return NextResponse.json({ ok: true, maintenance: on });
+      }
+
+      case "ping": {
+        const result: Record<string, { ok: boolean; detail: string }> = {};
+        try {
+          await db.$queryRaw`SELECT 1`;
+          result.db = { ok: true, detail: "Postgres reachable" };
+        } catch (e) {
+          result.db = { ok: false, detail: e instanceof Error ? e.message.slice(0, 140) : "unreachable" };
+        }
+        const key = process.env.BREVO_API_KEY;
+        if (!key) {
+          result.brevo = { ok: false, detail: "BREVO_API_KEY not configured" };
+        } else {
+          try {
+            const res = await fetch("https://api.brevo.com/v3/account", { headers: { "api-key": key } });
+            result.brevo = { ok: res.ok, detail: res.ok ? "Brevo API live" : `HTTP ${res.status}` };
+          } catch (e) {
+            result.brevo = { ok: false, detail: e instanceof Error ? e.message.slice(0, 140) : "unreachable" };
+          }
+        }
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "CONNECTIVITY_PING", detail: result as unknown as Record<string, unknown> });
+        return NextResponse.json({ ok: true, ...result });
       }
 
       case "import": {

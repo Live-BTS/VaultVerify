@@ -6,6 +6,7 @@ import {
   createRecruiterSession, getRecruiterSessionAccount, destroyRecruiterSession,
   dbConfigured, emailLive,
 } from "@/lib/bts/auth";
+import { assertPlatformWritable } from "@/lib/bts/platform";
 import { createSession, destroySession, getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
 
@@ -45,6 +46,10 @@ export async function POST(req: NextRequest) {
   if (!dbConfigured()) {
     return bad("Server not configured: DATABASE_URL is missing. Add the environment variables in Vercel → Settings → Environment Variables, then redeploy.", 503);
   }
+
+  // Maintenance mode pauses all account writes (superadmin bypasses).
+  const writable = await assertPlatformWritable();
+  if (!writable.ok) return bad(writable.error ?? "Platform is in maintenance mode.", 503);
 
   try {
     // ── signup ────────────────────────────────────────────────────
@@ -110,6 +115,11 @@ export async function POST(req: NextRequest) {
       if (!account || !verifyPassword(password, account.passwordHash)) {
         return bad("Email or password is incorrect.", 401);
       }
+      // Command layer: suspended accounts are dead ends — no session, clear reason.
+      if (account.status === "SUSPENDED") {
+        await logAudit({ actorType: "SYSTEM", actorId: email, action: "SIGNIN_BLOCKED_SUSPENDED", entity: role === "CANDIDATE" ? "checklistAccount" : "recruiterAccount", entityId: account.id, ip: req.headers.get("x-forwarded-for")?.split(",")[0] ?? "" });
+        return bad("This account is suspended. Contact VaultVerify support.", 403);
+      }
       if (!account.emailVerified) {
         const token = await createVerification(role, email);
         await sendVerificationEmail(role, email, token, originOf(req));
@@ -143,6 +153,11 @@ export async function POST(req: NextRequest) {
     if (action === "me") {
       const candidate = await getAccount();
       if (candidate?.emailVerified) {
+        // Suspended sessions die on the next probe — the portal sees a clean logout.
+        if (candidate.status === "SUSPENDED") {
+          await destroySession();
+          return NextResponse.json({ ok: true, account: null, suspended: true });
+        }
         return NextResponse.json({
           ok: true, role: "CANDIDATE",
           account: { id: candidate.id, name: candidate.name, email: candidate.email, onboardingComplete: candidate.onboardingComplete },
@@ -150,6 +165,10 @@ export async function POST(req: NextRequest) {
       }
       const recruiter = await getRecruiterSessionAccount();
       if (recruiter?.emailVerified) {
+        if (recruiter.status === "SUSPENDED") {
+          await destroyRecruiterSession();
+          return NextResponse.json({ ok: true, account: null, suspended: true });
+        }
         return NextResponse.json({
           ok: true, role: "RECRUITER",
           account: { id: recruiter.id, name: recruiter.name, email: recruiter.email, onboardingComplete: recruiter.onboardingComplete },

@@ -30,9 +30,13 @@ model Agency {
   primaryColor String   @default("#0F766E") // teal-700
   accentColor  String   @default("#B45309") // amber-700
   creditsGranted Int    @default(500) // Credit management: sandbox grant per company
+  // ── Superadmin command state (Phase 1) ──
+  status        String   @default("ACTIVE") // ACTIVE | SUSPENDED | READ_ONLY — enforced on every outbound action
+  allowOverage  Boolean  @default(false)    // post-paid overage: outbound continues below 0 credits
   createdAt    DateTime @default(now())
 
   candidates Candidate[]
+  ledger     CreditLedger[]
 }
 
 model Candidate {
@@ -150,6 +154,10 @@ model FraudFlag {
   detail    String
   severity  String @default("LOW") // LOW | MEDIUM | HIGH
   resolved  Boolean @default(false)
+  // ── Superadmin threat console (Phase 1) ──
+  status    String   @default("OPEN") // OPEN | RESOLVED | ESCALATED | DISMISSED
+  resolution String  @default("")     // owner's note recorded with the decision
+  resolvedAt DateTime?
   createdAt DateTime @default(now())
 }
 
@@ -201,6 +209,8 @@ model ChecklistAccount {
   yrsSpecialtyStart DateTime?          // calendar entry
   onboardingComplete Boolean @default(false)
   emailVerified      Boolean @default(false)
+  // ── Superadmin command state (Phase 1) ──
+  status     String   @default("ACTIVE") // ACTIVE | SUSPENDED — login + sessions killed on suspend
   createdAt    DateTime @default(now())
 
   sessions    ChecklistSession[]
@@ -378,6 +388,8 @@ model RecruiterAccount {
   zip                String   @default("")
   emailVerified      Boolean  @default(false)
   onboardingComplete Boolean  @default(false)
+  // ── Superadmin command state (Phase 1) ──
+  status             String   @default("ACTIVE") // ACTIVE | SUSPENDED — login + sessions killed on suspend
   createdAt          DateTime @default(now())
 
   sessions RecruiterSession[]
@@ -421,4 +433,33 @@ model SuperAdminSession {
   token     String   @unique @default(cuid())
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+// ── Superadmin Phase 1: command & enforce ─────────────────────────────
+
+// Immutable credit ledger — the single source of truth for company balances.
+// Every outbound verification (reference request, checklist invite) spends
+// exactly 1 credit via a ledger row; superadmin grants/adjustments are ledger
+// rows too. Balance = sum of deltas (last row's balanceAfter is authoritative).
+model CreditLedger {
+  id           String   @id @default(cuid())
+  agencyId     String
+  agency       Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  delta        Int      // positive = grant, negative = spend
+  reason       String   @default("")
+  actorType    String   @default("SYSTEM") // SYSTEM | SUPERADMIN
+  actorId      String   @default("")
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  @@index([agencyId, createdAt])
+}
+
+// Platform-level command switches (maintenance mode, tuning thresholds).
+// Server-only: read via src/lib/bts/platform.ts, written from the console.
+model PlatformConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  updatedBy String   @default("superadmin")
 }

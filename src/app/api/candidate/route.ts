@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { guardOutbound } from "@/lib/bts/guard";
+import { creditSpend } from "@/lib/bts/credits";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
 import { deriveCallbackCode } from "@/lib/bts/seed";
@@ -96,6 +98,10 @@ export async function POST(req: NextRequest) {
   const agency = (await db.agency.findUnique({ where: { slug: "vaultverify" } })) ?? (await db.agency.findFirst());
   if (!agency) return NextResponse.json({ error: "Agency not configured" }, { status: 500 });
 
+  // Command layer: company state + credit balance gate every outbound batch.
+  const outbound = await guardOutbound(agency.id);
+  if (!outbound.ok) return NextResponse.json({ error: outbound.error }, { status: outbound.status });
+
   const candidate = await db.candidate.create({
     data: {
       agencyId: agency.id,
@@ -148,6 +154,8 @@ export async function POST(req: NextRequest) {
     await logAudit({ actorType: "SYSTEM", action: "REQUEST_SENT", entity: "reference_request", entityId: r.id, detail: { ref: r.refEmail }, ip: clientIp(req) });
   }
   await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "PROFILE_CREATED", entity: "candidate", entityId: candidate.id, detail: { specialty: specialtyLabel(body.specialty), refs: candidate.requests.length }, ip: clientIp(req) });
+  // Meter: 1 credit per outbound verification (one batch = one request here).
+  await creditSpend(agency.id, `Reference request — ${candidate.fullName}`, 1, "CANDIDATE", candidate.id);
 
   const requests = candidate.requests.map((r) => ({
     ...r,

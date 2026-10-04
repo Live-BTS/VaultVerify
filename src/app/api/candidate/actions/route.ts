@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
 import { LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
+import { guardOutbound } from "@/lib/bts/guard";
+import { creditSpend } from "@/lib/bts/credits";
 
 function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
@@ -52,6 +54,9 @@ export async function POST(req: NextRequest) {
     const email = String(body.email ?? "").toLowerCase().trim();
     const candidate = await db.candidate.findFirst({ where: { email }, include: { agency: true } });
     if (!candidate) return NextResponse.json({ error: "No reference profile found for this account" }, { status: 404 });
+    // Command layer: company state + credits gate every new outbound request.
+    const outbound = await guardOutbound(candidate.agencyId);
+    if (!outbound.ok) return NextResponse.json({ error: outbound.error }, { status: outbound.status });
     const dup = await db.referenceRequest.findFirst({ where: { candidateId: candidate.id, refEmail: rf.refEmail.toLowerCase().trim(), status: { notIn: ["EXPIRED"] } } });
     if (dup) return NextResponse.json({ error: `${dup.refName} already has an open request` }, { status: 409 });
     const created = await db.referenceRequest.create({
@@ -76,6 +81,7 @@ export async function POST(req: NextRequest) {
     await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
     await sendNotification({ channel: "EMAIL", kind: "INVITE", to: created.refEmail, subject: `Reference request — ${candidate.fullName}`, body: bodyText, requestId: created.id });
     await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "REFERENCE_ADDED", entity: "reference_request", entityId: created.id, detail: { ref: created.refEmail }, ip: clientIp(req) });
+    await creditSpend(candidate.agencyId, `Reference request — ${candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", candidate.id);
     return NextResponse.json({ ok: true, message: `Request sent to ${created.refName}` });
   }
 
@@ -91,6 +97,10 @@ export async function POST(req: NextRequest) {
   if (!request) return NextResponse.json({ error: "Request not found" }, { status: 404 });
 
   const agency = request.candidate.agency;
+
+  // Command layer: nudges/swaps send real outbound email — company must be live.
+  const outbound = await guardOutbound(agency.id);
+  if (!outbound.ok) return NextResponse.json({ error: outbound.error }, { status: outbound.status });
 
   if (body.action === "nudge") {
     const link = `${baseUrl(req)}/?r=${request.token}`;
@@ -135,6 +145,7 @@ export async function POST(req: NextRequest) {
     await sendNotification({ channel: "EMAIL", kind: "INVITE", to: created.refEmail, subject: `Reference request — ${request.candidate.fullName}`, body: bodyText, requestId: created.id });
     await sendNotification({ channel: "EMAIL", kind: "SWAP_NOTICE", to: old.refEmail, subject: "Reference request withdrawn", body: `${request.candidate.fullName} has replaced this reference request with a different contact. No action is needed.`, requestId: old.id });
     await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "REFERENCE_SWAPPED", entity: "reference_request", entityId: created.id, detail: { oldId: old.id, oldEmail: old.refEmail }, ip: clientIp(req) });
+    await creditSpend(agency.id, `Reference swap — ${request.candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", request.candidateId);
     return NextResponse.json({ ok: true, message: `New request sent to ${created.refName}` });
   }
 

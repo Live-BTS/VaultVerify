@@ -4,6 +4,8 @@ import { getAccount } from "@/lib/bts/checklistAuth";
 import { recruiterAuthed } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification } from "@/lib/bts/notifications";
+import { guardOutbound } from "@/lib/bts/guard";
+import { creditSpend, primaryAgencyId } from "@/lib/bts/credits";
 
 // ── POST /api/checklist/invite — recruiter sends a checklist to a candidate ──
 // send    : { code, candidateName, candidateEmail, candidatePhone, profession, jobTitle, specialty, recruiterName, facilityName?, message? }
@@ -141,6 +143,10 @@ export async function POST(req: NextRequest) {
     if (!emailOk(candidateEmail)) return NextResponse.json({ ok: false, error: "A valid candidate email is required" }, { status: 400 });
     if (candidatePhone.replace(/\D/g, "").length < 7) return NextResponse.json({ ok: false, error: "A valid candidate phone number is required" }, { status: 400 });
 
+    // Command layer: company state + credit balance gate every outbound invite.
+    const outbound = await guardOutbound();
+    if (!outbound.ok) return NextResponse.json({ ok: false, error: outbound.error }, { status: outbound.status });
+
     const invite = await db.checklistInvite.create({
       data: {
         candidateName,
@@ -171,6 +177,7 @@ export async function POST(req: NextRequest) {
         ? `You have a new skills checklist request from ${invite.recruiterName} (${invite.facilityName || invite.agencyName}). Sign in at ${setupLink} — it's waiting in your Invites tab.`
         : `${invite.recruiterName} (${invite.facilityName || invite.agencyName}) requested your skills checklist. Your email is already set — open ${setupLink} to set your password, confirm your details, and complete it once (valid 1 year).`,
     }).catch(() => undefined);
+    await creditSpend(outbound.agencyId ?? (await primaryAgencyId()) ?? "", `Checklist invite — ${candidateName}`, 1, "RECRUITER", invite.recruiterName);
     await logAudit({
       actorType: "RECRUITER", actorId: invite.recruiterName, action: "CHECKLIST_INVITE_SENT",
       entity: "checklistInvite", entityId: invite.id,

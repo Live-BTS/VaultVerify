@@ -13,6 +13,7 @@ import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
   Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server, Mail,
+  ScrollText, Activity,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -28,6 +29,7 @@ interface TemplateSet {
 }
 interface UserRow {
   id: string; name: string; email: string; title: string; onboardingComplete: boolean;
+  status: string;
   completions: number; requests: number; invites: number; joinedAt: string;
 }
 interface CandidateProfileRow {
@@ -39,6 +41,18 @@ interface CandidateProfileRow {
 interface CompanyRow {
   id: string; name: string; slug: string; logoText: string; candidates: number;
   primaryColor: string; accentColor: string; creditsGranted: number; creditsUsed: number; creditsRemaining: number;
+  status: string; allowOverage: boolean;
+}
+interface ThreatFlagRow {
+  id: string; type: string; detail: string; severity: string; status: string; resolution: string; createdAt: string;
+  requestId: string; candidate: string; candidateEmail: string; referee: string; refEmail: string;
+}
+interface AuditEventRow {
+  id: string; at: string; actorType: string; actorId: string; action: string;
+  entity: string; entityId: string; detail: string; ip: string;
+}
+interface LedgerRow {
+  id: string; at: string; agency: string; delta: number; reason: string; actorType: string; actorId: string; balanceAfter: number;
 }
 interface Overview {
   stats: { agencies: number; candidates: number; requests: number; completed: number; responses: number; templates: number; openFlags: number; notifications: number; pendingChecklistRequests: number };
@@ -47,6 +61,8 @@ interface Overview {
   users: UserRow[];
   candidateProfiles: CandidateProfileRow[];
   companies: CompanyRow[];
+  threatFlags: ThreatFlagRow[];
+  platform: { maintenance: boolean };
   extras: ExtraQ[];
 }
 
@@ -61,7 +77,7 @@ interface ExtraQ {
   id: string; kind: string; prompt: string; placeholder: string; specialty: string; active: boolean; sortOrder: number;
 }
 
-type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "skills" | "system";
+type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "audit" | "skills" | "system";
 
 interface SystemItemView { key: string; label: string; envVar: string; provider: string; purpose: string; critical: boolean; configured: boolean }
 interface SystemStatus { items: SystemItemView[]; protections: { label: string; detail: string }[]; runtime: { databaseProvider: string; emailProvider: string; smsProvider: string; environment: string } }
@@ -100,6 +116,7 @@ const NAV: [Section, string, typeof Users][] = [
   ["companies", "Company management", Building2],
   ["candidates", "Candidate management", BookUser],
   ["credits", "Credit management", Wallet],
+  ["audit", "Audit log", ScrollText],
   ["skills", "Skills & imports", Database],
   ["system", "System & APIs", Server],
 ];
@@ -286,6 +303,95 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
     try { await call({ action: "extra.delete", id: q.id }); toast({ title: "Question deleted" }); await refresh(); } catch { toast({ title: "Delete failed", variant: "destructive" }); }
   };
 
+  // ── Phase 1 command layer: state ──
+  const [audit, setAudit] = useState<AuditEventRow[] | null>(null);
+  const [auditQ, setAuditQ] = useState("");
+  const [auditType, setAuditType] = useState("");
+  const [auditDays, setAuditDays] = useState(30);
+  const [ledger, setLedger] = useState<LedgerRow[] | null>(null);
+  const [userQ, setUserQ] = useState("");
+  const [userStatus, setUserStatus] = useState("ALL");
+  const [creditForm, setCreditForm] = useState<{ id: string; delta: string; reason: string } | null>(null);
+  const [ping, setPing] = useState<{ db?: { ok: boolean; detail: string }; brevo?: { ok: boolean; detail: string } } | null>(null);
+
+  // ── Phase 1 command layer: actions ──
+  const loadAudit = async (q = auditQ, type = auditType, days = auditDays) => {
+    try { const d = await call({ action: "audit_query", q, actorType: type, days }); setAudit(d.events); } catch { /* keep old */ }
+  };
+  const loadLedger = async () => {
+    try { const d = await call({ action: "ledger_query" }); setLedger(d.ledger); } catch { /* keep old */ }
+  };
+  const cmd = async (payload: Record<string, unknown>, title: string, description?: string) => {
+    try {
+      await call(payload);
+      toast({ title, description });
+      await refresh();
+    } catch (e) {
+      toast({ title: "Command failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+  const changeUserStatus = (u: UserRow, status: "ACTIVE" | "SUSPENDED") => {
+    if (status === "SUSPENDED" && !confirm(`Suspend ${u.name} (${u.email})?\nTheir live sessions are killed immediately and sign-in is blocked.`)) return;
+    cmd({ action: "set_user_status", kind: "CANDIDATE", id: u.id, status },
+      status === "SUSPENDED" ? "Account suspended" : "Account reactivated",
+      status === "SUSPENDED" ? "Sessions killed — sign-in is now blocked." : "The user can sign in again.");
+  };
+  const setCompanyStatus = (a: CompanyRow, status: "ACTIVE" | "SUSPENDED" | "READ_ONLY") => {
+    if (status === "SUSPENDED" && !confirm(`Suspend ${a.name}?\nEvery outbound verification for this company is blocked until reactivated.`)) return;
+    cmd({ action: "set_company_status", id: a.id, status },
+      status === "ACTIVE" ? "Company active" : status === "SUSPENDED" ? "Company suspended" : "Company set to read-only");
+  };
+  const toggleOverage = (a: CompanyRow) =>
+    cmd({ action: "set_company_overage", id: a.id, allow: !a.allowOverage },
+      a.allowOverage ? "Post-paid overage off" : "Post-paid overage on",
+      a.allowOverage ? "Outbound stops again at 0 credits." : "Outbound verifications continue below 0 credits (billed later).");
+  const applyCredit = () => {
+    if (!creditForm) return;
+    const delta = Number(creditForm.delta);
+    if (!Number.isFinite(delta) || delta === 0) { toast({ title: "Enter a non-zero amount", variant: "destructive" }); return; }
+    cmd({ action: "credit_adjust", id: creditForm.id, delta, reason: creditForm.reason },
+      "Credits adjusted",
+      `${delta > 0 ? "+" : ""}${delta} credits written to the immutable ledger.`);
+    setCreditForm(null);
+  };
+  const revokeReq = async (r: ChecklistRequestRow) => {
+    const reason = prompt(`Revoke ${r.account.name}'s checklist?\nAny completed report becomes invalid immediately.\nReason (recorded in the audit log):`);
+    if (reason === null) return;
+    await cmd({ action: "revoke_request", id: r.id, reason }, "Request revoked", "The checklist is locked and any completed report is invalid.");
+    await loadRequests();
+  };
+  const flagDecide = async (f: ThreatFlagRow, decision: "RESOLVED" | "ESCALATED" | "DISMISSED") => {
+    let note = "";
+    if (decision !== "ESCALATED") {
+      const input = prompt(decision === "RESOLVED" ? "Resolution note (recorded in the audit log):" : "Why dismiss this flag?");
+      if (input === null) return;
+      note = input;
+    }
+    try {
+      await call({ action: "flag_decide", id: f.id, decision, note });
+      toast({ title: `Flag ${decision.toLowerCase()}`, description: "The decision is in the audit log." });
+      await refresh();
+    } catch { toast({ title: "Decision failed", variant: "destructive" }); }
+  };
+  const toggleMaintenance = () => {
+    const on = !data?.platform.maintenance;
+    if (on && !confirm("Put the platform in maintenance mode?\nCandidates and recruiters can read, but every write is rejected until you switch it off.")) return;
+    cmd({ action: "set_platform", key: "MAINTENANCE_MODE", value: on }, on ? "Maintenance mode ON" : "Maintenance mode OFF");
+  };
+  const runPing = async () => {
+    try {
+      const d = await call({ action: "ping" });
+      setPing({ db: d.db, brevo: d.brevo });
+      toast({ title: "Connectivity checked", description: `DB ${d.db.ok ? "ok" : "down"} · Brevo ${d.brevo.ok ? "ok" : "down"}` });
+    } catch { toast({ title: "Ping failed", variant: "destructive" }); }
+  };
+
+  const statusPill = (s: string) =>
+    cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+      s === "ACTIVE" ? "border-verify-green/40 text-verify-ink"
+        : s === "SUSPENDED" ? "border-rose-300 bg-rose-50 text-rose-600"
+        : "border-amber-300 bg-amber-50 text-amber-700");
+
   // ── Gate ──
   if (!data) {
     return (
@@ -398,7 +504,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         const badge = badgeFor(sec);
         return (
           <button key={sec} type="button"
-            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); }}
+            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); }}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
               active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
@@ -467,9 +573,62 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
               <div>
                 <h2 className="text-base font-semibold text-jade-ink">Candidate checklist requests</h2>
                 <p className="mt-1 text-sm text-jade-muted">
-                  Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year.
+                  Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year. Approved requests can be revoked; any completed report becomes invalid immediately.
                 </p>
               </div>
+
+              {/* Threat console — fraud flags with decisions */}
+              {(data.threatFlags?.length ?? 0) > 0 && (
+                <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-jade-ink">Threat console</h3>
+                      <p className="mt-0.5 text-xs text-jade-muted">Anomalies raised by the fraud engine — resolve, escalate, or dismiss. Every decision is audit-logged.</p>
+                    </div>
+                    <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-600">{data.stats.openFlags} open</span>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {data.threatFlags.map((f) => {
+                      const open = f.status === "OPEN" || f.status === "ESCALATED";
+                      return (
+                        <div key={f.id} className={cn("rounded-xl border p-4", open ? "border-vault-border" : "border-vault-border/50 opacity-70")}>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold uppercase",
+                                f.severity === "HIGH" ? "bg-rose-100 text-rose-700" : f.severity === "MEDIUM" ? "bg-amber-100 text-amber-700" : "bg-[#f0f6f2] text-verify-ink")}>
+                                {f.severity}
+                              </span>
+                              <span className="text-sm font-semibold text-jade-ink">{f.type.replaceAll("_", " ").toLowerCase()}</span>
+                              <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                                f.status === "ESCALATED" ? "border-rose-300 text-rose-600" : f.status === "OPEN" ? "border-amber-300 text-amber-700" : "border-vault-border text-jade-muted")}>
+                                {f.status}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-jade-muted">{new Date(f.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                          </div>
+                          <p className="mt-1.5 text-xs leading-relaxed text-jade-muted">{f.detail}</p>
+                          <p className="mt-1 text-xs text-jade-ink">{f.candidate} · {f.candidateEmail} · referee {f.referee} ({f.refEmail})</p>
+                          {f.resolution && <p className="mt-1 rounded-lg bg-[#f2f7f4] px-3 py-1.5 text-xs text-verify-ink">{f.status}: {f.resolution}</p>}
+                          {open && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button size="sm" onClick={() => flagDecide(f, "RESOLVED")} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                                <Check className="mr-1.5 h-3.5 w-3.5" /> Resolve
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => flagDecide(f, "ESCALATED")} className="border border-amber-300 text-amber-700 hover:bg-amber-50">
+                                Escalate
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => flagDecide(f, "DISMISSED")} className="border border-vault-border text-jade-muted hover:text-jade-ink">
+                                Dismiss
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {!cqRequests && <div className="flex justify-center rounded-xl border border-vault-border bg-white vv-card-shadow p-10"><Spinner /></div>}
               {cqRequests?.length === 0 && (
                 <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-10 text-center text-sm text-jade-muted">No requests yet.</div>
@@ -493,10 +652,16 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                         <X className="mr-1.5 h-3.5 w-3.5" /> Decline
                       </Button>
                     </div>
+                  ) : r.status === "APPROVED" ? (
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full border border-verify-green/40 px-3 py-1 text-xs font-semibold text-verify-ink">Approved</span>
+                      <button type="button" onClick={() => revokeReq(r)} className="rounded-full border border-rose-300 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50">
+                        Revoke
+                      </button>
+                    </div>
                   ) : (
-                    <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
-                      r.status === "APPROVED" ? "border-verify-green/40 text-verify-ink" : "border-rose-300 text-rose-600")}>
-                      {r.status === "APPROVED" ? "Approved" : "Declined"}
+                    <span className="rounded-full border border-rose-300 px-3 py-1 text-xs font-semibold text-rose-600">
+                      {r.status === "REVOKED" ? "Revoked" : "Declined"}
                     </span>
                   )}
                 </div>
@@ -505,27 +670,44 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           )}
 
           {/* ── User management ── */}
-          {section === "users" && (
+          {section === "users" && (() => {
+            const visible = data.users.filter((u) =>
+              (userStatus === "ALL" || (userStatus === "SUSPENDED" ? u.status === "SUSPENDED" : u.status === "ACTIVE")) &&
+              (!userQ || `${u.name} ${u.email} ${u.title}`.toLowerCase().includes(userQ.toLowerCase())));
+            return (
             <div className="mt-8 space-y-3">
-              <div>
-                <h2 className="text-base font-semibold text-jade-ink">User management</h2>
-                <p className="mt-1 text-sm text-jade-muted">Everyone with a platform login — candidate accounts, onboarding status and activity.</p>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-jade-ink">User management</h2>
+                  <p className="mt-1 text-sm text-jade-muted">Everyone with a platform login — suspend an account to kill its sessions and block sign-in instantly.</p>
+                </div>
+                <div className="flex gap-2">
+                  <Input value={userQ} onChange={(e) => setUserQ(e.target.value)} placeholder="Search name, email, discipline…"
+                    className="h-9 w-56 border-vault-border bg-white text-sm text-jade-ink placeholder:text-[#8aa29c]" />
+                  <select value={userStatus} onChange={(e) => setUserStatus(e.target.value)}
+                    className="h-9 rounded-md border border-vault-border bg-white px-2 text-sm text-jade-ink">
+                    <option value="ALL">All statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="SUSPENDED">Suspended</option>
+                  </select>
+                </div>
               </div>
               <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
                 <table className="min-w-full text-left">
                   <thead>
                     <tr>
-                      {["Name", "Email", "Discipline", "Onboarding", "Checklists", "Requests", "Invites", "Joined"].map((h) => (
+                      {["Name", "Email", "Discipline", "Status", "Onboarding", "Checklists", "Requests", "Invites", "Joined", "Actions"].map((h) => (
                         <th key={h} className={th}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {data.users.map((u) => (
-                      <tr key={u.id}>
+                    {visible.map((u) => (
+                      <tr key={u.id} className="transition hover:bg-[#f7fbf8]">
                         <td className={cn(td, "font-medium")}>{u.name}</td>
                         <td className={cn(td, "text-jade-muted")}>{u.email}</td>
                         <td className={td}>{u.title}</td>
+                        <td className={td}><span className={statusPill(u.status)}>{u.status === "SUSPENDED" ? "Suspended" : "Active"}</span></td>
                         <td className={td}>
                           <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold",
                             u.onboardingComplete ? "border-verify-green/40 text-verify-ink" : "border-amber-300 text-amber-600")}>
@@ -536,34 +718,72 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                         <td className={td}>{u.requests}</td>
                         <td className={td}>{u.invites}</td>
                         <td className={cn(td, "text-jade-muted")}>{new Date(u.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
+                        <td className={td}>
+                          {u.status === "SUSPENDED" ? (
+                            <button type="button" onClick={() => changeUserStatus(u, "ACTIVE")}
+                              className="rounded-full border border-verify-green/50 px-2.5 py-1 text-[11px] font-semibold text-verify-ink transition hover:bg-verify-green/10">
+                              Reactivate
+                            </button>
+                          ) : (
+                            <button type="button" onClick={() => changeUserStatus(u, "SUSPENDED")}
+                              className="rounded-full border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50">
+                              Suspend
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
-                    {data.users.length === 0 && (
-                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={8}>No users yet.</td></tr>
+                    {visible.length === 0 && (
+                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={10}>No users match this filter.</td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* ── Company management ── */}
           {section === "companies" && (
             <div className="mt-8 space-y-3">
               <div>
                 <h2 className="text-base font-semibold text-jade-ink">Company management</h2>
-                <p className="mt-1 text-sm text-jade-muted">Agencies on the platform. Creation & white-label editing ship with the multi-tenant admin phase.</p>
+                <p className="mt-1 text-sm text-jade-muted">
+                  Total command over every tenant: suspend or read-only a company and every outbound verification blocks instantly. Creation & white-label editing ship with the multi-tenant admin phase.
+                </p>
               </div>
               {data.companies.map((a) => (
-                <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
-                  <div className="flex items-center gap-3">
-                    <span className="h-3 w-3 rounded-full" style={{ background: a.accentColor }} />
-                    <div>
-                      <p className="text-sm font-medium text-jade-ink">{a.name}</p>
-                      <p className="text-xs text-jade-muted">slug: {a.slug} · {a.candidates} candidate(s)</p>
+                <div key={a.id} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="h-3 w-3 rounded-full" style={{ background: a.accentColor }} />
+                      <div>
+                        <p className="flex items-center gap-2 text-sm font-medium text-jade-ink">
+                          {a.name} <span className={statusPill(a.status)}>{a.status === "READ_ONLY" ? "Read-only" : a.status.charAt(0) + a.status.slice(1).toLowerCase()}</span>
+                          {a.allowOverage && <span className="rounded-full border border-amber-300 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Post-paid</span>}
+                        </p>
+                        <p className="text-xs text-jade-muted">slug: {a.slug} · {a.candidates} candidate(s) · {a.creditsRemaining} of {a.creditsGranted} credits remaining</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setCompanyStatus(a, "ACTIVE")} disabled={a.status === "ACTIVE"}
+                        className="border border-verify-green/50 text-verify-ink hover:bg-verify-green/10 disabled:opacity-40">
+                        <Check className="mr-1 h-3.5 w-3.5" /> Active
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setCompanyStatus(a, "READ_ONLY")} disabled={a.status === "READ_ONLY"}
+                        className="border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40">
+                        Read-only
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setCompanyStatus(a, "SUSPENDED")} disabled={a.status === "SUSPENDED"}
+                        className="border border-rose-300 text-rose-600 hover:bg-rose-50 disabled:opacity-40">
+                        <X className="mr-1 h-3.5 w-3.5" /> Suspend
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => toggleOverage(a)}
+                        className="border border-vault-border text-jade-muted hover:text-jade-ink">
+                        <ToggleLeft className="mr-1 h-3.5 w-3.5" /> {a.allowOverage ? "Overage on" : "Overage off"}
+                      </Button>
                     </div>
                   </div>
-                  <p className="text-xs text-jade-muted">{a.creditsRemaining} of {a.creditsGranted} credits remaining</p>
                 </div>
               ))}
             </div>
@@ -622,31 +842,150 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
               <div>
                 <h2 className="text-base font-semibold text-jade-ink">Credit management</h2>
                 <p className="mt-1 text-sm text-jade-muted">
-                  Sandbox metering: 1 credit per outbound verification (reference requests + checklist invites). Swap in the billing provider of choice at launch.
+                  Immutable ledger: 1 credit per outbound verification (reference requests + checklist invites). At zero credits outbound stops — unless post-paid overage is on. Grant or deduct below; every entry is permanent.
                 </p>
               </div>
               {data.companies.map((a) => {
-                const pct = a.creditsGranted ? Math.min(100, Math.round((a.creditsUsed / a.creditsGranted) * 100)) : 0;
+                const pct = a.creditsGranted ? Math.min(100, Math.round((Math.max(0, a.creditsGranted - a.creditsRemaining) / a.creditsGranted) * 100)) : 0;
                 return (
                   <div key={a.id} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-jade-ink">{a.name}</p>
-                        <p className="text-xs text-jade-muted">{a.creditsUsed} used of {a.creditsGranted} granted</p>
+                        <p className="text-xs text-jade-muted">{a.creditsUsed} spent · {a.creditsGranted} plan grant · {a.status === "ACTIVE" ? "outbound live" : "outbound " + a.status.toLowerCase()}</p>
                       </div>
-                      <p className={cn("text-sm font-bold", a.creditsRemaining <= 0 ? "text-rose-600" : "text-verify-ink")}>
-                        {a.creditsRemaining} remaining
+                      <p className={cn("text-sm font-bold", a.creditsRemaining <= 0 && !a.allowOverage ? "text-rose-600" : "text-verify-ink")}>
+                        {a.creditsRemaining} remaining{a.allowOverage && a.creditsRemaining <= 0 ? " (post-paid)" : ""}
                       </p>
                     </div>
                     <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#eef4f1]">
                       <div className={cn("h-full rounded-full transition-all", pct > 85 ? "bg-rose-500" : "bg-verify-green")} style={{ width: `${pct}%` }} />
                     </div>
+                    {creditForm?.id === a.id ? (
+                      <div className="mt-4 rounded-xl border border-verify-green/30 bg-[#f2f7f4] p-4">
+                        <div className="grid gap-3 sm:grid-cols-[140px_1fr_auto]">
+                          <div>
+                            <Label className="text-jade-ink/80">Credits (+/−)</Label>
+                            <Input value={creditForm.delta} onChange={(e) => setCreditForm({ ...creditForm, delta: e.target.value.replace(/[^\-\d]/g, "") })}
+                              placeholder="e.g. 100 or -25" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                          </div>
+                          <div>
+                            <Label className="text-jade-ink/80">Reason (required)</Label>
+                            <Input value={creditForm.reason} onChange={(e) => setCreditForm({ ...creditForm, reason: e.target.value })}
+                              placeholder="e.g. March prepaid bundle" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                          </div>
+                          <div className="flex items-end gap-2">
+                            <Button size="sm" onClick={applyCredit} disabled={!creditForm.delta || creditForm.reason.trim().length < 3}
+                              className="bg-verify-green text-vault-dark hover:bg-verify-green/90 disabled:opacity-40">
+                              <Check className="mr-1.5 h-3.5 w-3.5" /> Apply
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setCreditForm(null)} className="border border-vault-border text-jade-muted hover:text-jade-ink">Cancel</Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => setCreditForm({ id: a.id, delta: "", reason: "" })}
+                        className="mt-3 border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                        <PlusCircle className="mr-1.5 h-3.5 w-3.5" /> Grant / adjust credits
+                      </Button>
+                    )}
                   </div>
                 );
               })}
               {data.companies.length === 0 && (
                 <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-10 text-center text-sm text-jade-muted">No companies yet.</div>
               )}
+
+              {/* Ledger — the immutable money trail */}
+              <div className="overflow-hidden rounded-xl border border-vault-border bg-white vv-card-shadow">
+                <div className="flex items-center justify-between px-5 py-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-jade-ink">Credit ledger</h3>
+                    <p className="text-xs text-jade-muted">Last 50 entries, newest first — grants, spends, adjustments. Write-once, never editable.</p>
+                  </div>
+                  <button type="button" onClick={loadLedger} className="rounded-lg p-2 text-jade-muted transition hover:bg-jade-ink/5 hover:text-jade-ink" aria-label="Refresh ledger">
+                    <RefreshCw className="h-4 w-4" />
+                  </button>
+                </div>
+                <table className="min-w-full text-left">
+                  <thead className="bg-[#f7fbf8]">
+                    <tr>{["When", "Company", "Change", "Reason", "By", "Balance"].map((h) => <th key={h} className={cn(th, "text-left")}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {(ledger ?? []).map((l) => (
+                      <tr key={l.id}>
+                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{new Date(l.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+                        <td className={td}>{l.agency}</td>
+                        <td className={cn(td, "font-mono font-semibold", l.delta >= 0 ? "text-verify-ink" : "text-rose-600")}>{l.delta >= 0 ? `+${l.delta}` : l.delta}</td>
+                        <td className={cn(td, "text-xs text-jade-muted")}>{l.reason}</td>
+                        <td className={cn(td, "text-xs")}>{l.actorType.toLowerCase()}{l.actorId ? ` · ${l.actorId.slice(0, 18)}` : ""}</td>
+                        <td className={cn(td, "font-mono")}>{l.balanceAfter}</td>
+                      </tr>
+                    ))}
+                    {ledger?.length === 0 && <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={6}>No ledger entries yet.</td></tr>}
+                    {!ledger && <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={6}><Spinner /></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Audit log — the platform's permanent record ── */}
+          {section === "audit" && (
+            <div className="mt-8 space-y-3">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-jade-ink">Audit log</h2>
+                  <p className="mt-1 text-sm text-jade-muted">Write-once record of every action on the platform — including your own. Search by action, actor, or entity.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Input value={auditQ} onChange={(e) => setAuditQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadAudit()}
+                    placeholder="Search action / actor / entity…" className="h-9 w-56 border-vault-border bg-white text-sm text-jade-ink placeholder:text-[#8aa29c]" />
+                  <select value={auditType} onChange={(e) => setAuditType(e.target.value)}
+                    className="h-9 rounded-md border border-vault-border bg-white px-2 text-sm text-jade-ink">
+                    <option value="">All actors</option>
+                    <option value="CANDIDATE">Candidates</option>
+                    <option value="RECRUITER">Recruiters</option>
+                    <option value="REFERENCE">Referees</option>
+                    <option value="SYSTEM">System / Superadmin</option>
+                  </select>
+                  <select value={auditDays} onChange={(e) => setAuditDays(Number(e.target.value))}
+                    className="h-9 rounded-md border border-vault-border bg-white px-2 text-sm text-jade-ink">
+                    <option value={1}>24 hours</option>
+                    <option value={7}>7 days</option>
+                    <option value={30}>30 days</option>
+                    <option value={365}>1 year</option>
+                  </select>
+                  <Button size="sm" variant="ghost" onClick={() => loadAudit()} className="h-9 border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Search
+                  </Button>
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-vault-border bg-white vv-card-shadow">
+                <table className="min-w-full text-left">
+                  <thead className="bg-[#f7fbf8]">
+                    <tr>{["When", "Actor", "Action", "Entity", "IP", "Detail"].map((h) => <th key={h} className={cn(th, "text-left")}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {(audit ?? []).map((ev) => (
+                      <tr key={ev.id} className="transition hover:bg-[#f7fbf8]">
+                        <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{new Date(ev.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })}</td>
+                        <td className={cn(td, "max-w-48 truncate")}>
+                          <span className="rounded bg-[#f0f6f2] px-1.5 py-0.5 text-[10px] font-bold uppercase text-verify-ink">{ev.actorType}</span>
+                          {ev.actorId && <span className="ml-1.5 text-xs text-jade-muted">{ev.actorId.slice(0, 26)}</span>}
+                        </td>
+                        <td className={cn(td, "whitespace-nowrap font-mono text-xs font-semibold text-jade-ink")}>{ev.action}</td>
+                        <td className={cn(td, "text-xs text-jade-muted")}>{ev.entity}{ev.entityId ? ` · ${ev.entityId.slice(0, 14)}` : ""}</td>
+                        <td className={cn(td, "font-mono text-xs text-jade-muted")}>{ev.ip || "—"}</td>
+                        <td className={cn(td, "max-w-72 truncate text-xs text-jade-muted")} title={ev.detail}>{ev.detail !== "{}" ? ev.detail : "—"}</td>
+                      </tr>
+                    ))}
+                    {audit?.length === 0 && <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={6}>No events match this filter.</td></tr>}
+                    {!audit && <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={6}><Spinner /></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              {audit && audit.length >= 200 && <p className="text-center text-[11px] text-[#8aa29c]">Showing the 200 most recent events — narrow the filter to see more.</p>}
             </div>
           )}
 
@@ -889,6 +1228,42 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                   The deployment map for this platform. Secret <strong>values</strong> live only in environment variables
                   (Vercel encrypted store) — this page shows configured flags, never the values themselves.
                 </p>
+              </div>
+
+              {/* Platform controls — the command switches */}
+              <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-jade-ink">Platform controls</h3>
+                    <p className="mt-0.5 text-xs text-jade-muted">Maintenance mode pauses every write across the platform. Connectivity pings verify the live integrations.</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" onClick={toggleMaintenance}
+                      className={cn("rounded-full border px-4 py-1.5 text-xs font-semibold transition",
+                        data.platform.maintenance ? "border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                      {data.platform.maintenance ? "Maintenance ON — click to resume" : "Maintenance mode"}
+                    </button>
+                    <Button size="sm" variant="ghost" onClick={runPing} className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                      <Activity className="mr-1.5 h-3.5 w-3.5" /> Ping integrations
+                    </Button>
+                  </div>
+                </div>
+                {ping && (
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                    {[ping.db && ["Database", ping.db], ping.brevo && ["Brevo email", ping.brevo]].filter(Boolean).map(([label, v]) => {
+                      const item = v as { ok: boolean; detail: string };
+                      return (
+                        <div key={label as string} className={cn("rounded-xl border px-4 py-3 text-sm", item.ok ? "border-verify-green/30 bg-verify-green/5" : "border-rose-200 bg-rose-50")}>
+                          <p className="flex items-center gap-2 font-semibold text-jade-ink">
+                            {item.ok ? <Check className="h-4 w-4 text-verify-green" /> : <X className="h-4 w-4 text-rose-500" />}
+                            {label as string}
+                          </p>
+                          <p className={cn("mt-0.5 text-xs", item.ok ? "text-jade-muted" : "text-rose-600")}>{item.detail}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {!sys ? (
