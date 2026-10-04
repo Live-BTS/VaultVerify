@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createSession, destroySession, getAccount, hashPassword, verifyPassword } from "@/lib/bts/checklistAuth";
-import { createVerification, sendVerificationEmail, maskEmail } from "@/lib/bts/auth";
+import { createVerification, sendVerificationEmail, maskEmail, dbConfigured, emailLive } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 
 // ── /api/checklist/account — candidate account for the skills checklist ──
@@ -55,6 +55,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const action = body.action as string;
 
+  // Missing deployment config should read as an owner action item, not a bug.
+  if (!dbConfigured()) {
+    return NextResponse.json(
+      { ok: false, error: "Server not configured: DATABASE_URL is missing. Add the environment variables in Vercel → Settings → Environment Variables, then redeploy." },
+      { status: 503 },
+    );
+  }
+
   try {
     if (action === "signup") {
       const name = String(body.name ?? "").trim();
@@ -83,7 +91,7 @@ export async function POST(req: NextRequest) {
       }
       const token = await createVerification("CANDIDATE", email);
       await sendVerificationEmail("CANDIDATE", email, token, originOf(req));
-      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email) });
+      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email), emailLive: emailLive() });
     }
 
     if (action === "login") {

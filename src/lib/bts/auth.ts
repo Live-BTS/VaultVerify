@@ -10,6 +10,11 @@ import { sendNotification } from "@/lib/bts/notifications";
 
 export const RECRUITER_COOKIE = "vv_rc";
 export const SESSION_DAYS = 30;
+
+// Fail-fast config probes: a missing env var should produce a clear 503 that
+// names the variable, not an opaque 500 from a deep Prisma/email failure.
+export const dbConfigured = () => !!process.env.DATABASE_URL;
+export const emailLive = () => !!process.env.BREVO_API_KEY;
 export const VERIFY_TTL_MINUTES = 60 * 24; // verification links live 24h
 
 export function hashPassword(password: string): string {

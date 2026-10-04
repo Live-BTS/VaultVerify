@@ -29,6 +29,7 @@ export function AuthPanel({
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [pendingEmail, setPendingEmail] = useState("");
   const [sentTo, setSentTo] = useState("");
+  const [emailLive, setEmailLive] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -50,6 +51,7 @@ export function AuthPanel({
       if (data.checkEmail || data.needsVerification) {
         setPendingEmail(form.email.trim().toLowerCase());
         setSentTo(data.sentTo ?? "your email");
+        setEmailLive(data.emailLive !== false);
         setMode("check");
         return;
       }
@@ -89,6 +91,11 @@ export function AuthPanel({
               Open it to activate your recruiter account — then this page continues automatically.
             </p>
             <p className="mt-2 text-xs text-slate-400">The link expires in 24 hours. Didn&apos;t get it? Check spam or resend below.</p>
+            {!emailLive && (
+              <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                Email delivery isn&apos;t configured on this deployment yet, so this message was simulated. Set BREVO_API_KEY and BREVO_SENDER_EMAIL in Vercel, then resend.
+              </p>
+            )}
             <Button onClick={resend} disabled={busy} variant="outline" className="mt-5 w-full border-teal-700/30 text-teal-700 hover:bg-teal-50">
               {busy ? "Sending…" : "Resend verification email"}
             </Button>

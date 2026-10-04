@@ -4,6 +4,7 @@ import {
   hashPassword, verifyPassword, isValidEmail, maskEmail,
   createVerification, sendVerificationEmail, consumeVerification,
   createRecruiterSession, getRecruiterSessionAccount, destroyRecruiterSession,
+  dbConfigured, emailLive,
 } from "@/lib/bts/auth";
 import { createSession, destroySession, getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
@@ -40,6 +41,11 @@ export async function POST(req: NextRequest) {
   const action = String(body.action ?? "");
   const role = body.role === "RECRUITER" ? "RECRUITER" : body.role === "CANDIDATE" ? "CANDIDATE" : null;
 
+  // Missing deployment config should read as an owner action item, not a bug.
+  if (!dbConfigured()) {
+    return bad("Server not configured: DATABASE_URL is missing. Add the environment variables in Vercel → Settings → Environment Variables, then redeploy.", 503);
+  }
+
   try {
     // ── signup ────────────────────────────────────────────────────
     if (action === "signup") {
@@ -73,7 +79,7 @@ export async function POST(req: NextRequest) {
       const token = await createVerification(role, email);
       await sendVerificationEmail(role, email, token, originOf(req));
       await logAudit({ actorType: role, actorId: email, action: "SIGNUP", entity: role === "CANDIDATE" ? "checklistAccount" : "recruiterAccount", entityId: email });
-      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email) });
+      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email), emailLive: emailLive() });
     }
 
     // ── verify (emailed link) ─────────────────────────────────────
