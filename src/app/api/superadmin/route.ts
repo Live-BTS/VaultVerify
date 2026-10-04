@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
-import { sha256 } from "@/lib/bts/auth";
+import { sha256, hashPassword, createPasswordReset, maskEmail } from "@/lib/bts/auth";
 import { sendNotification } from "@/lib/bts/notifications";
 import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
@@ -54,8 +54,26 @@ function yearsFrom(manual: number, start: Date | null): number {
   return manual;
 }
 
+function originOf(req: NextRequest): string {
+  const proto = req.headers.get("x-forwarded-proto") ?? "http";
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "localhost:3000";
+  return `${proto}://${host}`;
+}
+
+const tempPassword = () => randomBytes(9).toString("base64url"); // ~12 URL-safe chars
+
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (!rows.length) return "";
+  const cols = Object.keys(rows[0]);
+  const esc = (v: unknown) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replaceAll("\"", "\"\"")}"` : s;
+  };
+  return [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+}
+
 async function overview() {
-  const [agencies, candidates, requests, responses, templates, flags, notifications, accounts, invites, refRequests, extras, flagRows] = await Promise.all([
+  const [agencies, candidates, requests, responses, templates, flags, notifications, accounts, invites, refRequests, extras, flagRows, recruiters] = await Promise.all([
     db.agency.findMany({ include: { _count: { select: { candidates: true } } }, orderBy: { createdAt: "asc" } }),
     db.candidate.count(),
     db.referenceRequest.count(),
@@ -65,7 +83,7 @@ async function overview() {
     db.notificationLog.count(),
     db.checklistAccount.findMany({
       orderBy: { createdAt: "desc" },
-      include: { _count: { select: { completions: true, requests: true, invites: true } } },
+      include: { _count: { select: { completions: true, requests: true, invites: true, sessions: true } } },
     }),
     db.checklistInvite.count(),
     db.referenceRequest.count(),
@@ -74,6 +92,10 @@ async function overview() {
       orderBy: { createdAt: "desc" },
       take: 40,
       include: { request: { include: { candidate: true } } },
+    }),
+    db.recruiterAccount.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { _count: { select: { sessions: true } } },
     }),
   ]);
   const completed = await db.referenceRequest.count({ where: { status: "COMPLETED" } });
@@ -94,8 +116,15 @@ async function overview() {
   const users = accounts.map((a) => ({
     id: a.id, name: a.name, email: a.email, title: a.discipline || a.title,
     onboardingComplete: a.onboardingComplete, status: a.status,
+    failedLogins: a.failedLogins, lastFailedLogin: a.lastFailedLogin, liveSessions: a._count.sessions,
     completions: a._count.completions, requests: a._count.requests, invites: a._count.invites,
     joinedAt: a.createdAt,
+  }));
+  const recruiterRows = recruiters.map((r) => ({
+    id: r.id, name: r.name, email: r.email, company: r.company, jobTitle: r.jobTitle,
+    emailVerified: r.emailVerified, onboardingComplete: r.onboardingComplete, status: r.status,
+    failedLogins: r.failedLogins, lastFailedLogin: r.lastFailedLogin, liveSessions: r._count.sessions,
+    joinedAt: r.createdAt,
   }));
   const candidateProfiles = accounts.map((a) => ({
     id: a.id, name: a.name, phone: a.phone, email: a.email,
@@ -135,6 +164,7 @@ async function overview() {
     agencies: agencies.map((a) => ({ id: a.id, name: a.name, slug: a.slug, logoText: a.logoText, candidates: a._count.candidates, primaryColor: a.primaryColor, accentColor: a.accentColor })),
     sets: [...sets.values()].map((s) => ({ ...s, sources: [...s.sources], rows: s.rows.map((r) => ({ id: r.id, category: r.category, skillName: r.skillName, questionType: r.questionType, hasNA: r.hasNA, highRisk: r.highRisk, active: r.active, source: r.source })) })),
     users,
+    recruiters: recruiterRows,
     candidateProfiles,
     companies,
     threatFlags,
@@ -357,6 +387,202 @@ export async function POST(req: NextRequest) {
         }
         await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "CONNECTIVITY_PING", detail: result as unknown as Record<string, unknown> });
         return NextResponse.json({ ok: true, ...result });
+      }
+
+      // ── Phase 2: security center, view-as, share oversight, exports ──
+      case "impersonate_view": {
+        // Read-only proxy dossier — the compliant way to "see what they see":
+        // no session is created, nothing can be written, and the access is
+        // audit-stamped as impersonation every single time.
+        const kind = body.kind === "RECRUITER" ? "RECRUITER" : "CANDIDATE";
+        const id = String(body.id);
+        if (kind === "RECRUITER") {
+          const r = await db.recruiterAccount.findUnique({
+            where: { id },
+            include: { _count: { select: { sessions: true } } },
+          });
+          if (!r) return NextResponse.json({ ok: false, error: "Recruiter not found" }, { status: 404 });
+          await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "IMPERSONATION_VIEWED", entity: "recruiterAccount", entityId: r.id, detail: { email: r.email } });
+          const invites = await db.checklistInvite.findMany({ where: { recruiterName: r.name }, orderBy: { createdAt: "desc" }, take: 25 });
+          return NextResponse.json({
+            ok: true,
+            view: {
+              kind, id: r.id, name: r.name, email: r.email, status: r.status, emailVerified: r.emailVerified,
+              onboardingComplete: r.onboardingComplete, liveSessions: r._count.sessions, createdAt: r.createdAt,
+              profile: { phone: r.phone, company: r.company, jobTitle: r.jobTitle, city: r.city, state: r.state, zip: r.zip },
+              invites: invites.map((i) => ({ id: i.id, candidate: i.candidateName, specialty: i.specialty, status: i.status, createdAt: i.createdAt })),
+              requests: [], completions: [], shareLinks: [],
+            },
+          });
+        }
+        const a = await db.checklistAccount.findUnique({
+          where: { id },
+          include: {
+            _count: { select: { sessions: true } },
+            invites: { orderBy: { createdAt: "desc" }, take: 25 },
+            requests: { orderBy: { requestedAt: "desc" }, take: 25 },
+            completions: { orderBy: { completedAt: "desc" }, take: 25, include: { shareLinks: { orderBy: { createdAt: "desc" } } } },
+          },
+        });
+        if (!a) return NextResponse.json({ ok: false, error: "Candidate not found" }, { status: 404 });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "IMPERSONATION_VIEWED", entity: "checklistAccount", entityId: a.id, detail: { email: a.email } });
+        return NextResponse.json({
+          ok: true,
+          view: {
+            kind, id: a.id, name: a.name, email: a.email, status: a.status, emailVerified: a.emailVerified,
+            onboardingComplete: a.onboardingComplete, liveSessions: a._count.sessions, createdAt: a.createdAt,
+            profile: { phone: a.phone, city: a.city, state: a.state, zip: a.zip, profession: a.profession, discipline: a.discipline, specialty: a.specialty, yrsOverall: a.yrsOverall, yrsSpecialty: a.yrsSpecialty },
+            invites: a.invites.map((i) => ({ id: i.id, candidate: i.candidateName, specialty: i.specialty, status: i.status, createdAt: i.createdAt })),
+            requests: a.requests.map((r) => ({ id: r.id, jobTitle: r.jobTitle, specialty: r.specialty, status: r.status, requestedAt: r.requestedAt })),
+            completions: a.completions.map((c) => ({ id: c.id, specialtyLabel: c.specialtyLabel, source: c.source, completedAt: c.completedAt, expiresAt: c.expiresAt, shareLinks: c.shareLinks.length })),
+            shareLinks: a.completions.flatMap((c) => c.shareLinks.map((s) => ({ id: s.id, accessType: s.accessType, revoked: s.revoked, expiresAt: s.expiresAt, viewCount: s.viewCount }))),
+          },
+        });
+      }
+
+      case "security_reset": {
+        // Email a /?reset=<token> link and kill every live session.
+        const kind = body.kind === "RECRUITER" ? "RECRUITER" : "CANDIDATE";
+        const id = String(body.id);
+        const account = kind === "RECRUITER"
+          ? await db.recruiterAccount.findUnique({ where: { id } })
+          : await db.checklistAccount.findUnique({ where: { id } });
+        if (!account) return NextResponse.json({ ok: false, error: "Account not found" }, { status: 404 });
+        const token = await createPasswordReset(kind, account.id);
+        if (kind === "RECRUITER") await killRecruiterSessions(account.id);
+        else await killCandidateSessions(account.id);
+        const result = await sendNotification({
+          channel: "EMAIL", kind: "SECURITY", to: account.email,
+          subject: "Reset your VaultVerify password",
+          body: `A password reset was requested for your VaultVerify account by platform support.\n\nSet a new password here (link expires in 60 minutes):\n${originOf(req)}/?reset=${token}\n\nIf you weren't expecting this, ignore the email — your current password still works until the link is used.`,
+        });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "PASSWORD_RESET_SENT", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
+        return NextResponse.json({ ok: true, sentTo: maskEmail(account.email), simulated: result.status === "SIMULATED" });
+      }
+
+      case "security_temp_password": {
+        // Issue a one-time temp password (shown once in the console) and email
+        // it together with the set-your-own-password link.
+        const kind = body.kind === "RECRUITER" ? "RECRUITER" : "CANDIDATE";
+        const id = String(body.id);
+        const account = kind === "RECRUITER"
+          ? await db.recruiterAccount.findUnique({ where: { id } })
+          : await db.checklistAccount.findUnique({ where: { id } });
+        if (!account) return NextResponse.json({ ok: false, error: "Account not found" }, { status: 404 });
+        const temp = tempPassword();
+        await (kind === "RECRUITER" ? db.recruiterAccount : db.checklistAccount).update({
+          where: { id: account.id },
+          data: { passwordHash: hashPassword(temp), failedLogins: 0 },
+        });
+        const token = await createPasswordReset(kind, account.id);
+        if (kind === "RECRUITER") await killRecruiterSessions(account.id);
+        else await killCandidateSessions(account.id);
+        const result = await sendNotification({
+          channel: "EMAIL", kind: "SECURITY", to: account.email,
+          subject: "Your temporary VaultVerify password",
+          body: `Platform support issued a temporary password for your VaultVerify account:\n\n${temp}\n\nSign in with it, then set your own password here (expires in 60 minutes):\n${originOf(req)}/?reset=${token}\n\nAll previous sessions were signed out.`,
+        });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "TEMP_PASSWORD_ISSUED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
+        return NextResponse.json({ ok: true, tempPassword: temp, sentTo: maskEmail(account.email), simulated: result.status === "SIMULATED" });
+      }
+
+      case "revoke_user_sessions": {
+        const kind = body.kind === "RECRUITER" ? "RECRUITER" : "CANDIDATE";
+        const id = String(body.id);
+        const killed = kind === "RECRUITER" ? await killRecruiterSessions(id) : await killCandidateSessions(id);
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "USER_SESSIONS_REVOKED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: id, detail: { killed } });
+        return NextResponse.json({ ok: true, killed });
+      }
+
+      case "revoke_all_sessions": {
+        // Nukes every candidate + recruiter session platform-wide. The
+        // superadmin's own console session is deliberately untouched.
+        const [c, r] = await Promise.all([
+          db.checklistSession.deleteMany({}),
+          db.recruiterSession.deleteMany({}),
+        ]);
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "ALL_SESSIONS_REVOKED", detail: { candidates: c.count, recruiters: r.count } });
+        return NextResponse.json({ ok: true, candidates: c.count, recruiters: r.count });
+      }
+
+      case "shares_list": {
+        const [refLinks, checkLinks] = await Promise.all([
+          db.referenceShareLink.findMany({
+            orderBy: { createdAt: "desc" }, take: 100,
+            include: { request: { include: { candidate: true } } },
+          }),
+          db.checklistShareLink.findMany({
+            orderBy: { createdAt: "desc" }, take: 100,
+            include: { completion: { include: { account: true } } },
+          }),
+        ]);
+        const links = [
+          ...refLinks.map((l) => ({
+            kind: "reference" as const, id: l.id, token: l.token, accessType: l.accessType,
+            label: l.label, revoked: l.revoked, viewCount: l.viewCount, expiresAt: l.expiresAt, createdAt: l.createdAt,
+            owner: l.request.candidate.fullName, ownerEmail: l.request.candidate.email, what: `Reference — ${l.request.candidate.fullName}`,
+          })),
+          ...checkLinks.map((l) => ({
+            kind: "checklist" as const, id: l.id, token: l.token, accessType: l.accessType,
+            label: l.label, revoked: l.revoked, viewCount: l.viewCount, expiresAt: l.expiresAt, createdAt: l.createdAt,
+            owner: l.completion.account.name, ownerEmail: l.completion.account.email, what: `Checklist — ${l.completion.specialtyLabel || l.completion.specialty}`,
+          })),
+        ].sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
+        return NextResponse.json({ ok: true, links });
+      }
+
+      case "share_revoke": {
+        const kind = body.kind === "reference" ? "reference" : "checklist";
+        const id = String(body.id);
+        if (kind === "reference") await db.referenceShareLink.update({ where: { id }, data: { revoked: true } });
+        else await db.checklistShareLink.update({ where: { id }, data: { revoked: true } });
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "SHARE_REVOKED_ADMIN", entity: kind === "reference" ? "referenceShareLink" : "checklistShareLink", entityId: id });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "notifications_list": {
+        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const [rows, sent, simulated, failed] = await Promise.all([
+          db.notificationLog.findMany({ orderBy: { createdAt: "desc" }, take: 60 }),
+          db.notificationLog.count({ where: { createdAt: { gte: since }, status: "SENT" } }),
+          db.notificationLog.count({ where: { createdAt: { gte: since }, status: "SIMULATED" } }),
+          db.notificationLog.count({ where: { createdAt: { gte: since }, status: "FAILED" } }),
+        ]);
+        return NextResponse.json({
+          ok: true,
+          stats: { sent, simulated, failed },
+          notifications: rows.map((n) => ({ id: n.id, at: n.createdAt, channel: n.channel, kind: n.kind, to: n.to, subject: n.subject, status: n.status, provider: n.provider })),
+        });
+      }
+
+      case "export_csv": {
+        const what = String(body.what ?? "");
+        let rows: Record<string, unknown>[] = [];
+        if (what === "users") {
+          rows = (await db.checklistAccount.findMany({ orderBy: { createdAt: "desc" } })).map((a) => ({
+            name: a.name, email: a.email, title: a.discipline || a.title, phone: a.phone,
+            city: a.city, state: a.state, zip: a.zip, profession: a.profession, specialty: a.specialty,
+            status: a.status, emailVerified: a.emailVerified, onboardingComplete: a.onboardingComplete,
+            failedLogins: a.failedLogins, joinedAt: a.createdAt.toISOString(),
+          }));
+        } else if (what === "companies") {
+          for (const a of await db.agency.findMany({ orderBy: { createdAt: "asc" } })) {
+            rows.push({
+              name: a.name, slug: a.slug, candidates: a._count?.candidates ?? (await db.candidate.count({ where: { agencyId: a.id } })),
+              status: a.status, allowOverage: a.allowOverage, creditsGranted: a.creditsGranted,
+              creditsRemaining: await creditBalance(a.id), createdAt: a.createdAt.toISOString(),
+            });
+          }
+        } else if (what === "audit") {
+          rows = (await db.auditEvent.findMany({ orderBy: { createdAt: "desc" }, take: 5000 })).map((e) => ({
+            at: e.createdAt.toISOString(), actorType: e.actorType, actorId: e.actorId,
+            action: e.action, entity: e.entity, entityId: e.entityId, ip: e.ip, detail: e.detail,
+          }));
+        } else {
+          return NextResponse.json({ ok: false, error: "Unknown export" }, { status: 400 });
+        }
+        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "DATA_EXPORTED", detail: { what, rows: rows.length } });
+        return NextResponse.json({ ok: true, csv: toCsv(rows), count: rows.length, what });
       }
 
       case "import": {

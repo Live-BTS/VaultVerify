@@ -106,8 +106,12 @@ export async function POST(req: NextRequest) {
       const password = String(body.password ?? "");
       const account = await db.checklistAccount.findUnique({ where: { email } });
       if (!account || !verifyPassword(password, account.passwordHash)) {
+        if (account) {
+          await db.checklistAccount.update({ where: { id: account.id }, data: { failedLogins: { increment: 1 }, lastFailedLogin: new Date() } });
+        }
         return NextResponse.json({ ok: false, error: "Wrong email or password" }, { status: 401 });
       }
+      await db.checklistAccount.update({ where: { id: account.id }, data: { failedLogins: 0 } });
       if (account.status === "SUSPENDED") {
         await logAudit({ actorType: "SYSTEM", actorId: email, action: "SIGNIN_BLOCKED_SUSPENDED", entity: "checklistAccount", entityId: account.id, ip: req.headers.get("x-forwarded-for")?.split(",")[0] ?? "" });
         return NextResponse.json({ ok: false, error: "This account is suspended. Contact VaultVerify support." }, { status: 403 });

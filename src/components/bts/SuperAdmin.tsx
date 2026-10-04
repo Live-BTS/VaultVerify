@@ -13,7 +13,7 @@ import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
   Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server, Mail,
-  ScrollText, Activity,
+  ScrollText, Activity, Link2, Eye, KeyRound, LogOut, Ban,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -30,7 +30,31 @@ interface TemplateSet {
 interface UserRow {
   id: string; name: string; email: string; title: string; onboardingComplete: boolean;
   status: string;
+  failedLogins: number; lastFailedLogin: string | null; liveSessions: number;
   completions: number; requests: number; invites: number; joinedAt: string;
+}
+interface RecruiterRow {
+  id: string; name: string; email: string; company: string; jobTitle: string;
+  emailVerified: boolean; onboardingComplete: boolean; status: string;
+  failedLogins: number; lastFailedLogin: string | null; liveSessions: number;
+  joinedAt: string;
+}
+interface ImpersonationView {
+  kind: string; id: string; name: string; email: string; status: string; emailVerified: boolean;
+  onboardingComplete: boolean; liveSessions: number; createdAt: string;
+  profile: Record<string, string | number>;
+  invites: { id: string; candidate: string; specialty: string; status: string; createdAt: string }[];
+  requests: { id: string; jobTitle: string; specialty: string; status: string; requestedAt: string }[];
+  completions: { id: string; specialtyLabel: string; source: string; completedAt: string; expiresAt: string; shareLinks: number }[];
+  shareLinks: { id: string; accessType: string; revoked: boolean; expiresAt: string | null; viewCount: number }[];
+}
+interface ShareLinkRow {
+  kind: "reference" | "checklist"; id: string; token: string; accessType: string;
+  label: string; revoked: boolean; viewCount: number; expiresAt: string | null; createdAt: string;
+  owner: string; ownerEmail: string; what: string;
+}
+interface NotificationRow {
+  id: string; at: string; channel: string; kind: string; to: string; subject: string; status: string; provider: string;
 }
 interface CandidateProfileRow {
   id: string; name: string; phone: string; email: string;
@@ -59,6 +83,7 @@ interface Overview {
   agencies: { id: string; name: string; slug: string; logoText: string; candidates: number; primaryColor: string; accentColor: string }[];
   sets: TemplateSet[];
   users: UserRow[];
+  recruiters: RecruiterRow[];
   candidateProfiles: CandidateProfileRow[];
   companies: CompanyRow[];
   threatFlags: ThreatFlagRow[];
@@ -77,7 +102,7 @@ interface ExtraQ {
   id: string; kind: string; prompt: string; placeholder: string; specialty: string; active: boolean; sortOrder: number;
 }
 
-type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "audit" | "skills" | "system";
+type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "audit" | "shares" | "skills" | "system";
 
 interface SystemItemView { key: string; label: string; envVar: string; provider: string; purpose: string; critical: boolean; configured: boolean }
 interface SystemStatus { items: SystemItemView[]; protections: { label: string; detail: string }[]; runtime: { databaseProvider: string; emailProvider: string; smsProvider: string; environment: string } }
@@ -116,6 +141,7 @@ const NAV: [Section, string, typeof Users][] = [
   ["companies", "Company management", Building2],
   ["candidates", "Candidate management", BookUser],
   ["credits", "Credit management", Wallet],
+  ["shares", "Shared links", Link2],
   ["audit", "Audit log", ScrollText],
   ["skills", "Skills & imports", Database],
   ["system", "System & APIs", Server],
@@ -392,6 +418,98 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         : s === "SUSPENDED" ? "border-rose-300 bg-rose-50 text-rose-600"
         : "border-amber-300 bg-amber-50 text-amber-700");
 
+  // ── Phase 2: security center, view-as, share oversight, exports ──
+  const [userKind, setUserKind] = useState<"CANDIDATES" | "RECRUITERS">("CANDIDATES");
+  const [impView, setImpView] = useState<ImpersonationView | null>(null);
+  const [shares, setShares] = useState<ShareLinkRow[] | null>(null);
+  const [notifHealth, setNotifHealth] = useState<{ stats: { sent: number; simulated: number; failed: number }; notifications: NotificationRow[] } | null>(null);
+  const [tempPwShown, setTempPwShown] = useState<{ email: string; temp: string } | null>(null);
+
+  const openImpersonation = async (kind: "CANDIDATE" | "RECRUITER", id: string) => {
+    try {
+      const d = await call({ action: "impersonate_view", kind, id });
+      setImpView(d.view);
+    } catch (e) {
+      toast({ title: "Could not load the account view", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+  const sendReset = async (kind: "CANDIDATE" | "RECRUITER", id: string, email: string) => {
+    if (!confirm(`Email a password-reset link to ${email}?\nAll their live sessions are signed out.`)) return;
+    try {
+      const d = await call({ action: "security_reset", kind, id });
+      toast({ title: d.simulated ? "Reset link simulated (sandbox)" : `Reset link sent to ${d.sentTo}`, description: "The link expires in 60 minutes." });
+      await refresh();
+    } catch (e) {
+      toast({ title: "Could not send reset", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+  const issueTempPw = async (kind: "CANDIDATE" | "RECRUITER", id: string, email: string) => {
+    if (!confirm(`Issue a temporary password for ${email}?\nIt replaces their current password, signs out all sessions, and is emailed to them.`)) return;
+    try {
+      const d = await call({ action: "security_temp_password", kind, id });
+      setTempPwShown({ email: d.sentTo ?? email, temp: d.tempPassword });
+      await refresh();
+    } catch (e) {
+      toast({ title: "Could not issue a temp password", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+  const killUserSessions = async (kind: "CANDIDATE" | "RECRUITER", id: string, email: string) => {
+    try {
+      const d = await call({ action: "revoke_user_sessions", kind, id });
+      toast({ title: "Sessions revoked", description: `${d.killed} live session(s) signed out for ${email}.` });
+      await refresh();
+    } catch { toast({ title: "Could not revoke sessions", variant: "destructive" }); }
+  };
+  const killAllSessions = async () => {
+    if (!confirm("Sign out EVERY candidate and recruiter on the platform?\nUse for a suspected platform-wide breach. The superadmin console stays signed in.")) return;
+    if (!confirm("Final confirmation — every user will be forced to sign in again.")) return;
+    try {
+      const d = await call({ action: "revoke_all_sessions" });
+      toast({ title: "All sessions revoked", description: `${d.candidates} candidate + ${d.recruiters} recruiter sessions destroyed.` });
+      await refresh();
+    } catch { toast({ title: "Could not revoke sessions", variant: "destructive" }); }
+  };
+  const loadShares = async () => {
+    try { const d = await call({ action: "shares_list" }); setShares(d.links); } catch { /* keep old */ }
+  };
+  const revokeShare = async (l: ShareLinkRow) => {
+    if (!confirm(`Revoke this ${l.kind} share link?\n${l.owner} → "${l.label || "unlabeled"}"\nAnyone holding the link loses access immediately.`)) return;
+    try {
+      await call({ action: "share_revoke", kind: l.kind, id: l.id });
+      toast({ title: "Link revoked", description: "The decision is in the audit log." });
+      await loadShares();
+    } catch { toast({ title: "Revoke failed", variant: "destructive" }); }
+  };
+  const loadNotifications = async () => {
+    try { const d = await call({ action: "notifications_list" }); setNotifHealth({ stats: d.stats, notifications: d.notifications }); } catch { /* keep old */ }
+  };
+  const exportCsv = async (what: "users" | "companies" | "audit") => {
+    try {
+      const d = await call({ action: "export_csv", what });
+      const blob = new Blob([d.csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `vaultverify-${what}-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: `Exported ${d.count} row(s)`, description: "The export is recorded in the audit log." });
+    } catch (e) {
+      toast({ title: "Export failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
+  const securityChip = (row: { failedLogins: number; lastFailedLogin: string | null; liveSessions: number }) =>
+    row.failedLogins >= 3 ? (
+      <span className="rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600" title={`Last failure ${row.lastFailedLogin ? new Date(row.lastFailedLogin).toLocaleString() : "—"}`}>
+        {row.failedLogins} fails · {row.liveSessions} live
+      </span>
+    ) : (
+      <span className="text-xs text-jade-muted" title={`Last failure ${row.lastFailedLogin ? new Date(row.lastFailedLogin).toLocaleString() : "never"}`}>
+        {row.failedLogins} fails · {row.liveSessions} live
+      </span>
+    );
+
   // ── Gate ──
   if (!data) {
     return (
@@ -504,7 +622,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         const badge = badgeFor(sec);
         return (
           <button key={sec} type="button"
-            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); }}
+            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); if (sec === "shares" && !shares) loadShares(); if (sec === "system") loadNotifications(); }}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
               active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
@@ -671,32 +789,49 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
 
           {/* ── User management ── */}
           {section === "users" && (() => {
-            const visible = data.users.filter((u) =>
+            const rows = userKind === "CANDIDATES"
+              ? data.users.map((u) => ({ kind: "CANDIDATE" as const, id: u.id, name: u.name, email: u.email, sub: u.title || "—", status: u.status, verified: true, onboardingComplete: u.onboardingComplete, security: u, joinedAt: u.joinedAt }))
+              : data.recruiters.map((r) => ({ kind: "RECRUITER" as const, id: r.id, name: r.name, email: r.email, sub: `${r.jobTitle || "Recruiter"}${r.company ? ` · ${r.company}` : ""}`, status: r.status, verified: r.emailVerified, onboardingComplete: r.onboardingComplete, security: r, joinedAt: r.joinedAt }));
+            const visible = rows.filter((u) =>
               (userStatus === "ALL" || (userStatus === "SUSPENDED" ? u.status === "SUSPENDED" : u.status === "ACTIVE")) &&
-              (!userQ || `${u.name} ${u.email} ${u.title}`.toLowerCase().includes(userQ.toLowerCase())));
+              (!userQ || `${u.name} ${u.email} ${u.sub}`.toLowerCase().includes(userQ.toLowerCase())));
             return (
             <div className="mt-8 space-y-3">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h2 className="text-base font-semibold text-jade-ink">User management</h2>
-                  <p className="mt-1 text-sm text-jade-muted">Everyone with a platform login — suspend an account to kill its sessions and block sign-in instantly.</p>
+                  <p className="mt-1 text-sm text-jade-muted">Suspend accounts, force password resets, view-as read-only, or kill sessions — every action lands in the audit log.</p>
                 </div>
-                <div className="flex gap-2">
-                  <Input value={userQ} onChange={(e) => setUserQ(e.target.value)} placeholder="Search name, email, discipline…"
-                    className="h-9 w-56 border-vault-border bg-white text-sm text-jade-ink placeholder:text-[#8aa29c]" />
+                <div className="flex flex-wrap gap-2">
+                  <div className="flex overflow-hidden rounded-lg border border-vault-border text-xs font-semibold">
+                    <button type="button" onClick={() => setUserKind("CANDIDATES")}
+                      className={cn("px-3 py-2 transition", userKind === "CANDIDATES" ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:text-jade-ink")}>
+                      Candidates ({data.users.length})
+                    </button>
+                    <button type="button" onClick={() => setUserKind("RECRUITERS")}
+                      className={cn("px-3 py-2 transition", userKind === "RECRUITERS" ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:text-jade-ink")}>
+                      Recruiters ({data.recruiters.length})
+                    </button>
+                  </div>
+                  <Input value={userQ} onChange={(e) => setUserQ(e.target.value)} placeholder="Search name, email…"
+                    className="h-9 w-48 border-vault-border bg-white text-sm text-jade-ink placeholder:text-[#8aa29c]" />
                   <select value={userStatus} onChange={(e) => setUserStatus(e.target.value)}
                     className="h-9 rounded-md border border-vault-border bg-white px-2 text-sm text-jade-ink">
                     <option value="ALL">All statuses</option>
                     <option value="ACTIVE">Active</option>
                     <option value="SUSPENDED">Suspended</option>
                   </select>
+                  <Button size="sm" variant="ghost" onClick={() => exportCsv(userKind === "CANDIDATES" ? "users" : "users")}
+                    className="h-9 border border-vault-border text-verify-ink hover:bg-verify-green/10" title="Export CSV (candidates)">
+                    <FileDown className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
               <div className="overflow-x-auto rounded-xl border border-vault-border bg-white vv-card-shadow">
                 <table className="min-w-full text-left">
                   <thead>
                     <tr>
-                      {["Name", "Email", "Discipline", "Status", "Onboarding", "Checklists", "Requests", "Invites", "Joined", "Actions"].map((h) => (
+                      {["Name", "Email", userKind === "CANDIDATES" ? "Discipline" : "Company", "Status", "Onboarding", "Security", "Joined", "Actions"].map((h) => (
                         <th key={h} className={th}>{h}</th>
                       ))}
                     </tr>
@@ -706,35 +841,44 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                       <tr key={u.id} className="transition hover:bg-[#f7fbf8]">
                         <td className={cn(td, "font-medium")}>{u.name}</td>
                         <td className={cn(td, "text-jade-muted")}>{u.email}</td>
-                        <td className={td}>{u.title}</td>
+                        <td className={td}>{u.sub}</td>
                         <td className={td}><span className={statusPill(u.status)}>{u.status === "SUSPENDED" ? "Suspended" : "Active"}</span></td>
                         <td className={td}>
                           <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold",
                             u.onboardingComplete ? "border-verify-green/40 text-verify-ink" : "border-amber-300 text-amber-600")}>
                             {u.onboardingComplete ? "Complete" : "Pending"}
                           </span>
+                          {!u.verified && <span className="ml-1.5 text-[10px] text-[#8aa29c]">unverified</span>}
                         </td>
-                        <td className={td}>{u.completions}</td>
-                        <td className={td}>{u.requests}</td>
-                        <td className={td}>{u.invites}</td>
+                        <td className={td}>{securityChip(u.security)}</td>
                         <td className={cn(td, "text-jade-muted")}>{new Date(u.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
                         <td className={td}>
-                          {u.status === "SUSPENDED" ? (
-                            <button type="button" onClick={() => changeUserStatus(u, "ACTIVE")}
-                              className="rounded-full border border-verify-green/50 px-2.5 py-1 text-[11px] font-semibold text-verify-ink transition hover:bg-verify-green/10">
-                              Reactivate
+                          <div className="flex items-center gap-1">
+                            <button type="button" onClick={() => openImpersonation(u.kind, u.id)} title="View as (read-only)"
+                              className="rounded-lg p-2 text-jade-muted transition hover:bg-jade-ink/5 hover:text-jade-ink" aria-label="View as">
+                              <Eye className="h-3.5 w-3.5" />
                             </button>
-                          ) : (
-                            <button type="button" onClick={() => changeUserStatus(u, "SUSPENDED")}
-                              className="rounded-full border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50">
-                              Suspend
+                            <button type="button" onClick={() => sendReset(u.kind, u.id, u.email)} title="Email password-reset link"
+                              className="rounded-lg p-2 text-jade-muted transition hover:bg-jade-ink/5 hover:text-jade-ink" aria-label="Send password reset">
+                              <KeyRound className="h-3.5 w-3.5" />
                             </button>
-                          )}
+                            {u.status === "SUSPENDED" ? (
+                              <button type="button" onClick={() => cmd({ action: "set_user_status", kind: u.kind, id: u.id, status: "ACTIVE" }, "Account reactivated", "The user can sign in again.")}
+                                className="rounded-full border border-verify-green/50 px-2.5 py-1 text-[11px] font-semibold text-verify-ink transition hover:bg-verify-green/10">
+                                Reactivate
+                              </button>
+                            ) : (
+                              <button type="button" onClick={() => changeUserStatus({ ...u, completions: 0, requests: 0, invites: 0 } as UserRow, "SUSPENDED")}
+                                className="rounded-full border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50">
+                                Suspend
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
                     {visible.length === 0 && (
-                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={10}>No users match this filter.</td></tr>
+                      <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={8}>No users match this filter.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -751,6 +895,11 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                 <p className="mt-1 text-sm text-jade-muted">
                   Total command over every tenant: suspend or read-only a company and every outbound verification blocks instantly. Creation & white-label editing ship with the multi-tenant admin phase.
                 </p>
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" variant="ghost" onClick={() => exportCsv("companies")} className="h-9 border border-vault-border text-verify-ink hover:bg-verify-green/10" title="Export CSV">
+                  <FileDown className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+                </Button>
               </div>
               {data.companies.map((a) => (
                 <div key={a.id} className="rounded-xl border border-vault-border bg-white vv-card-shadow p-5">
@@ -930,6 +1079,59 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
             </div>
           )}
 
+          {/* ── Shared links — global kill-switch over Controlled Sharing ── */}
+          {section === "shares" && (
+            <div className="mt-8 space-y-3">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-jade-ink">Shared links</h2>
+                  <p className="mt-1 text-sm text-jade-muted">Every controlled-sharing link on the platform — reference reports and checklist completions. Revoke any link instantly if it's abused.</p>
+                </div>
+                <Button size="sm" variant="ghost" onClick={loadShares} className="h-9 border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Refresh
+                </Button>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-vault-border bg-white vv-card-shadow">
+                <table className="min-w-full text-left">
+                  <thead className="bg-[#f7fbf8]">
+                    <tr>{["What", "Owner", "Access", "Views", "Expires", "Status", ""].map((h, i) => <th key={i} className={cn(th, "text-left")}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {(shares ?? []).map((l) => {
+                      const expired = l.expiresAt ? new Date(l.expiresAt) < new Date() : false;
+                      const state = l.revoked ? "Revoked" : expired ? "Expired" : l.accessType === "ONE_TIME" && l.viewCount > 0 ? "Used" : "Live";
+                      return (
+                        <tr key={l.id} className={cn("transition hover:bg-[#f7fbf8]", l.revoked && "opacity-60")}>
+                          <td className={cn(td, "font-medium")}>{l.what}{l.label && <span className="ml-1.5 text-xs font-normal text-jade-muted">· “{l.label}”</span>}</td>
+                          <td className={cn(td, "text-jade-muted")}>{l.owner} · {l.ownerEmail}</td>
+                          <td className={td}>{l.accessType === "ONE_TIME" ? "One-time" : "Duration"}</td>
+                          <td className={td}>{l.viewCount}</td>
+                          <td className={cn(td, "whitespace-nowrap text-jade-muted")}>{l.expiresAt ? new Date(l.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</td>
+                          <td className={td}>
+                            <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                              state === "Live" ? "border-verify-green/40 text-verify-ink" : state === "Revoked" ? "border-rose-300 text-rose-600" : "border-vault-border text-jade-muted")}>
+                              {state}
+                            </span>
+                          </td>
+                          <td className={cn(td, "text-right")}>
+                            {!l.revoked && !expired && (
+                              <button type="button" onClick={() => revokeShare(l)}
+                                className="rounded-full border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50">
+                                Revoke
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {shares?.length === 0 && <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={7}>No share links yet.</td></tr>}
+                    {!shares && <tr><td className={cn(td, "py-8 text-center text-jade-muted")} colSpan={7}><Spinner /></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* ── Audit log — the platform's permanent record ── */}
           {section === "audit" && (
             <div className="mt-8 space-y-3">
@@ -956,6 +1158,9 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                     <option value={30}>30 days</option>
                     <option value={365}>1 year</option>
                   </select>
+                  <Button size="sm" variant="ghost" onClick={() => exportCsv("audit")} className="h-9 border border-vault-border text-verify-ink hover:bg-verify-green/10" title="Export CSV">
+                    <FileDown className="h-3.5 w-3.5" />
+                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => loadAudit()} className="h-9 border border-vault-border text-verify-ink hover:bg-verify-green/10">
                     <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Search
                   </Button>
@@ -1264,6 +1469,59 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                     })}
                   </div>
                 )}
+
+                {/* Notification delivery health */}
+                <div className="mt-6 border-t border-vault-border/60 pt-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-jade-ink">Email delivery health</h4>
+                      <p className="mt-0.5 text-xs text-jade-muted">Last 7 days across all notification kinds (invites, reminders, OTP, security).</p>
+                    </div>
+                    {notifHealth && (
+                      <div className="flex gap-2 text-xs font-semibold">
+                        <span className="rounded-full border border-verify-green/40 px-2.5 py-1 text-verify-ink">{notifHealth.stats.sent} sent</span>
+                        <span className="rounded-full border border-amber-300 px-2.5 py-1 text-amber-700">{notifHealth.stats.simulated} simulated</span>
+                        <span className={cn("rounded-full border px-2.5 py-1", notifHealth.stats.failed > 0 ? "border-rose-300 bg-rose-50 text-rose-600" : "border-vault-border text-jade-muted")}>{notifHealth.stats.failed} failed</span>
+                      </div>
+                    )}
+                  </div>
+                  {notifHealth && notifHealth.notifications.length > 0 && (
+                    <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-vault-border">
+                      <table className="min-w-full text-left text-xs">
+                        <thead className="sticky top-0 bg-[#f7fbf8]">
+                          <tr>{["When", "Channel", "Kind", "To", "Status"].map((h) => <th key={h} className="px-3 py-2 font-semibold uppercase tracking-wider text-jade-muted">{h}</th>)}</tr>
+                        </thead>
+                        <tbody>
+                          {notifHealth.notifications.map((n) => (
+                            <tr key={n.id} className="border-t border-vault-border/50">
+                              <td className="whitespace-nowrap px-3 py-2 text-jade-muted">{new Date(n.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+                              <td className="px-3 py-2">{n.channel}</td>
+                              <td className="px-3 py-2 font-mono">{n.kind}</td>
+                              <td className="max-w-56 truncate px-3 py-2 text-jade-muted" title={n.to}>{n.to}</td>
+                              <td className="px-3 py-2">
+                                <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold uppercase",
+                                  n.status === "SENT" ? "bg-verify-green/15 text-verify-ink" : n.status === "FAILED" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700")}>
+                                  {n.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Breach response */}
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-vault-border/60 pt-5">
+                  <div>
+                    <h4 className="text-sm font-semibold text-jade-ink">Breach response</h4>
+                    <p className="mt-0.5 text-xs text-jade-muted">Sign out every candidate and recruiter on the platform. The superadmin console stays signed in.</p>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={killAllSessions} className="border border-rose-300 text-rose-600 hover:bg-rose-50">
+                    <LogOut className="mr-1.5 h-3.5 w-3.5" /> Revoke all user sessions
+                  </Button>
+                </div>
               </div>
 
               {!sys ? (
@@ -1336,6 +1594,110 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           </div>
         </main>
       </div>
+
+      {/* ── View-as drawer (read-only proxy dossier) ── */}
+      {impView && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[2px]" onClick={() => setImpView(null)}>
+          <div className="h-full w-full max-w-lg overflow-y-auto border-l border-vault-border bg-white p-6 vv-card-shadow" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">View as · read-only</p>
+                <h3 className="mt-1 text-lg font-semibold text-jade-ink">{impView.name}</h3>
+                <p className="text-sm text-jade-muted">{impView.email} · {impView.kind.toLowerCase()}</p>
+              </div>
+              <button type="button" onClick={() => setImpView(null)} className="rounded-lg p-2 text-jade-muted transition hover:bg-jade-ink/5 hover:text-jade-ink" aria-label="Close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+              You are viewing this account's data as platform admin. Nothing can be written from here, and this access is stamped in the audit log.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className={statusPill(impView.status)}>{impView.status === "SUSPENDED" ? "Suspended" : "Active"}</span>
+              <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold", impView.emailVerified ? "border-verify-green/40 text-verify-ink" : "border-amber-300 text-amber-700")}>
+                {impView.emailVerified ? "Email verified" : "Unverified"}
+              </span>
+              <span className="rounded-full border border-vault-border px-2 py-0.5 text-[11px] font-semibold text-jade-muted">{impView.liveSessions} live session(s)</span>
+            </div>
+
+            <h4 className="mt-5 text-xs font-bold uppercase tracking-wider text-jade-muted">Security actions</h4>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" variant="ghost" onClick={() => sendReset(impView.kind, impView.id, impView.email)} className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                <KeyRound className="mr-1.5 h-3.5 w-3.5" /> Send password reset
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => issueTempPw(impView.kind, impView.id, impView.email)} className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                Issue temp password
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => killUserSessions(impView.kind, impView.id, impView.email)} className="border border-rose-300 text-rose-600 hover:bg-rose-50">
+                <Ban className="mr-1.5 h-3.5 w-3.5" /> Kill sessions
+              </Button>
+            </div>
+
+            <h4 className="mt-5 text-xs font-bold uppercase tracking-wider text-jade-muted">Profile</h4>
+            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              {Object.entries(impView.profile).map(([k, v]) => (
+                <div key={k}>
+                  <p className="text-[10px] uppercase tracking-wider text-jade-muted">{k.replace(/([A-Z])/g, " $1").trim()}</p>
+                  <p className="text-jade-ink">{String(v) || "—"}</p>
+                </div>
+              ))}
+            </div>
+
+            {impView.invites.length > 0 && (
+              <>
+                <h4 className="mt-5 text-xs font-bold uppercase tracking-wider text-jade-muted">Checklist invites</h4>
+                <div className="mt-2 space-y-1.5">
+                  {impView.invites.map((i) => (
+                    <div key={i.id} className="flex items-center justify-between rounded-lg border border-vault-border/60 px-3 py-2 text-xs">
+                      <span className="text-jade-ink">{i.candidate} · {specialtyLabel(i.specialty)}</span>
+                      <span className="text-jade-muted">{i.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {impView.requests.length > 0 && (
+              <>
+                <h4 className="mt-5 text-xs font-bold uppercase tracking-wider text-jade-muted">Checklist requests</h4>
+                <div className="mt-2 space-y-1.5">
+                  {impView.requests.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between rounded-lg border border-vault-border/60 px-3 py-2 text-xs">
+                      <span className="text-jade-ink">{specialtyLabel(r.specialty)} · {r.jobTitle}</span>
+                      <span className="text-jade-muted">{r.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {impView.completions.length > 0 && (
+              <>
+                <h4 className="mt-5 text-xs font-bold uppercase tracking-wider text-jade-muted">Completed checklists</h4>
+                <div className="mt-2 space-y-1.5">
+                  {impView.completions.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between rounded-lg border border-vault-border/60 px-3 py-2 text-xs">
+                      <span className="text-jade-ink">{c.specialtyLabel} · {new Date(c.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                      <span className="text-jade-muted">{c.shareLinks} share link(s)</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Temp password reveal (shown once) ── */}
+      {tempPwShown && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]" onClick={() => setTempPwShown(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-vault-border bg-white p-6 vv-card-shadow" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-jade-ink">Temporary password issued</h3>
+            <p className="mt-1 text-sm text-jade-muted">Emailed to {tempPwShown.email}. It is shown once here — copy it now if you want to hand it over directly.</p>
+            <p className="mt-3 rounded-lg border border-vault-border bg-[#f7fbf8] px-4 py-3 text-center font-mono text-lg font-semibold tracking-wide text-jade-ink">{tempPwShown.temp}</p>
+            <Button className="mt-4 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90" onClick={() => setTempPwShown(null)}>Done</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

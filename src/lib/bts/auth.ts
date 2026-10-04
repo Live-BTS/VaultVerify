@@ -95,6 +95,26 @@ export async function consumeVerification(token: string): Promise<{ role: string
   return { role: row.role, email: row.email };
 }
 
+// ── Password resets (security center, superadmin-triggered) ──────
+
+export const RESET_TTL_MINUTES = 60;
+
+export async function createPasswordReset(kind: "CANDIDATE" | "RECRUITER", accountId: string): Promise<string> {
+  // Invalidate prior unconsumed resets, then issue a fresh one-hour token.
+  await db.passwordResetToken.updateMany({ where: { accountId, kind, consumedAt: null }, data: { consumedAt: new Date() } });
+  const row = await db.passwordResetToken.create({
+    data: { kind, accountId, expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000) },
+  });
+  return row.token;
+}
+
+export async function consumePasswordReset(kind: "CANDIDATE" | "RECRUITER", token: string): Promise<{ accountId: string } | null> {
+  const row = await db.passwordResetToken.findUnique({ where: { token } });
+  if (!row || row.kind !== kind || row.consumedAt || row.expiresAt < new Date()) return null;
+  await db.passwordResetToken.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
+  return { accountId: row.accountId };
+}
+
 // ── Sessions ──────────────────────────────────────────────────────
 
 export async function createRecruiterSession(accountId: string): Promise<string> {

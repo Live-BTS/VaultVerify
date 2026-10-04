@@ -5,8 +5,10 @@ import {
   createVerification, sendVerificationEmail, consumeVerification,
   createRecruiterSession, getRecruiterSessionAccount, destroyRecruiterSession,
   dbConfigured, emailLive,
+  createPasswordReset, consumePasswordReset,
 } from "@/lib/bts/auth";
 import { assertPlatformWritable } from "@/lib/bts/platform";
+import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { createSession, destroySession, getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
 
@@ -113,8 +115,18 @@ export async function POST(req: NextRequest) {
         ? await db.checklistAccount.findUnique({ where: { email } })
         : await db.recruiterAccount.findUnique({ where: { email } });
       if (!account || !verifyPassword(password, account.passwordHash)) {
+        // Security center: consecutive failed-login counter per account.
+        if (account) {
+          await (role === "CANDIDATE"
+            ? db.checklistAccount.update({ where: { id: account.id }, data: { failedLogins: { increment: 1 }, lastFailedLogin: new Date() } })
+            : db.recruiterAccount.update({ where: { id: account.id }, data: { failedLogins: { increment: 1 }, lastFailedLogin: new Date() } }));
+        }
         return bad("Email or password is incorrect.", 401);
       }
+      // Correct password — clear the failure counter.
+      await (role === "CANDIDATE"
+        ? db.checklistAccount.update({ where: { id: account.id }, data: { failedLogins: 0 } })
+        : db.recruiterAccount.update({ where: { id: account.id }, data: { failedLogins: 0 } }));
       // Command layer: suspended accounts are dead ends — no session, clear reason.
       if (account.status === "SUSPENDED") {
         await logAudit({ actorType: "SYSTEM", actorId: email, action: "SIGNIN_BLOCKED_SUSPENDED", entity: role === "CANDIDATE" ? "checklistAccount" : "recruiterAccount", entityId: account.id, ip: req.headers.get("x-forwarded-for")?.split(",")[0] ?? "" });
@@ -181,6 +193,31 @@ export async function POST(req: NextRequest) {
     if (action === "signout") {
       await destroySession();
       await destroyRecruiterSession();
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── password reset (consumes /?reset=<token> from the console) ──
+    if (action === "password_reset") {
+      const token = String(body.token ?? "");
+      const password = String(body.password ?? "");
+      if (password.length < 8) return bad("Password must be at least 8 characters.");
+      // Kind is inferred from the token when the portal doesn't send it.
+      let kind: "CANDIDATE" | "RECRUITER" | null = body.kind === "RECRUITER" ? "RECRUITER" : body.kind === "CANDIDATE" ? "CANDIDATE" : null;
+      if (!kind) {
+        const row = await db.passwordResetToken.findUnique({ where: { token } });
+        kind = row?.kind === "RECRUITER" ? "RECRUITER" : row?.kind === "CANDIDATE" ? "CANDIDATE" : null;
+      }
+      if (!kind) return bad("This reset link is invalid or has expired. Ask support for a new one.");
+      const hit = await consumePasswordReset(kind, token);
+      if (!hit) return bad("This reset link is invalid or has expired. Ask support for a new one.");
+      if (kind === "RECRUITER") {
+        await db.recruiterAccount.update({ where: { id: hit.accountId }, data: { passwordHash: hashPassword(password), failedLogins: 0 } });
+        await killRecruiterSessions(hit.accountId);
+      } else {
+        await db.checklistAccount.update({ where: { id: hit.accountId }, data: { passwordHash: hashPassword(password), failedLogins: 0 } });
+        await killCandidateSessions(hit.accountId);
+      }
+      await logAudit({ actorType: "SYSTEM", actorId: kind, action: "PASSWORD_RESET_COMPLETED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: hit.accountId });
       return NextResponse.json({ ok: true });
     }
 

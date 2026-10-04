@@ -211,6 +211,9 @@ model ChecklistAccount {
   emailVerified      Boolean @default(false)
   // ── Superadmin command state (Phase 1) ──
   status     String   @default("ACTIVE") // ACTIVE | SUSPENDED — login + sessions killed on suspend
+  // ── Security center (Phase 2) ──
+  failedLogins     Int       @default(0)
+  lastFailedLogin  DateTime?
   createdAt    DateTime @default(now())
 
   sessions    ChecklistSession[]
@@ -390,9 +393,27 @@ model RecruiterAccount {
   onboardingComplete Boolean  @default(false)
   // ── Superadmin command state (Phase 1) ──
   status             String   @default("ACTIVE") // ACTIVE | SUSPENDED — login + sessions killed on suspend
+  // ── Security center (Phase 2) ──
+  failedLogins       Int      @default(0)
+  lastFailedLogin    DateTime?
   createdAt          DateTime @default(now())
 
   sessions RecruiterSession[]
+}
+
+// Security center: superadmin-triggered password resets. The console emails
+// a /?reset=<token> link (optionally with a temp password); the portal form
+// consumes the token, sets the new hash, and kills every live session.
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  token      String    @unique @default(cuid())
+  kind       String    // CANDIDATE | RECRUITER
+  accountId  String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([accountId])
 }
 
 model RecruiterSession {

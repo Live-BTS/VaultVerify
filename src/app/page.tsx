@@ -11,10 +11,77 @@ import { ChecklistPortal } from "@/components/bts/checklist/ChecklistPortal";
 import { ShareView } from "@/components/bts/checklist/ShareView";
 import { ReferenceShareView } from "@/components/bts/checklist/ReferenceShareView";
 import { Spinner, VaultMark } from "@/components/bts/brand";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type View = "home" | "wizard" | "candidate" | "recruiter" | "super" | "checklist" | "share" | "refshare";
 
 interface VerifyState { status: "pending" | "ok" | "error"; message?: string; role?: "CANDIDATE" | "RECRUITER"; onboardingComplete?: boolean }
+
+// ── Password reset interstitial (/?reset=<token> from the security center) ──
+function ResetPanel({ token, onDone }: { token: string; onDone: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (password.length < 8) return setError("Password must be at least 8 characters.");
+    if (password !== confirm) return setError("Passwords don't match.");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "password_reset", token, password }),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error ?? "Reset failed");
+      setDone(true);
+      setTimeout(onDone, 1800);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5] px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-[#d8e6da] bg-white p-8 vv-card-shadow">
+        <div className="flex flex-col items-center text-center">
+          <VaultMark size={40} />
+          {done ? (
+            <>
+              <p className="mt-4 text-base font-semibold text-jade-ink">Password updated</p>
+              <p className="mt-2 text-sm text-jade-muted">All old sessions were signed out — sign in with your new password.</p>
+            </>
+          ) : (
+            <>
+              <h1 className="mt-3 text-lg font-semibold text-jade-ink">Set a new password</h1>
+              <p className="mt-1 text-sm text-jade-muted">Choose a strong password for your VaultVerify account.</p>
+              <form onSubmit={submit} className="mt-5 w-full text-left">
+                <Label htmlFor="rp1" className="text-jade-ink/80">New password</Label>
+                <Input id="rp1" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password"
+                  className="mt-1.5 border-[#d8e6da] bg-white text-jade-ink" />
+                <Label htmlFor="rp2" className="mt-3 block text-jade-ink/80">Confirm password</Label>
+                <Input id="rp2" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password"
+                  className="mt-1.5 border-[#d8e6da] bg-white text-jade-ink" />
+                {error && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
+                <Button type="submit" disabled={busy} className="mt-5 w-full bg-[#0b3d3f] text-white hover:bg-[#0b3d3f]/90">
+                  {busy ? "Saving…" : "Save new password"}
+                </Button>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Page() {
   const [view, setView] = useState<View>("home");
@@ -26,6 +93,7 @@ export default function Page() {
   const [agency, setAgency] = useState<AgencyInfo | null>(null);
   const [booted, setBooted] = useState(false);
   const [verify, setVerify] = useState<VerifyState | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,6 +105,13 @@ export default function Page() {
       const invite = params.get("invite");
       const view = params.get("view");
       const verifyToken = params.get("verify");
+      const resetTokenParam = params.get("reset");
+      if (resetTokenParam) {
+        setResetToken(resetTokenParam);
+        if (window.history?.replaceState) window.history.replaceState({}, "", "/");
+        setBooted(true);
+        return;
+      }
       try {
         const res = await fetch("/api/bootstrap");
         const d = await res.json();
@@ -124,6 +199,11 @@ export default function Page() {
   }
 
   const goHome = () => setView("home");
+
+  // ── Password reset interstitial ──
+  if (resetToken) {
+    return <ResetPanel token={resetToken} onDone={() => setResetToken(null)} />;
+  }
 
   // ── Email verification interstitial ──
   if (verify) {
