@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/bts/audit";
 import { runFraudChecks } from "@/lib/bts/fraud";
 import { deriveCallbackCode } from "@/lib/bts/seed";
 import { sendNotification } from "@/lib/bts/notifications";
+import { hashPassword } from "@/lib/bts/checklistAuth";
 import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
 import { specialtyLabel, type AnswerRecord } from "@/lib/bts/constants";
 
@@ -44,6 +45,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   }
 
   const { candidate } = request;
+  // does the referrer already hold a VaultVerify account with this email?
+  // (drives the onboarding section of the form — existing accounts skip it)
+  const existingAccount = await db.checklistAccount.findUnique({ where: { email: request.refEmail.toLowerCase().trim() } });
   return NextResponse.json({
     agency: candidate.agency,
     candidate: {
@@ -74,6 +78,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     nurseSkills: candidate.skills.map((s) => ({ skillName: s.skillName, highRisk: s.highRisk, proficiency: s.proficiency, recencyMonths: s.recencyMonths })),
     response: request.response,
     flags: request.flags,
+    accountExists: !!existingAccount,
   });
 }
 
@@ -96,6 +101,9 @@ interface VerifyPayload {
   remarks?: string;
   signatureName?: string;
   durationSeconds?: number;
+  // onboarding — when present (and no account exists yet) the referrer's
+  // VaultVerify candidate account is created the moment they submit
+  accountPassword?: string;
   skillsVerified?: boolean;
   skillChecks?: { skillName: string; nurseProficiency: string; confirmed: boolean; refProficiency?: string; comment?: string }[];
 }
@@ -205,11 +213,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const serverDuration = Math.round((Date.now() - new Date(startedAt).getTime()) / 1000);
   const duration = Math.max(body.durationSeconds ?? 0, serverDuration);
 
-  // employment mismatch detection
+  // employment fields — the new single-screen form no longer asks the referrer
+  // to re-enter what the candidate already provided; derive from the request
+  // (the q1 answer is the referrer's own stated relationship, including
+  // "Other — <custom relation>" when they picked Other and typed it in)
+  const q1Value = String(answerMap.get("q1_relationship")?.value ?? "");
+  const confirmedRelationship = (body.confirmedRelationship ?? "").trim() || q1Value || request.relationship;
+  const confirmedFacility = (body.confirmedFacility ?? "").trim() ||
+    `${request.facilityName}${request.facilityCity ? ", " + request.facilityCity : ""}${request.facilityState ? ", " + request.facilityState : ""}`;
+  const confirmedDates = (body.confirmedDates ?? "").trim() ||
+    `${request.workStartDate || "?"} – ${request.workEndDate || "present"}`;
   let mismatchNotes = (body.mismatchNotes ?? "").trim();
-  const relMismatch = body.confirmedRelationship && request.relationship && body.confirmedRelationship !== request.relationship;
+  const relMismatch = confirmedRelationship && request.relationship && confirmedRelationship !== request.relationship;
   if (relMismatch) {
-    mismatchNotes = (mismatchNotes ? mismatchNotes + " " : "") + `Stated relationship "${request.relationship}" was corrected to "${body.confirmedRelationship}".`;
+    mismatchNotes = (mismatchNotes ? mismatchNotes + " " : "") + `Stated relationship "${request.relationship}" was corrected to "${confirmedRelationship}".`;
   }
 
   const ip = clientIp(req);
@@ -234,9 +251,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       requestId: request.id,
       identityMethod,
       verifiedDomain: body.verifiedDomain ?? null,
-      confirmedRelationship: body.confirmedRelationship ?? "",
-      confirmedFacility: body.confirmedFacility ?? "",
-      confirmedDates: body.confirmedDates ?? "",
+      confirmedRelationship,
+      confirmedFacility,
+      confirmedDates,
       mismatchNotes,
       answers: JSON.stringify(answers),
       overallRating: overall,
@@ -262,6 +279,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   });
 
   await db.referenceRequest.update({ where: { id: request.id }, data: { status: finalStatus, completedAt: new Date() } });
+
+  // ── Onboarding: the referrer becomes a VaultVerify candidate ──
+  // Completing the reference creates their account with the password they set
+  // in the onboarding section — exactly like any other candidate signup.
+  let accountCreated = false;
+  const password = String(body.accountPassword ?? "");
+  const refEmail = request.refEmail.toLowerCase().trim();
+  const alreadyExists = await db.checklistAccount.findUnique({ where: { email: refEmail } });
+  if (password.length >= 8 && !alreadyExists) {
+    try {
+      const account = await db.checklistAccount.create({
+        data: {
+          email: refEmail,
+          name: request.refName.trim(),
+          passwordHash: hashPassword(password),
+          title: request.refTitle.trim() || "RN",
+          phone: request.refPhone ?? "",
+          profession: "Nursing",
+          discipline: request.refTitle.trim() || "RN",
+          onboardingComplete: false, // they confirm their profile on first sign-in
+        },
+      });
+      accountCreated = true;
+      await logAudit({ actorType: "REFERENCE", action: "REFERRER_ACCOUNT_CREATED", entity: "checklistAccount", entityId: account.id, detail: { requestId: request.id }, ip });
+    } catch {
+      // unique-race or DB issue — the reference itself is already saved
+      accountCreated = false;
+    }
+  }
+
   await sendNotification({
     channel: "EMAIL",
     kind: "COMPLETION",
@@ -279,7 +326,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     ip,
   });
 
-  return NextResponse.json({ ok: true, status: finalStatus, responseId: response.id, flags });
+  return NextResponse.json({ ok: true, status: finalStatus, responseId: response.id, flags, accountCreated });
 }
 
 

@@ -10,7 +10,7 @@ import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
 import { RATING_META, specialtyLabel, summarizeAnswers, type SkillAnswer } from "@/lib/bts/checklistShared";
 import { VaultMark, Spinner } from "../brand";
 import { ReferencesPanel } from "./ReferencesPanel";
-import { SharingPanel } from "./SharingPanel";
+import { SharingPanel, type RefShareRow } from "./SharingPanel";
 import { PortalShell } from "../shell/PortalShell";
 import { ChecklistFill, type CatalogSet, type FillSpec } from "./ChecklistFill";
 import { ChecklistOnboarding, type ProfileData } from "./ChecklistOnboarding";
@@ -148,6 +148,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
   const [section, setSection] = useState<"dashboard" | "checklists" | "references" | "sharing" | "settings">("dashboard");
   const [checkTab, setCheckTab] = useState<"mine" | "requests" | "invites">("mine");
   const [refStats, setRefStats] = useState<{ total: number; completed: number } | null>(null);
+  const [refShares, setRefShares] = useState<RefShareRow[]>([]);
   const [showRequest, setShowRequest] = useState(false);
   const [fillSpec, setFillSpec] = useState<FillSpec | null>(null);
   const [shareFor, setShareFor] = useState<CompletionDto | null>(null);
@@ -177,9 +178,18 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
 
   // prefetch reference stats (dashboard card + sidebar badge) — the References
   // panel refreshes the same state whenever it loads
+  const loadRefShares = useCallback(async (email: string) => {
+    try {
+      const res = await fetch(`/api/reference/share?email=${encodeURIComponent(email)}`);
+      const d = await res.json();
+      setRefShares(d.ok ? (d.links as RefShareRow[]) : []);
+    } catch { setRefShares([]); }
+  }, []);
+
   useEffect(() => {
     const email = me?.account?.email;
     if (!email) return;
+    loadRefShares(email);
     fetch(`/api/candidate?email=${encodeURIComponent(email)}`)
       .then((r) => r.json())
       .then((d) => {
@@ -189,7 +199,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
         } else setRefStats(null);
       })
       .catch(() => setRefStats(null));
-  }, [me?.account?.email]);
+  }, [me?.account?.email, loadRefShares]);
 
   // claim an invite link after sign-in
   useEffect(() => {
@@ -343,7 +353,8 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
 
   const startFill = (spec: FillSpec) => setFillSpec(spec);
 
-  const activeShares = completions.reduce((n, c) => n + c.shareLinks.filter((l) => !l.revoked && !(l.accessType === "ONE_TIME" && l.viewedAt) && !(l.expiresAt && new Date(l.expiresAt) < new Date())).length, 0);
+  const activeShares = completions.reduce((n, c) => n + c.shareLinks.filter((l) => !l.revoked && !(l.accessType === "ONE_TIME" && l.viewedAt) && !(l.expiresAt && new Date(l.expiresAt) < new Date())).length, 0)
+    + refShares.filter((l) => !l.revoked && !(l.accessType === "ONE_TIME" && l.viewedAt) && !(l.expiresAt && new Date(l.expiresAt) < new Date())).length;
   const checklistActions = approvedRequests.length + openInvites.length;
   const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 18 ? "Good afternoon" : "Good evening";
 
@@ -444,6 +455,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
         {/* ── References — the verified-reference half of the vault ── */}
         {section === "references" && acc.email && (
           <ReferencesPanel email={acc.email} fallbackName={acc.name} onStats={handleRefStats}
+            onShared={() => { loadRefShares(acc.email); }}
             onLaunchSetup={() => onLaunchReferences?.({ name: acc.name, email: acc.email, role: acc.title })} />
         )}
 
@@ -451,8 +463,9 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
         {section === "sharing" && (
           <SharingPanel
             completions={completions.map((c) => ({ id: c.id, specialtyLabel: c.specialtyLabel, jobTitle: c.jobTitle, expired: new Date(c.expiresAt) < new Date(), shareLinks: c.shareLinks }))}
+            refShares={refShares}
             recruiterAccess={invites.map((i) => ({ id: i.id, recruiterName: i.recruiterName, facilityName: i.facilityName, status: i.status, createdAt: i.createdAt }))}
-            onChanged={loadMe}
+            onChanged={() => { loadMe(); if (acc.email) loadRefShares(acc.email); }}
           />
         )}
 

@@ -1,0 +1,528 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useEffect, useMemo, useState } from "react";
+     4→     4→import { Button } from "@/components/ui/button";
+     5→     5→import { Card, CardContent } from "@/components/ui/card";
+     6→     6→import { Input } from "@/components/ui/input";
+     7→     7→import { Label } from "@/components/ui/label";
+     8→     8→import { Textarea } from "@/components/ui/textarea";
+     9→     9→import { Progress } from "@/components/ui/progress";
+    10→    10→import { Checkbox } from "@/components/ui/checkbox";
+    11→    11→import { useToast } from "@/hooks/use-toast";
+    12→    12→import { cn } from "@/lib/utils";
+    13→    13→import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
+    14→    14→import { RATING_SCALE, UNABLE_TO_OBSERVE } from "@/lib/bts/constants";
+    15→    15→import { AgencyLogo, VaultMark } from "./brand";
+    16→    16→import { Lock, ShieldCheck, ArrowRight, ArrowLeft, CheckCircle2, PhoneCall, MailCheck, CircleAlert, PartyPopper } from "lucide-react";
+    17→    17→
+    18→    18→interface FlowContext {
+    19→    19→  agency: { name: string; logoText: string; tagline: string; primaryColor: string; accentColor: string };
+    20→    20→  candidate: { fullName: string; role: string; specialtyLabel: string; city: string; state: string };
+    21→    21→  request: {
+    22→    22→    id: string; refName: string; refTitle: string; refEmail: string; relationship: string;
+    23→    23→    facilityName: string; facilityCity: string; facilityState: string;
+    24→    24→    workStartDate: string; workEndDate: string; status: string; expired: boolean; expiresAt: string;
+    25→    25→  };
+    26→    26→  nurseSkills: { skillName: string; highRisk: boolean; proficiency: string; recencyMonths: number }[];
+    27→    27→  response: { id: string } | null;
+    28→    28→  flags: { type: string; severity: string; detail: string }[];
+    29→    29→}
+    30→    30→
+    31→    31→type AnswerMap = Record<string, { type: string; value: string | number | null; unableToObserve?: boolean }>;
+    32→    32→
+    33→    33→export function ReferenceFlow({ token, onExit }: { token: string; onExit: () => void }) {
+    34→    34→  const { toast } = useToast();
+    35→    35→  const [ctx, setCtx] = useState<FlowContext | null>(null);
+    36→    36→  const [loadError, setLoadError] = useState<string | null>(null);
+    37→    37→  const [step, setStep] = useState(0); // 0 welcome, 1 identity, 2 employment, 3 questions, 4 remarks, 5 sign, 6 done
+    38→    38→  const [qIndex, setQIndex] = useState(0);
+    39→    39→  const [busy, setBusy] = useState(false);
+    40→    40→
+    41→    41→  const [identityMethod, setIdentityMethod] = useState<"EMAIL_DOMAIN" | "CALLBACK_CODE" | "SKIPPED" | null>(null);
+    42→    42→  const [verifiedDomain, setVerifiedDomain] = useState<string | null>(null);
+    43→    43→  const [workEmail, setWorkEmail] = useState("");
+    44→    44→  const [callbackCode, setCallbackCode] = useState("");
+    45→    45→
+    46→    46→  const [confirm, setConfirm] = useState({ relationship: "", facility: "", dates: "", mismatchNotes: "" });
+    47→    47→
+    48→    48→  const [answers, setAnswers] = useState<AnswerMap>({});
+    49→    49→  const [q8Explanation, setQ8Explanation] = useState("");
+    50→    50→  const [remarks, setRemarks] = useState("");
+    51→    51→  const [signature, setSignature] = useState("");
+    52→    52→  const [finalConsent, setFinalConsent] = useState(false);
+    53→    53→  const [finalStatus, setFinalStatus] = useState<string | null>(null);
+    54→    54→
+    55→    55→  useEffect(() => {
+    56→    56→    (async () => {
+    57→    57→      try {
+    58→    58→        const res = await fetch(`/api/reference/${token}`);
+    59→    59→        const data = await res.json();
+    60→    60→        if (!res.ok) throw new Error(data.error ?? "This link is not valid");
+    61→    61→        setCtx(data);
+    62→    62→        if (data.response) {
+    63→    63→          // already submitted
+    64→    64→          setStep(6);
+    65→    65→          setFinalStatus(data.request.status);
+    66→    66→        }
+    67→    67→      } catch (e) {
+    68→    68→        setLoadError(e instanceof Error ? e.message : "Failed to load");
+    69→    69→      }
+    70→    70→    })();
+    71→    71→  }, [token]);
+    72→    72→
+    73→    73→  useEffect(() => {
+    74→    74→    if (!ctx) return;
+    75→    75→    setConfirm({
+    76→    76→      relationship: ctx.request.relationship || "",
+    77→    77→      facility: `${ctx.request.facilityName}, ${ctx.request.facilityCity}${ctx.request.facilityState ? ", " + ctx.request.facilityState : ""}`,
+    78→    78→      dates: `${ctx.request.workStartDate || "?"} – ${ctx.request.workEndDate || "present"}`,
+    79→    79→      mismatchNotes: "",
+    80→    80→    });
+    81→    81→  }, [ctx]);
+    82→    82→
+    83→    83→  const start = useMemo(() => Date.now(), []);
+    84→    84→
+    85→    85→  const post = async (body: Record<string, unknown>) => {
+    86→    86→    const res = await fetch(`/api/reference/${token}`, {
+    87→    87→      method: "POST",
+    88→    88→      headers: { "Content-Type": "application/json" },
+    89→    89→      body: JSON.stringify(body),
+    90→    90→    });
+    91→    91→    const data = await res.json();
+    92→    92→    if (!res.ok) throw new Error(data.error ?? "Request failed");
+    93→    93→    return data;
+    94→    94→  };
+    95→    95→
+    96→    96→  const verifyIdentity = async (method: "EMAIL_DOMAIN" | "CALLBACK_CODE" | "SKIPPED") => {
+    97→    97→    setBusy(true);
+    98→    98→    try {
+    99→    99→      const data = await post({ action: "verify_identity", method, workEmail, callbackCode });
+   100→   100→      setIdentityMethod(method);
+   101→   101→      if (data.verifiedDomain) setVerifiedDomain(data.verifiedDomain);
+   102→   102→      setStep(2);
+   103→   103→    } catch (e) {
+   104→   104→      toast({ title: e instanceof Error ? e.message : "Verification failed", variant: "destructive" });
+   105→   105→    } finally {
+   106→   106→      setBusy(false);
+   107→   107→    }
+   108→   108→  };
+   109→   109→
+   110→   110→  const enterQuestions = async () => {
+   111→   111→    setBusy(true);
+   112→   112→    try {
+   113→   113→      await post({ action: "start" });
+   114→   114→    } catch {
+   115→   115→      /* non-blocking */
+   116→   116→    }
+   117→   117→    setBusy(false);
+   118→   118→    setStep(3);
+   119→   119→  };
+   120→   120→
+   121→   121→  const question = QUESTIONS[qIndex];
+   122→   122→  const q8Yes = answers["q8_discipline"]?.value === "YES";
+   123→   123→
+   124→   124→  const answerValue = (key: string) => answers[key];
+   125→   125→
+   126→   126→  const setAnswer = (key: string, type: string, value: string | number | null, unableToObserve = false) =>
+   127→   127→    setAnswers((a) => ({ ...a, [key]: { type, value, unableToObserve } }));
+   128→   128→
+   129→   129→  const qAnswered = () => {
+   130→   130→    const a = answerValue(question.key);
+   131→   131→    if (!a) return false;
+   132→   132→    if (question.type === "rating") return a.unableToObserve === true || (typeof a.value === "number" && a.value >= 1 && a.value <= 5);
+   133→   133→    if (question.type === "select") return !!a.value;
+   134→   134→    if (question.type === "boolean") return a.value === "YES" || a.value === "NO" || a.value === "PREFER_NOT";
+   135→   135→    return true;
+   136→   136→  };
+   137→   137→
+   138→   138→  const submitAll = async () => {
+   139→   139→    if (signature.trim().length < 3) return toast({ title: "Type your full name to sign.", variant: "destructive" });
+   140→   140→    if (!finalConsent) return toast({ title: "Please confirm the attestation checkbox.", variant: "destructive" });
+   141→   141→    setBusy(true);
+   142→   142→    try {
+   143→   143→      const payload = {
+   144→   144→        action: "submit",
+   145→   145→        identityMethodClient: identityMethod ?? "SKIPPED",
+   146→   146→        verifiedDomain,
+   147→   147→        confirmedRelationship: confirm.relationship,
+   148→   148→        confirmedFacility: confirm.facility,
+   149→   149→        confirmedDates: confirm.dates,
+   150→   150→        mismatchNotes: confirm.mismatchNotes,
+   151→   151→        answers: Object.entries(answers).map(([key, a]) => ({ key, type: a.type, value: a.value, unableToObserve: a.unableToObserve })),
+   152→   152→        q8Explanation: q8Yes ? q8Explanation : "",
+   153→   153→        remarks,
+   154→   154→        signatureName: signature.trim(),
+   155→   155→        durationSeconds: Math.round((Date.now() - start) / 1000),
+   156→   156→      };
+   157→   157→      const data = await post(payload);
+   158→   158→      setFinalStatus(data.status);
+   159→   159→      setStep(6);
+   160→   160→    } catch (e) {
+   161→   161→      toast({ title: e instanceof Error ? e.message : "Submission failed", variant: "destructive" });
+   162→   162→    } finally {
+   163→   163→      setBusy(false);
+   164→   164→    }
+   165→   165→  };
+   166→   166→
+   167→   167→  // ── Loading / error / expired states ──
+   168→   168→  if (loadError) {
+   169→   169→    return (
+   170→   170→      <CenteredCard>
+   171→   171→        <CircleAlert className="mx-auto h-10 w-10 text-rose-500" />
+   172→   172→        <h1 className="mt-3 text-center text-lg font-semibold">Link not valid</h1>
+   173→   173→        <p className="mt-2 text-center text-sm text-slate-600">{loadError}</p>
+   174→   174→        <Button variant="outline" className="mt-6 w-full" onClick={onExit}>Back to home</Button>
+   175→   175→      </CenteredCard>
+   176→   176→    );
+   177→   177→  }
+   178→   178→  if (!ctx) return <CenteredCard><div className="py-6 text-center text-sm text-slate-500">Loading your secure form…</div></CenteredCard>;
+   179→   179→
+   180→   180→  const alreadyDone = ctx.response != null;
+   181→   181→  if (ctx.request.expired && !alreadyDone) {
+   182→   182→    return (
+   183→   183→      <CenteredCard>
+   184→   184→        <CircleAlert className="mx-auto h-10 w-10 text-amber-500" />
+   185→   185→        <h1 className="mt-3 text-center text-lg font-semibold">This link has expired</h1>
+   186→   186→        <p className="mt-2 text-center text-sm text-slate-600">Secure links last 14 days. Ask {ctx.candidate.fullName} to send a fresh request.</p>
+   187→   187→        <Button variant="outline" className="mt-6 w-full" onClick={onExit}>Back to home</Button>
+   188→   188→      </CenteredCard>
+   189→   189→    );
+   190→   190→  }
+   191→   191→
+   192→   192→  // ── Done ──
+   193→   193→  if (step === 6) {
+   194→   194→    const flagged = finalStatus === "FLAGGED";
+   195→   195→    return (
+   196→   196→      <CenteredCard>
+   197→   197→        <PartyPopper className="mx-auto h-10 w-10 text-teal-600" />
+   198→   198→        <h1 className="mt-3 text-center text-lg font-semibold">Thank you, {ctx.request.refName.split(" ")[0]}!</h1>
+   199→   199→        <p className="mt-2 text-center text-sm leading-relaxed text-slate-600">
+   200→   200→          Your reference for {ctx.candidate.fullName} has been signed and submitted{flagged ? " — it has been routed for a standard recruiter review" : ""}.
+   201→   201→          A branded verification packet is now available to the {ctx.agency.name} recruiting team.
+   202→   202→        </p>
+   203→   203→        {identityMethod === "EMAIL_DOMAIN" && verifiedDomain && (
+   204→   204→          <p className="mt-3 text-center text-xs text-teal-700">Identity verified via employer domain: <strong>{verifiedDomain}</strong></p>
+   205→   205→        )}
+   206→   206→        <Button variant="outline" className="mt-6 w-full" onClick={onExit}>Done</Button>
+   207→   207→      </CenteredCard>
+   208→   208→    );
+   209→   209→  }
+   210→   210→
+   211→   211→  const totalSteps = 5;
+   212→   212→  const progressPct = step <= 2 ? (step / totalSteps) * 100 : step === 3 ? ((2 + (qIndex + 1) / QUESTIONS.length) / totalSteps) * 100 : (step / totalSteps) * 100;
+   213→   213→
+   214→   214→  return (
+   215→   215→    <div className="flex min-h-screen flex-col bg-slate-100">
+   216→   216→      {/* Branded banner */}
+   217→   217→      <div className="bg-teal-700" style={{ backgroundColor: ctx.agency.primaryColor }}>
+   218→   218→        <div className="mx-auto flex max-w-md items-center justify-between px-4 py-4 sm:px-0">
+   219→   219→          <div className="flex items-center gap-2.5">
+   220→   220→            {ctx.agency.logoText === "VV" ? (
+   221→   221→              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90">
+   222→   222→                <VaultMark size={26} />
+   223→   223→              </div>
+   224→   224→            ) : (
+   225→   225→              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-xs font-bold text-white">{ctx.agency.logoText.slice(0, 4)}</div>
+   226→   226→            )}
+   227→   227→            <div className="leading-tight text-white">
+   228→   228→              <p className="text-sm font-semibold">{ctx.agency.name}</p>
+   229→   229→              <p className="text-[11px] text-white/80">Reference request</p>
+   230→   230→            </div>
+   231→   231→          </div>
+   232→   232→          <span className="flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-medium text-white">
+   233→   233→            <Lock className="h-3 w-3" /> Secure
+   234→   234→          </span>
+   235→   235→        </div>
+   236→   236→      </div>
+   237→   237→
+   238→   238→      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-10 pt-6">
+   239→   239→        {/* Candidate intro strip */}
+   240→   240→        <Card className="border-slate-200">
+   241→   241→          <CardContent className="p-4">
+   242→   242→            <p className="text-sm font-semibold text-slate-900">{ctx.candidate.fullName}, {ctx.candidate.role}</p>
+   243→   243→            <p className="text-xs text-slate-500">{ctx.candidate.specialtyLabel} · {ctx.candidate.city}, {ctx.candidate.state}</p>
+   244→   244→            <Progress value={progressPct} className="mt-3 h-1.5" />
+   245→   245→            <p className="mt-1.5 text-[11px] text-slate-400">Takes 3–5 minutes · answers are confidential to the hiring team</p>
+   246→   246→          </CardContent>
+   247→   247→        </Card>
+   248→   248→
+   249→   249→        {/* ── Step 0: Welcome ── */}
+   250→   250→        {step === 0 && (
+   251→   251→          <Card className="mt-4 border-slate-200">
+   252→   252→            <CardContent className="p-6">
+   253→   253→              <h1 className="text-lg font-bold text-slate-900">You&apos;ve been listed as a reference</h1>
+   254→   254→              <p className="mt-2 text-sm leading-relaxed text-slate-600">
+   255→   255→                Hi {ctx.request.refName.split(" ")[0]} — {ctx.candidate.fullName} listed you as their <strong>{ctx.request.refTitle}</strong> at <strong>{ctx.request.facilityName}</strong> for a {ctx.candidate.specialtyLabel} placement through {ctx.agency.name}.
+   256→   256→              </p>
+   257→   257→              <ul className="mt-4 space-y-2.5 text-sm text-slate-700">
+   258→   258→                <li className="flex gap-2"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> Identity check first — your answers carry weight because they&apos;re provably yours</li>
+   259→   259→                <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> 10 quick questions, one per screen, with simple anchored scales</li>
+   260→   260→                <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> Signed, timestamped, and delivered as a branded verification packet</li>
+   261→   261→                <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" /> Typed e-signature at the end — no account needed</li>
+   262→   262→              </ul>
+   263→   263→              <Button className="mt-6 w-full bg-teal-700 hover:bg-teal-800" onClick={() => setStep(1)}>
+   264→   264→                Begin <ArrowRight className="ml-1.5 h-4 w-4" />
+   265→   265→              </Button>
+   266→   266→            </CardContent>
+   267→   267→          </Card>
+   268→   268→        )}
+   269→   269→
+   270→   270→        {/* ── Step 1: Identity ── */}
+   271→   271→        {step === 1 && (
+   272→   272→          <Card className="mt-4 border-slate-200">
+   273→   273→            <CardContent className="p-6">
+   274→   274→              <h1 className="text-lg font-bold text-slate-900">Verify it&apos;s really you</h1>
+   275→   275→              <p className="mt-1.5 text-sm text-slate-600">Pick whichever is fastest — this is what makes your reference verifiable to recruiters.</p>
+   276→   276→
+   277→   277→              <div className="mt-5 space-y-4">
+   278→   278→                <div className="rounded-lg border border-slate-200 p-4">
+   279→   279→                  <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><MailCheck className="h-4 w-4 text-teal-600" /> Employer email</p>
+   280→   280→                  <p className="mt-1 text-xs text-slate-500">Your hospital/facility email domain is matched and recorded.</p>
+   281→   281→                  <Input type="email" value={workEmail} onChange={(e) => setWorkEmail(e.target.value)} placeholder="you@stmaryschicago.org" className="mt-2.5" />
+   282→   282→                  <Button size="sm" disabled={busy} className="mt-3 w-full bg-teal-700 hover:bg-teal-800" onClick={() => verifyIdentity("EMAIL_DOMAIN")}>
+   283→   283→                    Verify with work email
+   284→   284→                  </Button>
+   285→   285→                </div>
+   286→   286→
+   287→   287→                <div className="rounded-lg border border-slate-200 p-4">
+   288→   288→                  <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><PhoneCall className="h-4 w-4 text-teal-600" /> Phone callback code</p>
+   289→   289→                  <p className="mt-1 text-xs text-slate-500">The nurse has a 6-digit code on their dashboard — they can read it to you over the phone.</p>
+   290→   290→                  <Input value={callbackCode} onChange={(e) => setCallbackCode(e.target.value)} placeholder="123456" inputMode="numeric" maxLength={6} className="mt-2.5 font-mono tracking-[0.3em]" />
+   291→   291→                  <Button size="sm" disabled={busy} variant="outline" className="mt-3 w-full" onClick={() => verifyIdentity("CALLBACK_CODE")}>
+   292→   292→                    Verify with code
+   293→   293→                  </Button>
+   294→   294→                </div>
+   295→   295→
+   296→   296→                <button
+   297→   297→                  className="w-full text-center text-xs text-slate-400 underline"
+   298→   298→                  disabled={busy}
+   299→   299→                  onClick={() => verifyIdentity("SKIPPED")}
+   300→   300→                >
+   301→   301→                  Skip verification (a low-severity review flag will be added)
+   302→   302→                </button>
+   303→   303→              </div>
+   304→   304→              <Button variant="ghost" className="mt-4 w-full" onClick={() => setStep(0)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
+   305→   305→            </CardContent>
+   306→   306→          </Card>
+   307→   307→        )}
+   308→   308→
+   309→   309→        {/* ── Step 2: Employment confirm ── */}
+   310→   310→        {step === 2 && (
+   311→   311→          <Card className="mt-4 border-slate-200">
+   312→   312→            <CardContent className="p-6">
+   313→   313→              {identityMethod === "EMAIL_DOMAIN" && verifiedDomain && (
+   314→   314→                <div className="mb-4 rounded-lg bg-teal-50 p-3 text-xs text-teal-800">
+   315→   315→                  <ShieldCheck className="mr-1 inline h-3.5 w-3.5" /> Verified via employer domain <strong>{verifiedDomain}</strong>
+   316→   316→                </div>
+   317→   317→              )}
+   318→   318→              {identityMethod === "CALLBACK_CODE" && (
+   319→   319→                <div className="mb-4 rounded-lg bg-teal-50 p-3 text-xs text-teal-800">
+   320→   320→                  <ShieldCheck className="mr-1 inline h-3.5 w-3.5" /> Verified via phone callback code
+   321→   321→                </div>
+   322→   322→              )}
+   323→   323→              <h1 className="text-lg font-bold text-slate-900">Confirm how you worked together</h1>
+   324→   324→              <p className="mt-1.5 text-sm text-slate-600">{ctx.candidate.fullName} pre-filled this from their profile — correct anything that&apos;s off.</p>
+   325→   325→
+   326→   326→              <div className="mt-5 space-y-4">
+   327→   327→                <div>
+   328→   328→                  <Label>Working relationship</Label>
+   329→   329→                  <select
+   330→   330→                    className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+   331→   331→                    value={confirm.relationship}
+   332→   332→                    onChange={(e) => setConfirm((c) => ({ ...c, relationship: e.target.value }))}
+   333→   333→                  >
+   334→   334→                    {["Direct supervisor", "Charge nurse / team lead", "Peer colleague on same unit", "Educator / preceptor", "Other working relationship"].map((r) => (
+   335→   335→                      <option key={r} value={r}>{r}</option>
+   336→   336→                    ))}
+   337→   337→                  </select>
+   338→   338→                </div>
+   339→   339→                <div>
+   340→   340→                  <Label>Facility</Label>
+   341→   341→                  <Input value={confirm.facility} onChange={(e) => setConfirm((c) => ({ ...c, facility: e.target.value }))} className="mt-1.5" />
+   342→   342→                </div>
+   343→   343→                <div>
+   344→   344→                  <Label>Dates they worked with you</Label>
+   345→   345→                  <Input value={confirm.dates} onChange={(e) => setConfirm((c) => ({ ...c, dates: e.target.value }))} className="mt-1.5" />
+   346→   346→                </div>
+   347→   347→                <div>
+   348→   348→                  <Label>Anything to correct or note?</Label>
+   349→   349→                  <Textarea value={confirm.mismatchNotes} onChange={(e) => setConfirm((c) => ({ ...c, mismatchNotes: e.target.value }))} placeholder="Optional — e.g. different unit, title differences…" className="mt-1.5 min-h-16" />
+   350→   350→                </div>
+   351→   351→              </div>
+   352→   352→              <Button disabled={busy} className="mt-6 w-full bg-teal-700 hover:bg-teal-800" onClick={enterQuestions}>
+   353→   353→                Looks right — start questions <ArrowRight className="ml-1.5 h-4 w-4" />
+   354→   354→              </Button>
+   355→   355→              <Button variant="ghost" className="mt-2 w-full" onClick={() => setStep(1)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
+   356→   356→            </CardContent>
+   357→   357→          </Card>
+   358→   358→        )}
+   359→   359→
+   360→   360→        {/* ── Step 3: Questions (one per screen) ── */}
+   361→   361→        {step === 3 && (
+   362→   362→          <Card className="mt-4 border-slate-200">
+   363→   363→            <CardContent className="p-6">
+   364→   364→              <div className="flex items-center justify-between">
+   365→   365→                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Question {qIndex + 1} of {QUESTIONS.length}</p>
+   366→   366→                {question.type === "rating" && <span className="text-[11px] text-slate-400">1 worst · 5 best</span>}
+   367→   367→              </div>
+   368→   368→              <h1 className="mt-2 text-lg font-bold leading-snug text-slate-900">{question.title}</h1>
+   369→   369→              {question.help && <p className="mt-1.5 text-sm text-slate-500">{question.help}</p>}
+   370→   370→
+   371→   371→              <div className="mt-5 space-y-2.5">
+   372→   372→                {question.type === "rating" &&
+   373→   373→                  RATING_SCALE.map((opt) => {
+   374→   374→                    const a = answerValue(question.key);
+   375→   375→                    const selected = !a?.unableToObserve && a?.value === opt.value;
+   376→   376→                    return (
+   377→   377→                      <button
+   378→   378→                        key={opt.value}
+   379→   379→                        className={cn("w-full rounded-lg border p-3 text-left transition", selected ? "border-teal-600 bg-teal-50" : "border-slate-200 bg-white hover:border-teal-300")}
+   380→   380→                        onClick={() => setAnswer(question.key, "rating", opt.value)}
+   381→   381→                      >
+   382→   382→                        <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold", selected ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-500")}>{opt.value}</span>
+   383→   383→                        <span className="ml-2 text-sm font-semibold text-slate-900">{opt.label}</span>
+   384→   384→                        <p className="mt-1 pl-8 text-xs leading-snug text-slate-500">{opt.anchor}</p>
+   385→   385→                      </button>
+   386→   386→                    );
+   387→   387→                  })}
+   388→   388→
+   389→   389→                {question.type === "select" &&
+   390→   390→                  question.options?.map((opt) => {
+   391→   391→                    const selected = answerValue(question.key)?.value === opt;
+   392→   392→                    return (
+   393→   393→                      <button
+   394→   394→                        key={opt}
+   395→   395→                        className={cn("w-full rounded-lg border p-3 text-left text-sm font-medium transition", selected ? "border-teal-600 bg-teal-50 text-teal-900" : "border-slate-200 bg-white text-slate-700 hover:border-teal-300")}
+   396→   396→                        onClick={() => setAnswer(question.key, "select", opt)}
+   397→   397→                      >
+   398→   398→                        {opt}
+   399→   399→                      </button>
+   400→   400→                    );
+   401→   401→                  })}
+   402→   402→
+   403→   403→                {question.type === "boolean" && (
+   404→   404→                  <>
+   405→   405→                    {(question.key === "q8_discipline" ? [["YES", "Yes"], ["NO", "No"], ["PREFER_NOT", "Prefer not to say"]] : [["YES", "Yes"], ["NO", "No"]]).map(([v, label]) => {
+   406→   406→                      const selected = answerValue(question.key)?.value === v;
+   407→   407→                      return (
+   408→   408→                        <button
+   409→   409→                          key={v}
+   410→   410→                          className={cn("w-full rounded-lg border p-3 text-left text-sm font-medium transition", selected ? "border-teal-600 bg-teal-50 text-teal-900" : "border-slate-200 bg-white text-slate-700 hover:border-teal-300")}
+   411→   411→                          onClick={() => setAnswer(question.key, "boolean", v)}
+   412→   412→                        >
+   413→   413→                          {label}
+   414→   414→                        </button>
+   415→   415→                      );
+   416→   416→                    })}
+   417→   417→                    {question.key === "q8_discipline" && q8Yes && (
+   418→   418→                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+   419→   419→                        <p className="text-xs font-medium text-amber-800">{Q8_EXPLANATION_PROMPT}</p>
+   420→   420→                        <Textarea value={q8Explanation} onChange={(e) => setQ8Explanation(e.target.value)} className="mt-2 min-h-20 border-amber-200 bg-white" />
+   421→   421→                      </div>
+   422→   422→                    )}
+   423→   423→                  </>
+   424→   424→                )}
+   425→   425→
+   426→   426→                {question.type === "rating" && (
+   427→   427→                  <button
+   428→   428→                    className={cn("w-full rounded-lg border border-dashed p-2.5 text-xs font-medium transition", answerValue(question.key)?.unableToObserve ? "border-slate-400 bg-slate-50 text-slate-700" : "border-slate-300 text-slate-400 hover:text-slate-600")}
+   429→   429→                    onClick={() => setAnswer(question.key, "rating", null, !answerValue(question.key)?.unableToObserve)}
+   430→   430→                  >
+   431→   431→                    {answerValue(question.key)?.unableToObserve ? "✓ Marked: unable to observe" : "I wasn't in a position to observe this"}
+   432→   432→                  </button>
+   433→   433→                )}
+   434→   434→              </div>
+   435→   435→
+   436→   436→              <div className="mt-6 flex items-center gap-3">
+   437→   437→                <Button variant="ghost" size="sm" onClick={() => (qIndex === 0 ? setStep(2) : setQIndex((i) => i - 1))}>
+   438→   438→                  <ArrowLeft className="h-4 w-4" />
+   439→   439→                </Button>
+   440→   440→                <Button
+   441→   441→                  className="flex-1 bg-teal-700 hover:bg-teal-800"
+   442→   442→                  disabled={!qAnswered() || (question.key === "q8_discipline" && q8Yes && q8Explanation.trim().length < 10)}
+   443→   443→                  onClick={() => (qIndex < QUESTIONS.length - 1 ? setQIndex((i) => i + 1) : setStep(4))}
+   444→   444→                >
+   445→   445→                  {qIndex < QUESTIONS.length - 1 ? "Next question" : "Continue"}
+   446→   446→                  <ArrowRight className="ml-1.5 h-4 w-4" />
+   447→   447→                </Button>
+   448→   448→              </div>
+   449→   449→            </CardContent>
+   450→   450→          </Card>
+   451→   451→        )}
+   452→   452→
+   453→   453→        {/* ── Step 4: Remarks ── */}
+   454→   454→        {step === 4 && (
+   455→   455→          <Card className="mt-4 border-slate-200">
+   456→   456→            <CardContent className="p-6">
+   457→   457→              <h1 className="text-lg font-bold text-slate-900">
+   458→   458→                Anything else to add? {!q8Yes && <span className="text-sm font-normal text-slate-500">(optional)</span>}
+   459→   459→              </h1>
+   460→   460→              {q8Yes && (
+   461→   461→                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-800">
+   462→   462→                  Remarks are required because you reported a disciplinary action or complaint.
+   463→   463→                </p>
+   464→   464→              )}
+   465→   465→              <Textarea
+   466→   466→                value={remarks}
+   467→   467→                onChange={(e) => setRemarks(e.target.value)}
+   468→   468→                className="mt-4 min-h-32"
+   469→   469→                placeholder="Describe their practice, strengths, growth areas, or anything a hiring manager should know…"
+   470→   470→              />
+   471→   471→              <Button
+   472→   472→                className="mt-5 w-full bg-teal-700 hover:bg-teal-800"
+   473→   473→                disabled={q8Yes && remarks.trim().length < 5}
+   474→   474→                onClick={() => setStep(5)}
+   475→   475→              >
+   476→   476→                Continue to signature <ArrowRight className="ml-1.5 h-4 w-4" />
+   477→   477→              </Button>
+   478→   478→              <Button variant="ghost" className="mt-2 w-full" onClick={() => setStep(3)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
+   479→   479→            </CardContent>
+   480→   480→          </Card>
+   481→   481→        )}
+   482→   482→
+   483→   483→        {/* ── Step 5: Signature ── */}
+   484→   484→        {step === 5 && (
+   485→   485→          <Card className="mt-4 border-slate-200">
+   486→   486→            <CardContent className="p-6">
+   487→   487→              <h1 className="text-lg font-bold text-slate-900">Review & e-sign</h1>
+   488→   488→              <div className="mt-4 rounded-lg border bg-slate-50 p-4 text-sm">
+   489→   489→                <p className="font-semibold text-slate-900">Attestation</p>
+   490→   490→                <p className="mt-2 leading-relaxed text-slate-600">
+   491→   491→                  I attest that I am {ctx.request.refName}, {ctx.request.refTitle}, and that my answers reflect my honest, first-hand professional experience working with {ctx.candidate.fullName}. I understand this submission
+   492→   492→                  carries a typed electronic signature, a timestamp, and an IP/device record, and that it will be shared with {ctx.agency.name} and the candidate.
+   493→   493→                </p>
+   494→   494→              </div>
+   495→   495→              <div className="mt-4 flex items-start gap-2">
+   496→   496→                <Checkbox id="attest" checked={finalConsent} onCheckedChange={(v) => setFinalConsent(v === true)} />
+   497→   497→                <Label htmlFor="attest" className="text-sm font-normal leading-snug text-slate-700">I agree to the attestation above.</Label>
+   498→   498→              </div>
+   499→   499→              <div className="mt-4">
+   500→   500→                <Label htmlFor="sig">Type your full name to sign *</Label>
+   501→   501→                <Input id="sig" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="Your full name" className="mt-1.5 font-serif text-lg italic" />
+   502→   502→              </div>
+   503→   503→              <Button disabled={busy} className="mt-5 w-full bg-teal-700 hover:bg-teal-800" onClick={submitAll}>
+   504→   504→                {busy ? "Submitting…" : "Sign & submit reference"}
+   505→   505→              </Button>
+   506→   506→              <Button variant="ghost" className="mt-2 w-full" onClick={() => setStep(4)}><ArrowLeft className="mr-1.5 h-4 w-4" /> Back</Button>
+   507→   507→            </CardContent>
+   508→   508→          </Card>
+   509→   509→        )}
+   510→   510→      </main>
+   511→   511→
+   512→   512→      <footer className="bg-white py-3">
+   513→   513→        <p className="text-center text-[11px] text-slate-400">Single-use secure link · expires {new Date(ctx.request.expiresAt).toLocaleDateString("en-US")} · audit-trailed</p>
+   514→   514→      </footer>
+   515→   515→    </div>
+   516→   516→  );
+   517→   517→}
+   518→   518→
+   519→   519→function CenteredCard({ children }: { children: React.ReactNode }) {
+   520→   520→  return (
+   521→   521→    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+   522→   522→      <Card className="w-full max-w-md border-slate-200">
+   523→   523→        <CardContent className="p-8">{children}</CardContent>
+   524→   524→      </Card>
+   525→   525→    </div>
+   526→   526→  );
+   527→   527→}
+   528→   528→

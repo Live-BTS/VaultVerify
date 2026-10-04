@@ -78,10 +78,13 @@ export async function runFraudChecks(ctx: FraudContext): Promise<FlagResult[]> {
   }
 
   // 4. Identity verification skipped entirely
+  //    "ACCOUNT" counts as verified: the referrer created their VaultVerify
+  //    account with the exact email the candidate provided on a signed,
+  //    single-use link — a stronger anchor than a domain string match.
   if (ctx.identityMethod === "SKIPPED") {
     flags.push({
       type: "IDENTITY_UNVERIFIED",
-      detail: "Reference completed the form without verifying identity via employer email domain or callback code.",
+      detail: "Reference completed the form without creating a VaultVerify account or verifying identity via employer email domain or callback code.",
       severity: "LOW",
     });
   }

@@ -39,31 +39,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const request = body.requestId
-    ? await db.referenceRequest.findUnique({
-        where: { id: body.requestId },
-        include: { candidate: { include: { agency: true } } },
-      })
-    : null;
-  if (!request) return NextResponse.json({ error: "Request not found" }, { status: 404 });
-
-  const agency = request.candidate.agency;
-
-  if (body.action === "nudge") {
-    const link = `${baseUrl(req)}/?r=${request.token}`;
-    await sendNotification({
-      channel: "SMS",
-      kind: "REMINDER",
-      to: request.refPhone || request.refEmail,
-      body: reminderText(agency.name, request.candidate.fullName, link),
-      requestId: request.id,
-    });
-    await db.referenceRequest.update({ where: { id: request.id }, data: { lastReminderAt: new Date() } });
-    await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "NUDGE_SENT", entity: "reference_request", entityId: request.id, ip: clientIp(req) });
-    return NextResponse.json({ ok: true, message: `Nudge sent to ${request.refName}` });
-  }
-
   // ── add_reference: { email, reference } — candidate adds another reference from the portal ──
+  // Resolved by candidate email (not an existing request), so it runs BEFORE the requestId lookup
   if (body.action === "add_reference") {
     const rf = body.reference;
     if (!rf?.refName || !rf?.refTitle || !rf?.refEmail || !rf?.facilityName || !rf?.relationship) {
@@ -100,6 +77,33 @@ export async function POST(req: NextRequest) {
     await sendNotification({ channel: "EMAIL", kind: "INVITE", to: created.refEmail, subject: `Reference request — ${candidate.fullName}`, body: bodyText, requestId: created.id });
     await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "REFERENCE_ADDED", entity: "reference_request", entityId: created.id, detail: { ref: created.refEmail }, ip: clientIp(req) });
     return NextResponse.json({ ok: true, message: `Request sent to ${created.refName}` });
+  }
+
+  // nudge/swap operate on an existing request; add_reference keys off the
+  // candidate email instead, so only resolve the request when an id was sent
+  const request = body.requestId
+    ? await db.referenceRequest.findUnique({
+        where: { id: body.requestId },
+        include: { candidate: { include: { agency: true } } },
+      })
+    : null;
+
+  if (!request) return NextResponse.json({ error: "Request not found" }, { status: 404 });
+
+  const agency = request.candidate.agency;
+
+  if (body.action === "nudge") {
+    const link = `${baseUrl(req)}/?r=${request.token}`;
+    await sendNotification({
+      channel: "SMS",
+      kind: "REMINDER",
+      to: request.refPhone || request.refEmail,
+      body: reminderText(agency.name, request.candidate.fullName, link),
+      requestId: request.id,
+    });
+    await db.referenceRequest.update({ where: { id: request.id }, data: { lastReminderAt: new Date() } });
+    await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "NUDGE_SENT", entity: "reference_request", entityId: request.id, ip: clientIp(req) });
+    return NextResponse.json({ ok: true, message: `Nudge sent to ${request.refName}` });
   }
 
   if (body.action === "swap") {

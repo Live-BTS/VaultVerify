@@ -9,14 +9,16 @@ import { ReferenceFlow } from "@/components/bts/ReferenceFlow";
 import { SuperAdmin } from "@/components/bts/SuperAdmin";
 import { ChecklistPortal } from "@/components/bts/checklist/ChecklistPortal";
 import { ShareView } from "@/components/bts/checklist/ShareView";
+import { ReferenceShareView } from "@/components/bts/checklist/ReferenceShareView";
 import { Spinner } from "@/components/bts/brand";
 
-type View = "home" | "wizard" | "candidate" | "recruiter" | "super" | "checklist" | "share";
+type View = "home" | "wizard" | "candidate" | "recruiter" | "super" | "checklist" | "share" | "refshare";
 
 export default function Page() {
   const [view, setView] = useState<View>("home");
   const [refToken, setRefToken] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
+  const [refShareToken, setRefShareToken] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [wizardPrefill, setWizardPrefill] = useState<{ name: string; email: string; role: string } | undefined>(undefined);
   const [agency, setAgency] = useState<AgencyInfo | null>(null);
@@ -28,6 +30,7 @@ export default function Page() {
       const params = new URLSearchParams(window.location.search);
       const r = params.get("r");
       const s = params.get("s");
+      const rs = params.get("rs");
       const invite = params.get("invite");
       const view = params.get("view");
       try {
@@ -40,13 +43,15 @@ export default function Page() {
       if (cancelled) return;
       if (r) setRefToken(r);
       if (s) setShareToken(s);
+      if (rs) setRefShareToken(rs);
       if (invite) setInviteToken(invite);
       if (view === "super") setView("super");
       if (view === "checklist") setView("checklist");
       if (view === "recruiter") setView("recruiter");
       if (s) setView("share");
+      if (rs) setView("refshare");
       setBooted(true);
-      if ((r || s) && window.history?.replaceState) {
+      if ((r || s || rs) && window.history?.replaceState) {
         window.history.replaceState({}, "", "/");
       }
     };
@@ -108,6 +113,8 @@ export default function Page() {
         onLaunchReferences={(p) => { setWizardPrefill(p); setView("wizard"); }} />;
     case "share":
       return <ShareView token={shareToken ?? ""} onExit={goHome} />;
+    case "refshare":
+      return <ReferenceShareView token={refShareToken ?? ""} onExit={goHome} />;
     default:
       return (
         <LandingView

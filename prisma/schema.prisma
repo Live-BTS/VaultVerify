@@ -15,7 +15,10 @@ datasource db {
 //   Proficiency:   NEVER | SUPERVISED | INDEPENDENT | CAN_TEACH
 //   Severity:      LOW | MEDIUM | HIGH
 //   Channel:       SMS | EMAIL
-//   IdentityMethod: EMAIL_DOMAIN | CALLBACK_CODE | SKIPPED
+//   IdentityMethod: EMAIL_DOMAIN | CALLBACK_CODE | SKIPPED | ACCOUNT
+//                   (ACCOUNT = the referrer created their VaultVerify account
+//                    with the exact email the candidate provided — the signed
+//                    single-use token plus account creation is the anchor)
 // ─────────────────────────────────────────────────────────────
 
 model Agency {
@@ -81,6 +84,7 @@ model ReferenceRequest {
 
   response ReferenceResponse?
   flags    FraudFlag[]
+  shares   ReferenceShareLink[]
 }
 
 model ReferenceResponse {
@@ -147,6 +151,24 @@ model FraudFlag {
   severity  String @default("LOW") // LOW | MEDIUM | HIGH
   resolved  Boolean @default(false)
   createdAt DateTime @default(now())
+}
+
+// Candidate → anyone: share a COMPLETED reference report via an expiring link
+// (/?rs=<token>). Same access rules as ChecklistShareLink: ONE_TIME or DURATION,
+// revocable and extendable from the candidate's Controlled Sharing panel.
+model ReferenceShareLink {
+  id           String           @id @default(cuid())
+  token        String           @unique @default(cuid())
+  requestId    String
+  request      ReferenceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  accessType   String           @default("DURATION") // ONE_TIME | DURATION
+  durationDays Int?             // null for ONE_TIME
+  label        String           @default("") // optional recipient note
+  createdAt    DateTime         @default(now())
+  expiresAt    DateTime?        // set for DURATION
+  viewedAt     DateTime?        // set on first view for ONE_TIME
+  viewCount    Int              @default(0)
+  revoked      Boolean          @default(false)
 }
 
 // ─────────────────────────────────────────────────────────────
