@@ -11,7 +11,8 @@ import { sendNotification } from "@/lib/bts/notifications";
 // preview : { token }              -> public invite info so the signup form can pre-fill
 // claim   : { token }  (candidate session) — attach an invite link to the signed-in account
 
-const RECRUITER_CODE = process.env.RECRUITER_CODE ?? "meds2026";
+// Env-only, fail-closed (empty never matches).
+const RECRUITER_CODE = process.env.RECRUITER_CODE ?? "";
 
 const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 

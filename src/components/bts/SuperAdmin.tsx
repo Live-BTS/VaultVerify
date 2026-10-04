@@ -12,7 +12,7 @@ import { professionLabel, disciplineLabel } from "@/lib/bts/catalog";
 import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
-  Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil,
+  Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -61,7 +61,10 @@ interface ExtraQ {
   id: string; kind: string; prompt: string; placeholder: string; specialty: string; active: boolean; sortOrder: number;
 }
 
-type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "skills";
+type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "skills" | "system";
+
+interface SystemItemView { key: string; label: string; envVar: string; provider: string; purpose: string; critical: boolean; configured: boolean }
+interface SystemStatus { items: SystemItemView[]; protections: { label: string; detail: string }[]; runtime: { databaseProvider: string; emailProvider: string; smsProvider: string; environment: string } }
 
 const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skill Name", "Question Type", "Has N/A Option"];
 
@@ -98,6 +101,7 @@ const NAV: [Section, string, typeof Users][] = [
   ["candidates", "Candidate management", BookUser],
   ["credits", "Credit management", Wallet],
   ["skills", "Skills & imports", Database],
+  ["system", "System & APIs", Server],
 ];
 
 const th = "px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-jade-muted";
@@ -110,6 +114,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const [loading, setLoading] = useState(false);
   const [section, setSection] = useState<Section>("requests");
   const [cqRequests, setCqRequests] = useState<ChecklistRequestRow[] | null>(null);
+  const [sys, setSys] = useState<SystemStatus | null>(null);
   const [openSet, setOpenSet] = useState<string | null>(null);
   const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -145,6 +150,10 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
 
   const loadRequests = async () => {
     try { const d = await call({ action: "requests" }); setCqRequests(d.requests); } catch { /* keep old */ }
+  };
+
+  const loadSystem = async () => {
+    try { const d = await call({ action: "system_config" }); setSys({ items: d.items, protections: d.protections, runtime: d.runtime }); } catch { /* keep old */ }
   };
 
   const decide = async (id: string, approve: boolean) => {
@@ -240,12 +249,14 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
               placeholder="Superadmin code"
               className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
             />
-            <p className="mt-2 text-xs text-jade-muted">
-              Sandbox demo code:{" "}
-              <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => auth("zipvault2026")}>
-                zipvault2026
-              </button>
-            </p>
+            {process.env.NODE_ENV === "development" && (
+              <p className="mt-2 text-xs text-jade-muted">
+                Sandbox demo code:{" "}
+                <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => auth("zipvault2026")}>
+                  zipvault2026
+                </button>
+              </p>
+            )}
           </div>
           <Button onClick={() => auth()} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
             {loading ? "Checking…" : "Unlock console"} <ShieldCheck className="ml-2 h-4 w-4" />
@@ -279,7 +290,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         const badge = badgeFor(sec);
         return (
           <button key={sec} type="button"
-            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); }}
+            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); }}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
               active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
@@ -758,6 +769,82 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* ── System & APIs — where every integration lives (flags only, never values) ── */}
+          {section === "system" && (
+            <div className="mt-8 space-y-6">
+              <div>
+                <h2 className="text-base font-semibold text-jade-ink">System & APIs</h2>
+                <p className="mt-1 text-sm text-jade-muted">
+                  The deployment map for this platform. Secret <strong>values</strong> live only in environment variables
+                  (Vercel encrypted store) — this page shows configured flags, never the values themselves.
+                </p>
+              </div>
+
+              {!sys ? (
+                <div className="flex justify-center py-12"><Spinner label="Reading system status…" /></div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">Runtime</p>
+                      <div className="mt-3 space-y-2 text-sm">
+                        <p className="flex justify-between gap-3"><span className="text-jade-muted">Database</span><span className="text-right font-medium text-jade-ink">{sys.runtime.databaseProvider}</span></p>
+                        <p className="flex justify-between gap-3"><span className="text-jade-muted">Email</span><span className="text-right font-medium text-jade-ink">{sys.runtime.emailProvider}</span></p>
+                        <p className="flex justify-between gap-3"><span className="text-jade-muted">SMS</span><span className="text-right font-medium text-jade-ink">{sys.runtime.smsProvider}</span></p>
+                        <p className="flex justify-between gap-3"><span className="text-jade-muted">Environment</span><span className="text-right font-medium text-jade-ink">{sys.runtime.environment}</span></p>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-verify-ink/90">Frontend protection</p>
+                      <div className="mt-3 space-y-1.5">
+                        {sys.protections.map((p) => (
+                          <p key={p.label} className="flex items-start gap-2 text-sm text-jade-ink" title={p.detail}>
+                            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-verify-green" />
+                            {p.label}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-2xl border border-vault-border bg-white vv-card-shadow">
+                    <table className="w-full">
+                      <thead className="bg-[#f7fbf8]">
+                        <tr>
+                          <th className={cn(th, "text-left")}>Integration</th>
+                          <th className={cn(th, "text-left")}>Env variable</th>
+                          <th className={cn(th, "text-left")}>Provider</th>
+                          <th className={cn(th, "text-left")}>Purpose</th>
+                          <th className={cn(th, "text-right")}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sys.items.map((i) => (
+                          <tr key={i.key}>
+                            <td className={cn(td, "font-medium")}>{i.label}{i.critical && <span className="ml-1.5 text-[10px] font-semibold text-[#b3591c]">critical</span>}</td>
+                            <td className={cn(td, "font-mono text-xs")}>{i.envVar}</td>
+                            <td className={td}>{i.provider}</td>
+                            <td className={cn(td, "text-xs text-jade-muted")}>{i.purpose}</td>
+                            <td className={cn(td, "text-right")}>
+                              {i.configured ? (
+                                <span className="rounded-full border border-verify-green/40 bg-verify-green/10 px-2.5 py-0.5 text-[11px] font-semibold text-verify-ink">Configured</span>
+                              ) : (
+                                <span className={cn("rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", i.critical ? "border-rose-200 bg-rose-50 text-rose-600" : "border-amber-200 bg-amber-50 text-amber-700")}>{i.critical ? "Not set" : "Optional"}</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-center text-[11px] text-[#8aa29c]">
+                    Manage values in Vercel → Settings → Environment Variables (or local <span className="font-mono">.env</span> for dev). See DEPLOY.md for the full guide.
+                  </p>
+                </>
+              )}
             </div>
           )}
 

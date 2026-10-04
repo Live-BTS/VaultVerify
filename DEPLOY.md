@@ -90,7 +90,30 @@ vercel link                     # inside the repo
 
 ---
 
-## 5 · Repository hygiene
+## 5 · Security — nothing visible on the frontend
+
+Layered hardening baked into the build:
+
+| Layer | What it does |
+|---|---|
+| Secrets server-side only | All keys/env vars stay in server env; API routes never forward them; no `NEXT_PUBLIC` secret is consumed by client code |
+| `productionBrowserSourceMaps: false` | No readable source maps ship to browsers |
+| `compiler.removeConsole` | Client console logs stripped in production (`console.error` kept) |
+| Content-Security-Policy | `default-src 'self'` + `connect-src 'self'` — browsers can only load/talk to this origin; `object-src 'none'`, `frame-ancestors 'none'` |
+| `poweredByHeader: false` | No `X-Powered-By: Next.js` fingerprint |
+| Security headers | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, strict `Referrer-Policy`, restrictive `Permissions-Policy`, COOP |
+| `SecurityGuard` (client, prod-only) | Blocks F12 / Ctrl+U / Ctrl+Shift+I·J·C / right-click; geometry-based devtools detection shows a full-screen "Protected session" shield until devtools close |
+| Fail-closed access codes | Superadmin + recruiter gates read env-only codes; unset codes lock the console |
+| Demo-data guard | Demo credential quick-fills render in `development` only — production bundles dead-code-eliminate them |
+| Brevo demo-domain guard | `example.com` / `example.org` recipients never receive real email, even with live keys |
+
+Honest scope: browsers must receive JS to run it, so client-side deterrents raise the bar but aren't absolute — the real guarantees are server-side (DB access, keys, business logic all live on the server; APIs return only business data).
+
+**Superadmin → System & APIs** shows the live deployment map: every integration, its env var name, provider, and configured status (flags only — values never leave the server).
+
+---
+
+## 6 · Repository hygiene
 
 - `.env` is git-ignored — real keys live only locally + in Vercel's encrypted env store.
 - `.env.example` documents every variable (safe to commit).

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
+import { buildSystemStatus } from "@/lib/bts/systemConfig";
 
 // ── POST /api/superadmin — platform administration (sandbox: passcode) ──
 // Actions:
@@ -13,7 +14,9 @@ import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTe
 //   decide     { code, id, approve }                 -> approve/reject a checklist request
 // In production, replace the passcode with NextAuth/Supabase role claims.
 
-const SUPERADMIN_CODE = process.env.SUPERADMIN_CODE ?? "zipvault2026";
+// Access code lives ONLY in environment variables — never in source.
+// Fail-closed: if SUPERADMIN_CODE is unset, no code can match.
+const SUPERADMIN_CODE = process.env.SUPERADMIN_CODE ?? "";
 
 function unauthorized() {
   return NextResponse.json({ ok: false, error: "Invalid superadmin code" }, { status: 401 });
@@ -105,6 +108,11 @@ export async function POST(req: NextRequest) {
     switch (body.action) {
       case "auth": {
         return NextResponse.json({ ok: true, ...(await overview()) });
+      }
+
+      case "system_config": {
+        // CONFIGURED FLAGS ONLY — values never leave the server.
+        return NextResponse.json({ ok: true, ...buildSystemStatus() });
       }
 
       case "import": {

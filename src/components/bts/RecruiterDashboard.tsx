@@ -138,7 +138,10 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
             </div>
             <h1 className="mt-3 text-2xl font-bold text-slate-900">Pipeline dashboard</h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              Enter your access code. Sandbox demo code: <button type="button" className="font-mono font-semibold text-teal-700 underline" onClick={() => { setCode("meds2026"); load("meds2026"); }}>meds2026</button>
+              Enter the recruiter access code you received from VaultVerify.
+              {process.env.NODE_ENV === "development" && (
+                <> Sandbox demo code: <button type="button" className="font-mono font-semibold text-teal-700 underline" onClick={() => { setCode("meds2026"); load("meds2026"); }}>meds2026</button></>
+              )}
             </p>
             <form className="mt-6 space-y-4" onSubmit={(e) => { e.preventDefault(); if (code.trim()) load(code.trim()); }}>
               <div>

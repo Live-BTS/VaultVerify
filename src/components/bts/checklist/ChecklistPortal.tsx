@@ -333,9 +333,11 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
               className="mt-4 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
               {mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
             </button>
-            <div className="mt-4 rounded-xl bg-[#f0f6f2] p-3 text-center text-[11px] text-jade-muted">
-              Demo account: <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => { setMode("login"); setForm({ ...form, email: "emma.chen@example.com", password: "demo1234" }); }}>emma.chen@example.com / demo1234</button>
-            </div>
+            {process.env.NODE_ENV === "development" && (
+              <div className="mt-4 rounded-xl bg-[#f0f6f2] p-3 text-center text-[11px] text-jade-muted">
+                Demo account: <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => { setMode("login"); setForm({ ...form, email: "emma.chen@example.com", password: "demo1234" }); }}>emma.chen@example.com / demo1234</button>
+              </div>
+            )}
             <button type="button" onClick={onExit} className="mt-4 w-full text-center text-xs text-[#8aa29c] hover:text-jade-muted">← Back to site</button>
           </div>
         </motion.div>

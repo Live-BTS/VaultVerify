@@ -132,7 +132,8 @@ export async function GET(req: NextRequest) {
       account = acc;
       accessClause = "Accessed by the candidate from their VaultVerify portal.";
     } else if (inviteId) {
-      if (sp.get("code") !== (process.env.RECRUITER_CODE ?? "meds2026")) return new NextResponse("Invalid code", { status: 401 });
+      const recruiterCode = process.env.RECRUITER_CODE ?? "";
+      if (!recruiterCode || sp.get("code") !== recruiterCode) return new NextResponse("Invalid code", { status: 401 });
       const invite = await db.checklistInvite.findUnique({ where: { id: inviteId } });
       if (!invite?.completionId) return new NextResponse("Not completed yet", { status: 404 });
       completion = await db.checklistCompletion.findUnique({ where: { id: invite.completionId } });

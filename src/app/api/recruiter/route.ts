@@ -4,7 +4,9 @@ import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, reminderBody } from "@/lib/bts/notifications";
 import { REMINDER_DAYS, LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
 
-export const RECRUITER_CODE = "meds2026"; // sandbox demo passcode — replaced by NextAuth in production
+// Access code lives ONLY in environment variables — never in source.
+// Fail-closed: if RECRUITER_CODE is unset, no code can match.
+export const RECRUITER_CODE = process.env.RECRUITER_CODE ?? "";
 
 function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
