@@ -4,6 +4,7 @@ import { getAccount } from "@/lib/bts/checklistAuth";
 import { recruiterAuthed } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification } from "@/lib/bts/notifications";
+import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend, primaryAgencyId } from "@/lib/bts/credits";
 
@@ -168,14 +169,11 @@ export async function POST(req: NextRequest) {
     // sandbox email delivery (simulated → NotificationLog): the candidate gets a
     // setup link — email is pre-filled, they only set a password + onboarding form
     const setupLink = `/?view=checklist&invite=${invite.token}`;
-    await sendNotification({
-      channel: "EMAIL",
-      kind: "INVITE",
-      to: candidateEmail,
-      subject: `${invite.recruiterName} requested your skills checklist`,
-      body: existing
-        ? `You have a new skills checklist request from ${invite.recruiterName} (${invite.facilityName || invite.agencyName}). Sign in at ${setupLink} — it's waiting in your Invites tab.`
-        : `${invite.recruiterName} (${invite.facilityName || invite.agencyName}) requested your skills checklist. Your email is already set — open ${setupLink} to set your password, confirm your details, and complete it once (valid 1 year).`,
+    await sendTemplatedEmail("checklist_invite", candidateEmail, {
+      recruiterName: invite.recruiterName,
+      organization: invite.facilityName || invite.agencyName,
+      candidateName,
+      setupLink,
     }).catch(() => undefined);
     await creditSpend(outbound.agencyId ?? (await primaryAgencyId()) ?? "", `Checklist invite — ${candidateName}`, 1, "RECRUITER", invite.recruiterName);
     await logAudit({

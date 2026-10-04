@@ -13,7 +13,7 @@ import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
   Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server, Mail,
-  ScrollText, Activity, Link2, Eye, KeyRound, LogOut, Ban, UserCog, Copy,
+  ScrollText, Activity, Link2, Eye, KeyRound, LogOut, Ban, UserCog, Copy, FileCode,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -108,10 +108,12 @@ interface ExtraQ {
   id: string; kind: string; prompt: string; placeholder: string; specialty: string; active: boolean; sortOrder: number;
 }
 
-type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "audit" | "shares" | "skills" | "system" | "team";
+type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "audit" | "shares" | "skills" | "system" | "team" | "templates";
 
 interface SystemItemView { key: string; label: string; envVar: string; provider: string; purpose: string; critical: boolean; configured: boolean }
 interface SystemStatus { items: SystemItemView[]; protections: { label: string; detail: string }[]; runtime: { databaseProvider: string; emailProvider: string; smsProvider: string; environment: string } }
+interface TemplateListItem { key: string; name: string; kind: string; description: string; customized: boolean; updatedAt: string | null; updatedBy: string | null }
+interface TplEdit { key: string; name: string; subject: string; html: string; description: string; customized: boolean }
 
 const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skill Name", "Question Type", "Has N/A Option"];
 
@@ -150,6 +152,7 @@ const NAV: [Section, string, typeof Users][] = [
   ["shares", "Shared links", Link2],
   ["audit", "Audit log", ScrollText],
   ["skills", "Skills & imports", Database],
+  ["templates", "Templates", FileCode],
   ["system", "System & APIs", Server],
   ["team", "Admin team", UserCog],
 ];
@@ -452,6 +455,60 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const loadFraud = async () => {
     try { const d = await call({ action: "fraud_config_get" }); setFraudCfg(d.config); } catch { /* keep old */ }
   };
+
+  // ── Email templates (Superadmin → Templates) ──
+  const [tplList, setTplList] = useState<TemplateListItem[] | null>(null);
+  const [tplEdit, setTplEdit] = useState<TplEdit | null>(null);
+  const [tplBusy, setTplBusy] = useState(false);
+  const [tplTestTo, setTplTestTo] = useState("");
+
+  const loadTemplates = async () => {
+    try { const d = await call({ action: "templates_list" }); setTplList(d.templates); } catch { /* keep old */ }
+  };
+  const openTemplate = async (key: string) => {
+    try {
+      const d = await call({ action: "template_get", key });
+      setTplEdit({ key: d.key, name: d.name, subject: d.subject, html: d.html, description: d.description, customized: d.customized });
+      setTplTestTo(data.identity?.email ?? "");
+    } catch (e) {
+      toast({ title: "Could not load template", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+  const saveTemplate = async () => {
+    if (!tplEdit) return;
+    setTplBusy(true);
+    try {
+      await call({ action: "template_save", key: tplEdit.key, name: tplEdit.name, subject: tplEdit.subject, html: tplEdit.html });
+      toast({ title: "Template saved", description: "Every new email of this type uses your version immediately." });
+      setTplEdit({ ...tplEdit, customized: true });
+      await loadTemplates();
+    } catch (e) {
+      toast({ title: "Save failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally { setTplBusy(false); }
+  };
+  const resetTemplate = async () => {
+    if (!tplEdit) return;
+    if (!confirm(`Restore the built-in default for "${tplEdit.name}"?\nYour custom version is deleted.`)) return;
+    setTplBusy(true);
+    try {
+      await call({ action: "template_reset", key: tplEdit.key });
+      await openTemplate(tplEdit.key);
+      await loadTemplates();
+      toast({ title: "Template restored to default" });
+    } catch (e) {
+      toast({ title: "Reset failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally { setTplBusy(false); }
+  };
+  const testTemplate = async () => {
+    if (!tplEdit) return;
+    setTplBusy(true);
+    try {
+      const d = await call({ action: "template_test", key: tplEdit.key, to: tplTestTo || undefined });
+      toast({ title: `Test email ${d.simulated ? "simulated (sandbox)" : "sent"}`, description: `Recipient: ${d.sentTo}` });
+    } catch (e) {
+      toast({ title: "Test send failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally { setTplBusy(false); }
+  };
   const inviteMember = async () => {
     if (!inviteForm) return;
     try {
@@ -721,7 +778,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         const badge = badgeFor(sec);
         return (
           <button key={sec} type="button"
-            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); if (sec === "shares" && !shares) loadShares(); if (sec === "system") { loadNotifications(); loadFraud(); } if (sec === "team" && !team) loadTeam(); }}
+            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); if (sec === "shares" && !shares) loadShares(); if (sec === "system") { loadNotifications(); loadFraud(); } if (sec === "team" && !team) loadTeam(); if (sec === "templates" && !tplList) loadTemplates(); }}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
               active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
@@ -1546,6 +1603,102 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           )}
 
           {/* ── System & APIs — where every integration lives (flags only, never values) ── */}
+          {/* ── Templates (email) ── */}
+          {section === "templates" && (
+            <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-vault-border/70 px-5 py-4">
+                <div>
+                  <h3 className="text-sm font-bold text-jade-ink">Email templates</h3>
+                  <p className="mt-0.5 text-xs text-jade-muted">Every outbound email — invites, reminders, verification links, admin codes — rendered from HTML templates you can edit, preview and test.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={loadTemplates} className="gap-1.5">
+                  <RefreshCw className="h-3.5 w-3.5" /> Reload
+                </Button>
+              </div>
+
+              {!tplList ? (
+                <div className="px-5 py-12"><Spinner label="Loading templates…" /></div>
+              ) : tplEdit ? (
+                <div className="grid gap-0 lg:grid-cols-2">
+                  {/* Editor */}
+                  <div className="border-b border-vault-border/70 p-5 lg:border-b-0 lg:border-r">
+                    <div className="mb-4 flex items-center justify-between gap-2">
+                      <button type="button" onClick={() => setTplEdit(null)} className="text-xs text-jade-muted underline hover:text-jade-ink">← All templates</button>
+                      {tplEdit.customized && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-700">Customized</span>}
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs text-jade-muted">Display name</Label>
+                        <Input value={tplEdit.name} onChange={(e) => setTplEdit({ ...tplEdit, name: e.target.value })} className="mt-1" disabled={readOnly} />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-jade-muted">Subject line — supports {"{{variables}}"}</Label>
+                        <Input value={tplEdit.subject} onChange={(e) => setTplEdit({ ...tplEdit, subject: e.target.value })} className="mt-1 font-medium" disabled={readOnly} />
+                      </div>
+                      <div className="rounded-lg bg-[#f4f9f5] px-3 py-2.5 text-[11px] leading-relaxed text-jade-muted">
+                        <span className="font-semibold text-jade-ink">Variables:</span>
+                        {tplEdit.description.split("\n").map((line, i) => (
+                          <span key={i} className="block whitespace-pre-line">{line}</span>
+                        ))}
+                      </div>
+                      <div>
+                        <Label className="text-xs text-jade-muted">HTML body — full document, inline styles only</Label>
+                        <textarea
+                          value={tplEdit.html}
+                          onChange={(e) => setTplEdit({ ...tplEdit, html: e.target.value })}
+                          spellCheck={false}
+                          disabled={readOnly}
+                          className="mt-1 h-80 w-full rounded-lg border border-vault-border bg-[#0b2a24] p-3 font-mono text-[11.5px] leading-relaxed text-emerald-50 focus:outline-none focus:ring-2 focus:ring-verify-green/40"
+                        />
+                      </div>
+                      {!readOnly && (
+                        <div className="flex flex-wrap gap-2">
+                          <Button onClick={saveTemplate} disabled={tplBusy} className="bg-[#0b3d3f] text-white hover:bg-[#0b3d3f]/90">
+                            {tplBusy ? "Working…" : "Save template"}
+                          </Button>
+                          <Button variant="outline" onClick={testTemplate} disabled={tplBusy || !tplTestTo} className="gap-1.5">
+                            <Mail className="h-3.5 w-3.5" /> Send test
+                          </Button>
+                          <Input value={tplTestTo} onChange={(e) => setTplTestTo(e.target.value)} placeholder="test recipient email" className="w-56 flex-1" />
+                          {tplEdit.customized && (
+                            <Button variant="ghost" onClick={resetTemplate} disabled={tplBusy} className="text-rose-600 hover:bg-rose-50">Restore default</Button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Live preview */}
+                  <div className="p-5">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-jade-muted">Live preview — placeholders shown as {"{{variables}}"}</p>
+                    <iframe
+                      title="Template preview"
+                      srcDoc={tplEdit.html}
+                      sandbox=""
+                      className="h-[560px] w-full rounded-xl border border-vault-border bg-[#f4f9f5]"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
+                  {tplList.map((t) => (
+                    <button key={t.key} type="button" onClick={() => openTemplate(t.key)}
+                      className="rounded-xl border border-vault-border bg-white p-4 text-left transition hover:border-verify-green/60 hover:shadow-md">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-bold text-jade-ink">{t.name}</p>
+                        {t.customized
+                          ? <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-sky-700">Edited</span>
+                          : <span className="shrink-0 rounded-full bg-jade-ink/5 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-jade-muted">Default</span>}
+                      </div>
+                      <p className="mt-1 text-[11px] font-mono text-jade-muted">{t.key} · {t.kind}</p>
+                      <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-jade-muted">{t.description.split("\n")[0]}</p>
+                      {t.updatedAt && <p className="mt-2 text-[10px] text-jade-muted">Edited {new Date(t.updatedAt).toLocaleString()} by {t.updatedBy}</p>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {section === "system" && (
             <div className="mt-8 space-y-6">
               <div>

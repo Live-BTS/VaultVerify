@@ -4,6 +4,7 @@ import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend } from "@/lib/bts/credits";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
+import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { deriveCallbackCode } from "@/lib/bts/seed";
 import { LINK_EXPIRY_DAYS, specialtyLabel } from "@/lib/bts/constants";
 import { CHECKLISTS } from "@/lib/bts/questions";
@@ -150,7 +151,13 @@ export async function POST(req: NextRequest) {
     const link = `${baseUrl(req)}/?r=${r.token}`;
     const bodyText = inviteBody(agency.name, candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: r.refPhone || r.refEmail, body: bodyText, requestId: r.id });
-    await sendNotification({ channel: "EMAIL", kind: "INVITE", to: r.refEmail, subject: `Reference request — ${candidate.fullName}`, body: bodyText, requestId: r.id });
+    await sendTemplatedEmail("reference_invite", r.refEmail, {
+      agencyName: agency.name,
+      candidateName: candidate.fullName,
+      refName: r.refName,
+      link,
+      expiryDays: LINK_EXPIRY_DAYS,
+    }, { requestId: r.id });
     await logAudit({ actorType: "SYSTEM", action: "REQUEST_SENT", entity: "reference_request", entityId: r.id, detail: { ref: r.refEmail }, ip: clientIp(req) });
   }
   await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "PROFILE_CREATED", entity: "candidate", entityId: candidate.id, detail: { specialty: specialtyLabel(body.specialty), refs: candidate.requests.length }, ip: clientIp(req) });

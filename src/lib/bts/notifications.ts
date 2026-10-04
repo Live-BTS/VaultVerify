@@ -15,7 +15,7 @@ import { db } from "@/lib/db";
 // Every message — sent or simulated — is persisted to NotificationLog.
 
 export type Channel = "SMS" | "EMAIL";
-export type Kind = "INVITE" | "REMINDER" | "SWAP_NOTICE" | "COMPLETION" | "CONSENT" | "AUTH" | "OTP";
+export type Kind = "INVITE" | "REMINDER" | "SWAP_NOTICE" | "COMPLETION" | "CONSENT" | "AUTH" | "OTP" | "SECURITY";
 
 export interface SendPayload {
   channel: Channel;
@@ -23,6 +23,8 @@ export interface SendPayload {
   to: string;
   subject?: string;
   body: string;
+  html?: string;          // rich HTML body (Brevo htmlContent)
+  templateKey?: string;   // which EmailTemplate rendered this message
   requestId?: string;
 }
 
@@ -74,6 +76,7 @@ const brevoEmailProvider: Provider = {
           to: [{ email: p.to }],
           subject: p.subject || "VaultVerify notification",
           textContent: p.body,
+          ...(p.html ? { htmlContent: p.html } : {}),
         }),
       });
       if (!res.ok) {
@@ -100,6 +103,8 @@ export async function sendNotification(p: SendPayload) {
       to: p.to,
       subject: p.subject ?? "",
       body: p.body,
+      html: p.html ?? null,
+      templateKey: p.templateKey ?? null,
       requestId: p.requestId ?? null,
       status: result.status,
       provider: result.provider,

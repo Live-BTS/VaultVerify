@@ -4,8 +4,8 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
-import { sha256, hashPassword, createPasswordReset, maskEmail } from "@/lib/bts/auth";
-import { sendNotification } from "@/lib/bts/notifications";
+import { sha256, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES } from "@/lib/bts/auth";
+import { sendTemplatedEmail, listTemplates, renderEmail, TEMPLATE_INDEX } from "@/lib/bts/emailTemplates";
 import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { getPlatformFlag, setPlatformFlag, deletePlatformFlag, MAINTENANCE_KEY } from "@/lib/bts/platform";
@@ -94,12 +94,40 @@ const OWNER_ONLY = new Set([
 const READ_ONLY = new Set([
   "auth", "system_config", "requests", "impersonate_view", "audit_query",
   "ledger_query", "shares_list", "notifications_list", "ping", "fraud_config_get",
+  "templates_list", "template_get",
 ]);
 
 function roleAllowed(role: AdminRole, action: string): boolean {
   if (role === "OWNER") return true;
   if (role === "ADMIN") return !OWNER_ONLY.has(action);
   return READ_ONLY.has(action); // SUPPORT
+}
+
+// Realistic sample values for template previews and test sends.
+function sampleVarsFor(key: string): Record<string, string> {
+  const base: Record<string, string> = {
+    code: "481902",
+    expiryMinutes: "5",
+    portal: "recruiter",
+    expiryHours: "24",
+    link: "https://vaultverify.vercel.app/?verify=sample-token-abc123",
+    setupLink: "https://vaultverify.vercel.app/?view=checklist&invite=sample-token-abc123",
+    role: "ADMIN",
+    email: "teammember@example.com",
+    accessDescription: "Your access covers all console commands except owner-only platform controls.",
+    consoleHint: "Open the console, enter your team email, and request a login code.",
+    agencyName: "Meridian Health Staffing",
+    candidateName: "Jordan Blake, RN",
+    refName: "Alex Rivera, MSN",
+    expiryDays: "14",
+    daysOpen: "6",
+    recruiterName: "Sam Chen",
+    organization: "St. Camillus Medical Center",
+    finalStatus: "completed",
+    rating: "4.6 / 5",
+    tempPassword: "Vv-92841xk",
+  };
+  return base;
 }
 
 function yearsFrom(manual: number, start: Date | null): number {
@@ -265,12 +293,9 @@ export async function POST(req: NextRequest) {
       await db.superAdminOtp.create({
         data: { email: target, codeHash: sha256(otp), expiresAt: new Date(Date.now() + OTP_TTL_MS) },
       });
-      const result = await sendNotification({
-        channel: "EMAIL",
-        kind: "OTP",
-        to: target,
-        subject: "VaultVerify admin login code",
-        body: `Your VaultVerify admin login code is:\n\n${otp}\n\nIt expires in 5 minutes. Never share this code.`,
+      const result = await sendTemplatedEmail("admin_otp", target, {
+        code: otp,
+        expiryMinutes: Math.round(OTP_TTL_MS / 60000),
       });
       await logAudit({ actorType: "SYSTEM", action: "ADMIN_OTP_REQUESTED", entity: "superAdminOtp", entityId: result.id, detail: { status: result.status } });
       const masked = target.replace(/^(.{2}).*(@.*)$/, "$1•••$2");
@@ -541,10 +566,9 @@ export async function POST(req: NextRequest) {
         const token = await createPasswordReset(kind, account.id);
         if (kind === "RECRUITER") await killRecruiterSessions(account.id);
         else await killCandidateSessions(account.id);
-        const result = await sendNotification({
-          channel: "EMAIL", kind: "SECURITY", to: account.email,
-          subject: "Reset your VaultVerify password",
-          body: `A password reset was requested for your VaultVerify account by platform support.\n\nSet a new password here (link expires in 60 minutes):\n${originOf(req)}/?reset=${token}\n\nIf you weren't expecting this, ignore the email — your current password still works until the link is used.`,
+        const result = await sendTemplatedEmail("password_reset", account.email, {
+          link: `${originOf(req)}/?reset=${token}`,
+          expiryMinutes: RESET_TTL_MINUTES,
         });
         await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "PASSWORD_RESET_SENT", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
         return NextResponse.json({ ok: true, sentTo: maskEmail(account.email), simulated: result.status === "SIMULATED" });
@@ -567,10 +591,10 @@ export async function POST(req: NextRequest) {
         const token = await createPasswordReset(kind, account.id);
         if (kind === "RECRUITER") await killRecruiterSessions(account.id);
         else await killCandidateSessions(account.id);
-        const result = await sendNotification({
-          channel: "EMAIL", kind: "SECURITY", to: account.email,
-          subject: "Your temporary VaultVerify password",
-          body: `Platform support issued a temporary password for your VaultVerify account:\n\n${temp}\n\nSign in with it, then set your own password here (expires in 60 minutes):\n${originOf(req)}/?reset=${token}\n\nAll previous sessions were signed out.`,
+        const result = await sendTemplatedEmail("temp_password", account.email, {
+          tempPassword: temp,
+          link: `${originOf(req)}/?reset=${token}`,
+          expiryMinutes: RESET_TTL_MINUTES,
         });
         await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "TEMP_PASSWORD_ISSUED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
         return NextResponse.json({ ok: true, tempPassword: temp, sentTo: maskEmail(account.email), simulated: result.status === "SIMULATED" });
@@ -823,22 +847,14 @@ export async function POST(req: NextRequest) {
         const existing = await db.superadminAccount.findUnique({ where: { email } });
         if (existing) return NextResponse.json({ ok: false, error: "A team account with this email already exists." }, { status: 409 });
         const member = await db.superadminAccount.create({ data: { email, name, role } });
-        const result = await sendNotification({
-          channel: "EMAIL",
-          kind: "AUTH",
-          to: email,
-          subject: "You have been added to the VaultVerify admin team",
-          body: [
-            `You have been granted ${role} access to the VaultVerify superadmin console.`,
-            "",
-            `To sign in: open the console, enter ${email} as the team member email, and request a login code — a 6-digit code will be emailed to you.`,
-            "",
+        const result = await sendTemplatedEmail("team_invite", email, {
+          role,
+          email,
+          accessDescription:
             role === "SUPPORT"
               ? "Your access is read-only: you can review users, companies, dossiers, the audit log and platform health, but cannot change anything."
               : "Your access covers all console commands except owner-only platform controls (team management, maintenance mode, platform-wide session revocation).",
-            "",
-            "If you were not expecting this email, you can safely ignore it.",
-          ].join("\n"),
+          consoleHint: `To sign in: open the console, enter ${email} as the team member email, and request a login code — a 6-digit code will be emailed to you.`,
         });
         await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "SUBADMIN_INVITED", entity: "superadminAccount", entityId: member.id, detail: { email, role, notified: result.status } });
         return NextResponse.json({ ok: true, member: { id: member.id, email: member.email, role: member.role }, notified: result.status !== "FAILED" });
@@ -939,6 +955,72 @@ export async function POST(req: NextRequest) {
           detail: { from: `${from.profession}/${from.jobTitle}/${from.specialty}`, to: `${to.profession}/${to.jobTitle}/${to.specialty}`, rows: source.length },
         });
         return NextResponse.json({ ok: true, cloned: source.length });
+      }
+
+      // ── Email template management (Superadmin → Templates) ─────────
+      // List/get for every role; save/reset/test for ADMIN and above.
+      case "templates_list": {
+        return NextResponse.json({ ok: true, templates: await listTemplates() });
+      }
+
+      case "template_get": {
+        const key = String(body.key ?? "");
+        if (!TEMPLATE_INDEX[key]) return NextResponse.json({ ok: false, error: "Unknown template key." }, { status: 404 });
+        const override = await db.emailTemplate.findUnique({ where: { key } });
+        const spec = TEMPLATE_INDEX[key];
+        return NextResponse.json({
+          ok: true,
+          key,
+          name: override?.name ?? spec.name,
+          kind: spec.kind,
+          description: override?.description ?? spec.description,
+          subject: override?.subject ?? spec.subject,
+          html: override?.html ?? spec.html,
+          customized: !!override,
+        });
+      }
+
+      case "template_save": {
+        const key = String(body.key ?? "");
+        const spec = TEMPLATE_INDEX[key];
+        if (!spec) return NextResponse.json({ ok: false, error: "Unknown template key." }, { status: 404 });
+        const subject = String(body.subject ?? "").trim();
+        const html = String(body.html ?? "");
+        const name = String(body.name ?? "").trim().slice(0, 80) || spec.name;
+        if (!subject) return NextResponse.json({ ok: false, error: "Subject cannot be empty." }, { status: 400 });
+        if (html.length < 40 || !/<[a-z]/i.test(html)) return NextResponse.json({ ok: false, error: "The HTML body looks empty or invalid." }, { status: 400 });
+        // Sanity render — a broken template must never take down sends.
+        try {
+          const preview = await renderEmail(key, sampleVarsFor(key));
+          if (!preview.subject || !preview.html.includes("<")) throw new Error("render produced empty output");
+        } catch (e) {
+          return NextResponse.json({ ok: false, error: `Template failed to render: ${(e as Error).message}` }, { status: 400 });
+        }
+        const saved = await db.emailTemplate.upsert({
+          where: { key },
+          create: { key, name, subject, html, description: spec.description, updatedBy: auditActor },
+          update: { name, subject, html, updatedBy: auditActor },
+        });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "EMAIL_TEMPLATE_SAVED", entity: "emailTemplate", entityId: saved.id, detail: { key } });
+        return NextResponse.json({ ok: true, updatedAt: saved.updatedAt.toISOString() });
+      }
+
+      case "template_reset": {
+        const key = String(body.key ?? "");
+        if (!TEMPLATE_INDEX[key]) return NextResponse.json({ ok: false, error: "Unknown template key." }, { status: 404 });
+        await db.emailTemplate.deleteMany({ where: { key } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "EMAIL_TEMPLATE_RESET", entity: "emailTemplate", entityId: key, detail: {} });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "template_test": {
+        const key = String(body.key ?? "");
+        if (!TEMPLATE_INDEX[key]) return NextResponse.json({ ok: false, error: "Unknown template key." }, { status: 404 });
+        const to = String(body.to ?? auditActor ?? SUPERADMIN_EMAIL).trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return NextResponse.json({ ok: false, error: "Enter a valid test recipient email." }, { status: 400 });
+        const result = await sendTemplatedEmail(key, to, sampleVarsFor(key));
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "EMAIL_TEMPLATE_TEST_SENT", entity: "emailTemplate", entityId: key, detail: { to, status: result.status } });
+        return NextResponse.json({ ok: true, sentTo: maskEmail(to), simulated: result.status === "SIMULATED", status: result.status });
       }
 
       default:

@@ -63,7 +63,7 @@ interface RecruiterData {
   audit: { id: string; actorType: string; action: string; entity: string; entityId: string; ip: string; createdAt: string }[];
 }
 
-export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () => void; onSuperAdmin?: () => void }) {
+export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   const { toast } = useToast();
   const [code, setCode] = useState("");
   const [me, setMe] = useState<{ name: string; email: string; onboardingComplete: boolean } | null>(null);
@@ -181,14 +181,6 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
             <button type="button" onClick={() => setShowLegacy(true)} className="text-xs text-slate-500 underline hover:text-teal-700">
               Have an agency access code instead?
             </button>
-            {onSuperAdmin && (
-              <>
-                <br />
-                <button type="button" onClick={onSuperAdmin} className="text-xs text-slate-500 underline hover:text-teal-700">
-                  Platform admin? Open Super Admin console
-                </button>
-              </>
-            )}
           </div>
         }
       />
@@ -223,11 +215,6 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
             <button type="button" onClick={() => setShowLegacy(false)} className="mt-4 w-full text-center text-xs text-slate-500 underline hover:text-teal-700">
               Sign up or sign in with an account instead
             </button>
-            {onSuperAdmin && (
-              <button type="button" onClick={onSuperAdmin} className="mt-2 w-full text-center text-xs text-slate-500 underline hover:text-teal-700">
-                Platform admin? Open Super Admin console
-              </button>
-            )}
           </CardContent>
         </Card>
       </div>

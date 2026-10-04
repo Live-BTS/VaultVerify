@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, reminderBody } from "@/lib/bts/notifications";
+import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { REMINDER_DAYS, LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
 import { getRecruiterSessionAccount, recruiterAuthed } from "@/lib/bts/auth";
 
@@ -110,6 +111,13 @@ export async function POST(req: NextRequest) {
           body: reminderBody(r.candidate.agency.name, r.candidate.fullName, link, daysOpen),
           requestId: r.id,
         });
+        await sendTemplatedEmail("reference_reminder", r.refEmail, {
+          agencyName: r.candidate.agency.name,
+          candidateName: r.candidate.fullName,
+          refName: r.refName,
+          link,
+          daysOpen,
+        }, { requestId: r.id });
         await db.referenceRequest.update({ where: { id: r.id }, data: { reminderCount: due, lastReminderAt: new Date() } });
         await logAudit({ actorType: "SYSTEM", action: "REMINDER_SENT", entity: "reference_request", entityId: r.id, detail: { day: daysOpen, count: due } });
         sent++;

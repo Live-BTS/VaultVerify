@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
+import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend } from "@/lib/bts/credits";
@@ -79,7 +80,13 @@ export async function POST(req: NextRequest) {
     const link = `${baseUrl(req)}/?r=${created.token}`;
     const bodyText = inviteBody(candidate.agency.name, candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
-    await sendNotification({ channel: "EMAIL", kind: "INVITE", to: created.refEmail, subject: `Reference request — ${candidate.fullName}`, body: bodyText, requestId: created.id });
+    await sendTemplatedEmail("reference_invite", created.refEmail, {
+      agencyName: candidate.agency.name,
+      candidateName: candidate.fullName,
+      refName: created.refName,
+      link,
+      expiryDays: LINK_EXPIRY_DAYS,
+    }, { requestId: created.id });
     await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "REFERENCE_ADDED", entity: "reference_request", entityId: created.id, detail: { ref: created.refEmail }, ip: clientIp(req) });
     await creditSpend(candidate.agencyId, `Reference request — ${candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", candidate.id);
     return NextResponse.json({ ok: true, message: `Request sent to ${created.refName}` });
@@ -111,6 +118,13 @@ export async function POST(req: NextRequest) {
       body: reminderText(agency.name, request.candidate.fullName, link),
       requestId: request.id,
     });
+    await sendTemplatedEmail("reference_reminder", request.refEmail, {
+      agencyName: agency.name,
+      candidateName: request.candidate.fullName,
+      refName: request.refName,
+      link,
+      daysOpen: Math.floor((Date.now() - new Date(request.sentAt).getTime()) / 86400000),
+    }, { requestId: request.id });
     await db.referenceRequest.update({ where: { id: request.id }, data: { lastReminderAt: new Date() } });
     await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "NUDGE_SENT", entity: "reference_request", entityId: request.id, ip: clientIp(req) });
     return NextResponse.json({ ok: true, message: `Nudge sent to ${request.refName}` });
@@ -142,8 +156,17 @@ export async function POST(req: NextRequest) {
     const link = `${baseUrl(req)}/?r=${created.token}`;
     const bodyText = inviteBody(agency.name, request.candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
-    await sendNotification({ channel: "EMAIL", kind: "INVITE", to: created.refEmail, subject: `Reference request — ${request.candidate.fullName}`, body: bodyText, requestId: created.id });
-    await sendNotification({ channel: "EMAIL", kind: "SWAP_NOTICE", to: old.refEmail, subject: "Reference request withdrawn", body: `${request.candidate.fullName} has replaced this reference request with a different contact. No action is needed.`, requestId: old.id });
+    await sendTemplatedEmail("reference_invite", created.refEmail, {
+      agencyName: agency.name,
+      candidateName: request.candidate.fullName,
+      refName: created.refName,
+      link,
+      expiryDays: LINK_EXPIRY_DAYS,
+    }, { requestId: created.id });
+    await sendTemplatedEmail("reference_withdrawn", old.refEmail, {
+      candidateName: request.candidate.fullName,
+      refName: old.refName,
+    }, { requestId: old.id });
     await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "REFERENCE_SWAPPED", entity: "reference_request", entityId: created.id, detail: { oldId: old.id, oldEmail: old.refEmail }, ip: clientIp(req) });
     await creditSpend(agency.id, `Reference swap — ${request.candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", request.candidateId);
     return NextResponse.json({ ok: true, message: `New request sent to ${created.refName}` });

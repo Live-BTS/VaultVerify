@@ -6,7 +6,6 @@ import { CandidateWizard, type CreatedCandidate } from "@/components/bts/Candida
 import { CandidateDashboard } from "@/components/bts/CandidateDashboard";
 import { RecruiterDashboard } from "@/components/bts/RecruiterDashboard";
 import { ReferenceFlow } from "@/components/bts/ReferenceFlow";
-import { SuperAdmin } from "@/components/bts/SuperAdmin";
 import { ChecklistPortal } from "@/components/bts/checklist/ChecklistPortal";
 import { ShareView } from "@/components/bts/checklist/ShareView";
 import { ReferenceShareView } from "@/components/bts/checklist/ReferenceShareView";
@@ -15,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type View = "home" | "wizard" | "candidate" | "recruiter" | "super" | "checklist" | "share" | "refshare";
+type View = "home" | "wizard" | "candidate" | "recruiter" | "checklist" | "share" | "refshare";
 
 interface VerifyState { status: "pending" | "ok" | "error"; message?: string; role?: "CANDIDATE" | "RECRUITER"; onboardingComplete?: boolean }
 
@@ -150,7 +149,6 @@ export default function Page() {
       if (s) setShareToken(s);
       if (rs) setRefShareToken(rs);
       if (invite) setInviteToken(invite);
-      if (view === "super") setView("super");
       if (view === "checklist") setView("checklist");
       if (view === "recruiter") setView("recruiter");
       if (s) setView("share");
@@ -257,9 +255,7 @@ export default function Page() {
     case "candidate":
       return <CandidateDashboard onSignOut={goHome} onOpenReference={openReference} />;
     case "recruiter":
-      return <RecruiterDashboard onSignOut={goHome} onSuperAdmin={() => setView("super")} />;
-    case "super":
-      return <SuperAdmin onExit={goHome} />;
+      return <RecruiterDashboard onSignOut={goHome} />;
     case "checklist":
       return <ChecklistPortal inviteToken={inviteToken} onExit={goHome}
         onLaunchReferences={(p) => { setWizardPrefill(p); setView("wizard"); }} />;

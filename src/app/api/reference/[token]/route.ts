@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { runFraudChecks } from "@/lib/bts/fraud";
 import { deriveCallbackCode } from "@/lib/bts/seed";
-import { sendNotification } from "@/lib/bts/notifications";
+import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { hashPassword } from "@/lib/bts/checklistAuth";
 import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
 import { specialtyLabel, type AnswerRecord } from "@/lib/bts/constants";
@@ -309,14 +309,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     }
   }
 
-  await sendNotification({
-    channel: "EMAIL",
-    kind: "COMPLETION",
-    to: request.candidate.agency.name.toLowerCase().replace(/\s+/g, "") + "@recruiting.local",
-    subject: `Reference completed — ${request.candidate.fullName} (${request.refName})`,
-    body: `Reference from ${request.refName} for ${request.candidate.fullName} was ${finalStatus === "FLAGGED" ? "completed and FLAGGED for review" : "completed"}. Average rating: ${overall?.toFixed(1) ?? "n/a"}.`,
-    requestId: request.id,
-  });
+  await sendTemplatedEmail("reference_completed", request.candidate.agency.name.toLowerCase().replace(/\s+/g, "") + "@recruiting.local", {
+    candidateName: request.candidate.fullName,
+    refName: request.refName,
+    finalStatus: finalStatus === "FLAGGED" ? "completed and flagged for review" : "completed",
+    rating: overall?.toFixed(1) ?? "n/a",
+  }, { requestId: request.id });
   await logAudit({
     actorType: "REFERENCE",
     action: "FORM_SUBMITTED",

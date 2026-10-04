@@ -346,16 +346,32 @@ model SkillTemplate {
 }
 
 model NotificationLog {
-  id        String   @id @default(cuid())
-  channel   String // SMS | EMAIL
-  kind      String // INVITE | REMINDER | SWAP_NOTICE | COMPLETION
-  to        String
-  subject   String   @default("")
-  body      String
-  requestId String?
-  status    String   @default("SIMULATED") // SENT | SIMULATED | FAILED
-  provider  String   @default("sandbox")
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  channel     String // SMS | EMAIL
+  kind        String // INVITE | REMINDER | SWAP_NOTICE | COMPLETION | AUTH | OTP | SECURITY
+  to          String
+  subject     String   @default("")
+  body        String
+  html        String?
+  templateKey String?
+  requestId   String?
+  status      String   @default("SIMULATED") // SENT | SIMULATED | FAILED
+  provider    String   @default("sandbox")
+  createdAt   DateTime @default(now())
+}
+
+// Editable email templates (Superadmin → Templates). A row here OVERRIDES the
+// built-in default of the same key; deleting the row falls back to default.
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "reference_invite" — see emailTemplates.ts
+  name        String // display name in the console
+  subject     String
+  html        String // full HTML body; {{variables}} substituted at send time
+  description String   @default("") // purpose + available variables
+  updatedBy   String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model AuditEvent {

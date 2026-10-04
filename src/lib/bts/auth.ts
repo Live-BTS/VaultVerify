@@ -1,7 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "crypto";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
-import { sendNotification } from "@/lib/bts/notifications";
+import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 
 // ── Portal auth shared helpers (candidates + recruiters) ──────────
 // Flow per product spec: signup → email verification → onboarding
@@ -72,19 +72,10 @@ export async function sendVerificationEmail(
 ): Promise<void> {
   const link = `${origin}/?verify=${token}`;
   const portal = role === "CANDIDATE" ? "candidate" : "recruiter";
-  await sendNotification({
-    channel: "EMAIL",
-    kind: "AUTH",
-    to: email,
-    subject: "Verify your VaultVerify email",
-    body: [
-      `Welcome to VaultVerify,`,
-      ``,
-      `Confirm this address to activate your ${portal} account:`,
-      link,
-      ``,
-      `The link expires in 24 hours. If you didn't sign up, ignore this email.`,
-    ].join("\n"),
+  await sendTemplatedEmail("email_verification", email, {
+    portal,
+    link,
+    expiryHours: Math.round(VERIFY_TTL_MINUTES / 60),
   });
 }
 
