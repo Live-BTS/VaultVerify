@@ -1028,10 +1028,26 @@ export async function POST(req: NextRequest) {
     }
   } catch (e) {
     console.error("[superadmin]", e);
-    const msg = e instanceof Error ? e.message : "";
-    const dbHint = /P1001|P1013|P1017|Authentication|Can't reach|Timed out fetching|doesn't exist|Invalid/i.test(msg)
-      ? " The deployment's database connection is failing — verify DATABASE_URL in Vercel → Settings → Environment Variables and redeploy."
-      : "";
-    return NextResponse.json({ ok: false, error: `Superadmin request failed.${dbHint}` }, { status: 500 });
+    const msg = e instanceof Error ? e.message : String(e);
+    const flat = msg.replace(/\s+/g, " ").trim();
+    const name = e instanceof Error ? e.name : "Error";
+    // Prisma wraps the real cause after the invocation dump — prefer the tail.
+    let detail = flat;
+    const inv = flat.lastIndexOf("invocation:");
+    if (inv !== -1) {
+      const brace = flat.lastIndexOf("}");
+      if (brace !== -1 && brace > inv && brace < flat.length - 2) detail = flat.slice(brace + 1).trim();
+    }
+    if (detail.length > 200) detail = `${detail.slice(0, 200)}…`;
+    let hint = "";
+    if (/P1001|P1013|P1017|P2024|Authentication|Can't reach|Timed out fetching/i.test(flat)) {
+      hint = " The deployment's database connection is failing — verify DATABASE_URL in Vercel → Settings → Environment Variables and redeploy.";
+    } else if (/P2021|P2022|does not exist|Unknown argument/i.test(flat)) {
+      hint = " The deployment's Prisma client is out of date with the schema — the build must run `prisma generate`; then redeploy.";
+    }
+    return NextResponse.json(
+      { ok: false, error: `Superadmin request failed — ${name}: ${detail || "unknown error"}.${hint}` },
+      { status: 500 }
+    );
   }
 }

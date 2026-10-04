@@ -247,6 +247,9 @@ export async function POST(req: NextRequest) {
     return bad("Unknown action");
   } catch (e) {
     console.error("[auth]", e);
-    return bad("Something went wrong — try again.", 500);
+    // Safe detail only — Prisma error codes carry no sensitive payload.
+    const code = (e as { code?: string } | null)?.code;
+    const extra = typeof code === "string" && /^P\d{4}$/.test(code) ? ` (db ${code})` : "";
+    return bad(`Something went wrong — try again.${extra}`, 500);
   }
 }
