@@ -103,7 +103,10 @@ async function overview() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    if (body.code !== SUPERADMIN_CODE) return unauthorized();
+    // Trim both sides: paste-whitespace or autocapitalize must not lock the owner out.
+    // Fail-closed stays intact: if SUPERADMIN_CODE is unset, no supplied code can match.
+    const supplied = typeof body.code === "string" ? body.code.trim() : "";
+    if (!SUPERADMIN_CODE || supplied !== SUPERADMIN_CODE.trim()) return unauthorized();
 
     switch (body.action) {
       case "auth": {

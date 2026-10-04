@@ -63,7 +63,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (body.code !== RECRUITER_CODE) return NextResponse.json({ ok: false, error: "Invalid recruiter code" }, { status: 401 });
+  const supplied = typeof body.code === "string" ? body.code.trim() : "";
+  if (!RECRUITER_CODE || supplied !== RECRUITER_CODE.trim()) return NextResponse.json({ ok: false, error: "Invalid recruiter code" }, { status: 401 });
 
   // recruiter asks: does this candidate already have an account? auto-fetch their details
   if (body.action === "lookup") {

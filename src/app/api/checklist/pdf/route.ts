@@ -133,7 +133,7 @@ export async function GET(req: NextRequest) {
       accessClause = "Accessed by the candidate from their VaultVerify portal.";
     } else if (inviteId) {
       const recruiterCode = process.env.RECRUITER_CODE ?? "";
-      if (!recruiterCode || sp.get("code") !== recruiterCode) return new NextResponse("Invalid code", { status: 401 });
+      if (!recruiterCode || (sp.get("code") ?? "").trim() !== recruiterCode.trim()) return new NextResponse("Invalid code", { status: 401 });
       const invite = await db.checklistInvite.findUnique({ where: { id: inviteId } });
       if (!invite?.completionId) return new NextResponse("Not completed yet", { status: 404 });
       completion = await db.checklistCompletion.findUnique({ where: { id: invite.completionId } });

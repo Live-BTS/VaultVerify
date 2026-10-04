@@ -146,7 +146,7 @@ export function RecruiterDashboard({ onSignOut, onSuperAdmin }: { onSignOut: () 
             <form className="mt-6 space-y-4" onSubmit={(e) => { e.preventDefault(); if (code.trim()) load(code.trim()); }}>
               <div>
                 <Label htmlFor="code">Access code</Label>
-                <Input id="code" type="password" value={code} onChange={(e) => setCode(e.target.value)} className="mt-1.5" required />
+                <Input id="code" type="password" value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} className="mt-1.5" required />
               </div>
               {error && <p className="text-sm text-rose-600">{error}</p>}
               <Button type="submit" disabled={loading} className="w-full bg-teal-700 hover:bg-teal-800">

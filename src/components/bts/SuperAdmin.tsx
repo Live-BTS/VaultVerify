@@ -128,8 +128,8 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   }, [code]);
 
   const auth = async (c?: string) => {
-    const useCode = c ?? code;
-    if (!useCode.trim()) return toast({ title: "Enter the superadmin code.", variant: "destructive" });
+    const useCode = (c ?? code).trim();
+    if (!useCode) return toast({ title: "Enter the superadmin code.", variant: "destructive" });
     setLoading(true);
     try {
       const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", code: useCode }) });
@@ -246,6 +246,10 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && auth()}
+              autoCapitalize="none"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
               placeholder="Superadmin code"
               className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
             />

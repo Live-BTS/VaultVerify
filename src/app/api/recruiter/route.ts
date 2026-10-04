@@ -20,8 +20,8 @@ function baseUrl(req: NextRequest): string {
 
 // ── GET /api/recruiter?code=... — full pipeline dashboard ──
 export async function GET(req: NextRequest) {
-  const code = req.nextUrl.searchParams.get("code");
-  if (code !== RECRUITER_CODE) {
+  const code = (req.nextUrl.searchParams.get("code") ?? "").trim();
+  if (!RECRUITER_CODE || code !== RECRUITER_CODE.trim()) {
     return NextResponse.json({ error: "Invalid access code" }, { status: 401 });
   }
 
