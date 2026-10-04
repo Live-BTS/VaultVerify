@@ -13,7 +13,7 @@ import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
   Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server, Mail,
-  ScrollText, Activity, Link2, Eye, KeyRound, LogOut, Ban,
+  ScrollText, Activity, Link2, Eye, KeyRound, LogOut, Ban, UserCog, Copy,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -89,7 +89,13 @@ interface Overview {
   threatFlags: ThreatFlagRow[];
   platform: { maintenance: boolean };
   extras: ExtraQ[];
+  identity?: { email: string; role: string };
 }
+
+// Phase 3 RBAC — console roles. SUPPORT is read-only by construction.
+type AdminRole = "OWNER" | "ADMIN" | "SUPPORT";
+interface TeamRow { id: string; email: string; name: string; role: string; status: string; liveSessions: number; createdAt: string }
+interface FraudConfigView { enabled: boolean; freeEmailSurname: boolean; duplicateIp: boolean; rapidCompletion: boolean; identityUnverified: boolean; rapidSeconds: number; minSurnameLength: number; freeEmailDomains: string[] }
 
 interface ChecklistRequestRow {
   id: string;
@@ -102,7 +108,7 @@ interface ExtraQ {
   id: string; kind: string; prompt: string; placeholder: string; specialty: string; active: boolean; sortOrder: number;
 }
 
-type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "audit" | "shares" | "skills" | "system";
+type Section = "requests" | "users" | "companies" | "candidates" | "credits" | "audit" | "shares" | "skills" | "system" | "team";
 
 interface SystemItemView { key: string; label: string; envVar: string; provider: string; purpose: string; critical: boolean; configured: boolean }
 interface SystemStatus { items: SystemItemView[]; protections: { label: string; detail: string }[]; runtime: { databaseProvider: string; emailProvider: string; smsProvider: string; environment: string } }
@@ -145,6 +151,7 @@ const NAV: [Section, string, typeof Users][] = [
   ["audit", "Audit log", ScrollText],
   ["skills", "Skills & imports", Database],
   ["system", "System & APIs", Server],
+  ["team", "Admin team", UserCog],
 ];
 
 const th = "px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-jade-muted";
@@ -158,9 +165,16 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const [otp, setOtp] = useState("");
   const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
   const [otpSimulated, setOtpSimulated] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");    // team members sign in with their own address
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(false);
   const [section, setSection] = useState<Section>("requests");
+  // ── Phase 3 RBAC: role comes from the authenticated identity; anything
+  // without an identity (older session restore) is the owner. ──
+  const role: AdminRole = (data?.identity?.role as AdminRole) ?? "OWNER";
+  const isOwner = role === "OWNER";
+  const isAdminPlus = role === "OWNER" || role === "ADMIN";
+  const readOnly = role === "SUPPORT";
   const [cqRequests, setCqRequests] = useState<ChecklistRequestRow[] | null>(null);
   const [sys, setSys] = useState<SystemStatus | null>(null);
   const [openSet, setOpenSet] = useState<string | null>(null);
@@ -199,7 +213,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const requestOtp = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request_otp" }) });
+      const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request_otp", email: adminEmail.trim() || undefined }) });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Could not send the code");
       setOtpSentTo(d.sentTo ?? "your email");
@@ -425,6 +439,77 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const [notifHealth, setNotifHealth] = useState<{ stats: { sent: number; simulated: number; failed: number }; notifications: NotificationRow[] } | null>(null);
   const [tempPwShown, setTempPwShown] = useState<{ email: string; temp: string } | null>(null);
 
+  // ── Phase 3: admin team (RBAC), fraud tuning, checklist cloning ──
+  const [team, setTeam] = useState<TeamRow[] | null>(null);
+  const [inviteForm, setInviteForm] = useState<{ name: string; email: string; role: "ADMIN" | "SUPPORT" } | null>(null);
+  const [fraudCfg, setFraudCfg] = useState<FraudConfigView | null>(null);
+  const [fraudSaving, setFraudSaving] = useState(false);
+  const [cloneForm, setCloneForm] = useState<{ from: TemplateSet; profession: string; jobTitle: string; specialty: string } | null>(null);
+
+  const loadTeam = async () => {
+    try { const d = await call({ action: "team_list" }); setTeam(d.team); } catch { /* keep old */ }
+  };
+  const loadFraud = async () => {
+    try { const d = await call({ action: "fraud_config_get" }); setFraudCfg(d.config); } catch { /* keep old */ }
+  };
+  const inviteMember = async () => {
+    if (!inviteForm) return;
+    try {
+      const d = await call({ action: "team_invite", name: inviteForm.name, email: inviteForm.email, role: inviteForm.role });
+      toast({ title: `Invited ${d.member.email} as ${d.member.role}`, description: d.notified ? "They receive an email with sign-in steps." : "Invite saved — email delivery is simulated in sandbox." });
+      setInviteForm(null);
+      await loadTeam();
+    } catch (e) {
+      toast({ title: "Invite failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+  const setMemberRole = (m: TeamRow, newRole: "ADMIN" | "SUPPORT") => {
+    cmd({ action: "team_set_role", id: m.id, role: newRole }, `${m.email} is now ${newRole}`, "The change applies to their live console session immediately.");
+    setTimeout(loadTeam, 400);
+  };
+  const setMemberStatus = (m: TeamRow, status: "ACTIVE" | "SUSPENDED") => {
+    if (status === "SUSPENDED" && !confirm(`Suspend ${m.email}?\nTheir console sessions are killed and sign-in is blocked.`)) return;
+    cmd({ action: "team_set_status", id: m.id, status }, status === "SUSPENDED" ? "Team member suspended" : "Team member reactivated");
+    setTimeout(loadTeam, 400);
+  };
+  const removeMember = (m: TeamRow) => {
+    if (!confirm(`Remove ${m.email} from the admin team?\nTheir live console sessions are killed and the account is deleted.`)) return;
+    cmd({ action: "team_remove", id: m.id }, "Team member removed", "The decision is in the audit log.");
+    setTimeout(loadTeam, 400);
+  };
+  const saveFraud = async () => {
+    if (!fraudCfg) return;
+    setFraudSaving(true);
+    try {
+      const d = await call({ action: "fraud_config_set", config: fraudCfg });
+      setFraudCfg(d.config);
+      toast({ title: "Fraud tuning saved", description: "New submissions use these rules immediately." });
+    } catch (e) {
+      toast({ title: "Save failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally {
+      setFraudSaving(false);
+    }
+  };
+  const runClone = async () => {
+    if (!cloneForm) return;
+    try {
+      const d = await call({
+        action: "clone_set",
+        profession: cloneForm.from.profession,
+        jobTitle: cloneForm.from.jobTitle,
+        specialty: cloneForm.from.specialty,
+        toProfession: cloneForm.profession,
+        toJobTitle: cloneForm.jobTitle,
+        toSpecialty: cloneForm.specialty,
+      });
+      toast({ title: `Cloned ${d.cloned} skill(s)`, description: `${cloneForm.from.specialty} → ${cloneForm.specialty}. The new set is live in the library below.` });
+      setCloneForm(null);
+      await refresh();
+    } catch (e) {
+      toast({ title: "Clone failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
   const openImpersonation = async (kind: "CANDIDATE" | "RECRUITER", id: string) => {
     try {
       const d = await call({ action: "impersonate_view", kind, id });
@@ -555,6 +640,20 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                 <p className="text-sm leading-relaxed text-jade-muted">
                   We&apos;ll email a one-time login code to the admin address saved in the platform configuration. The code expires in 5 minutes.
                 </p>
+                <div className="mt-4">
+                  <Label htmlFor="sa-team-email" className="text-jade-ink/80">Team member email <span className="font-normal text-jade-muted">(leave empty for the owner account)</span></Label>
+                  <Input
+                    id="sa-team-email"
+                    type="email"
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="you@company.com"
+                    className="mt-1.5 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]"
+                  />
+                </div>
                 <Button onClick={requestOtp} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
                   {loading ? "Sending…" : "Email me a login code"} <Mail className="ml-2 h-4 w-4" />
                 </Button>
@@ -617,12 +716,12 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
 
   const navList = (
     <nav className="space-y-1">
-      {NAV.map(([sec, label, Icon]) => {
+      {NAV.filter(([sec]) => sec !== "team" || isOwner).map(([sec, label, Icon]) => {
         const active = section === sec;
         const badge = badgeFor(sec);
         return (
           <button key={sec} type="button"
-            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); if (sec === "shares" && !shares) loadShares(); if (sec === "system") loadNotifications(); }}
+            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); if (sec === "shares" && !shares) loadShares(); if (sec === "system") { loadNotifications(); loadFraud(); } if (sec === "team" && !team) loadTeam(); }}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
               active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
@@ -646,6 +745,10 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
             <div className="leading-tight">
               <p className="text-sm font-semibold text-jade-ink">
                 Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Super Admin</span>
+                <span className={cn("ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                  role === "OWNER" ? "bg-jade-ink/10 text-jade-ink" : role === "ADMIN" ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700")}>
+                  {role.toLowerCase()}
+                </span>
               </p>
               <p className="text-[11px] text-jade-muted">Zipvault skills platform console</p>
             </div>
@@ -674,6 +777,13 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         <main className="min-w-0 flex-1">
           {/* Section switcher (mobile) */}
           <div className="mb-6 flex gap-2 overflow-x-auto pb-1 lg:hidden">{navList}</div>
+
+          {/* Role banner — SUPPORT is read-only by construction */}
+          {readOnly && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              You are signed in with <span className="font-semibold">support (read-only)</span> access — you can review users, companies, dossiers, the audit log and platform health, but every write is blocked. Signed in as {data.identity?.email ?? "support"}.
+            </div>
+          )}
 
           {/* Stats */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
@@ -1372,15 +1482,26 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                               {specialtyLabel(set.specialty)} <span className="ml-1 text-xs font-normal text-jade-muted">· {set.jobTitle} · {set.profession}</span>
                             </p>
                             <p className="text-xs text-jade-muted">
-                              {set.count} active skill(s) · {set.sources.map((src) => (src === "BUILTIN" ? "built-in" : "imported")).join(" + ")}
+                              {set.count} active skill(s) · {set.sources.map((src) => (src === "BUILTIN" ? "built-in" : src === "CLONE" ? "cloned" : "imported")).join(" + ")}
                             </p>
                           </div>
                         </div>
                         <span
                           role="button"
                           tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`)) deleteSet(set); }}
-                          onKeyDown={(e) => e.key === "Enter" && confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`) && deleteSet(set)}
+                          onClick={(e) => { e.stopPropagation(); if (isAdminPlus) setCloneForm({ from: set, profession: set.profession, jobTitle: set.jobTitle, specialty: "" }); }}
+                          onKeyDown={(e) => e.key === "Enter" && isAdminPlus && setCloneForm({ from: set, profession: set.profession, jobTitle: set.jobTitle, specialty: "" })}
+                          className="rounded-lg border border-transparent p-2 text-jade-muted transition hover:border-verify-green/40 hover:bg-verify-green/10 hover:text-verify-ink"
+                          aria-label={`Clone ${set.specialty} set`}
+                          title={isAdminPlus ? "Clone this checklist set" : "Admin access required"}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); if (isAdminPlus && confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`)) deleteSet(set); }}
+                          onKeyDown={(e) => e.key === "Enter" && isAdminPlus && confirm(`Delete the entire ${set.specialty} set (${set.rows.length} rows)?`) && deleteSet(set)}
                           className="rounded-lg border border-transparent p-2 text-jade-muted transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
                           aria-label={`Delete ${set.specialty} set`}
                         >
@@ -1443,11 +1564,13 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                     <p className="mt-0.5 text-xs text-jade-muted">Maintenance mode pauses every write across the platform. Connectivity pings verify the live integrations.</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button type="button" onClick={toggleMaintenance}
-                      className={cn("rounded-full border px-4 py-1.5 text-xs font-semibold transition",
-                        data.platform.maintenance ? "border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
-                      {data.platform.maintenance ? "Maintenance ON — click to resume" : "Maintenance mode"}
-                    </button>
+                    {isOwner && (
+                      <button type="button" onClick={toggleMaintenance}
+                        className={cn("rounded-full border px-4 py-1.5 text-xs font-semibold transition",
+                          data.platform.maintenance ? "border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                        {data.platform.maintenance ? "Maintenance ON — click to resume" : "Maintenance mode"}
+                      </button>
+                    )}
                     <Button size="sm" variant="ghost" onClick={runPing} className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
                       <Activity className="mr-1.5 h-3.5 w-3.5" /> Ping integrations
                     </Button>
@@ -1518,10 +1641,91 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                     <h4 className="text-sm font-semibold text-jade-ink">Breach response</h4>
                     <p className="mt-0.5 text-xs text-jade-muted">Sign out every candidate and recruiter on the platform. The superadmin console stays signed in.</p>
                   </div>
-                  <Button size="sm" variant="ghost" onClick={killAllSessions} className="border border-rose-300 text-rose-600 hover:bg-rose-50">
-                    <LogOut className="mr-1.5 h-3.5 w-3.5" /> Revoke all user sessions
-                  </Button>
+                  {isOwner && (
+                    <Button size="sm" variant="ghost" onClick={killAllSessions} className="border border-rose-300 text-rose-600 hover:bg-rose-50">
+                      <LogOut className="mr-1.5 h-3.5 w-3.5" /> Revoke all user sessions
+                    </Button>
+                  )}
                 </div>
+              </div>
+
+              {/* Fraud detection tuning — thresholds without code changes */}
+              <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-jade-ink">Fraud detection tuning</h3>
+                    <p className="mt-0.5 text-xs text-jade-muted">Switch rules on or off and tune thresholds for new reference submissions — no redeploy needed. Every change is audit-logged.</p>
+                  </div>
+                  {fraudCfg && (
+                    <button type="button" disabled={!isAdminPlus}
+                      onClick={() => setFraudCfg({ ...fraudCfg, enabled: !fraudCfg.enabled })}
+                      className={cn("rounded-full border px-4 py-1.5 text-xs font-semibold transition disabled:opacity-50",
+                        fraudCfg.enabled ? "border-verify-green/50 text-verify-ink hover:bg-verify-green/10" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                      {fraudCfg.enabled ? "Detection ON" : "Detection OFF — all rules skipped"}
+                    </button>
+                  )}
+                </div>
+
+                {!fraudCfg ? (
+                  <div className="mt-4 flex justify-center py-6"><Spinner label="Reading fraud configuration…" /></div>
+                ) : (
+                  <>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      {([
+                        ["freeEmailSurname", "Free-email + surname match", "Flags referee emails on free providers that contain the candidate's surname."],
+                        ["duplicateIp", "Duplicate signer IP", "Flags two references for the same candidate signed from one IP."],
+                        ["rapidCompletion", "Rapid completion", "Flags forms finished suspiciously fast."],
+                        ["identityUnverified", "Identity never verified", "Flags submissions where the referrer skipped every identity check."],
+                      ] as [keyof FraudConfigView, string, string][]).map(([key, label, desc]) => (
+                        <button key={key} type="button" disabled={!isAdminPlus}
+                          onClick={() => setFraudCfg({ ...fraudCfg, [key]: !fraudCfg[key] })}
+                          className={cn("flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition disabled:opacity-60",
+                            fraudCfg[key] ? "border-verify-green/40 bg-verify-green/5" : "border-vault-border opacity-70 hover:opacity-100")}>
+                          {fraudCfg[key]
+                            ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-verify-green" />
+                            : <X className="mt-0.5 h-4 w-4 shrink-0 text-[#8aa29c]" />}
+                          <span>
+                            <span className="block text-sm font-medium text-jade-ink">{label}</span>
+                            <span className="mt-0.5 block text-xs text-jade-muted">{desc}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <Label className="text-jade-ink/80">Rapid-completion floor (seconds)</Label>
+                        <Input type="number" min={10} max={600} disabled={!isAdminPlus} value={fraudCfg.rapidSeconds}
+                          onChange={(e) => setFraudCfg({ ...fraudCfg, rapidSeconds: Number(e.target.value) })}
+                          className="mt-1.5 w-32 border-vault-border bg-white text-jade-ink disabled:opacity-60" />
+                      </div>
+                      <div>
+                        <Label className="text-jade-ink/80">Minimum surname length for matching</Label>
+                        <Input type="number" min={1} max={10} disabled={!isAdminPlus} value={fraudCfg.minSurnameLength}
+                          onChange={(e) => setFraudCfg({ ...fraudCfg, minSurnameLength: Number(e.target.value) })}
+                          className="mt-1.5 w-32 border-vault-border bg-white text-jade-ink disabled:opacity-60" />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className="text-jade-ink/80">Free email providers (comma-separated domains)</Label>
+                        <textarea
+                          disabled={!isAdminPlus}
+                          value={fraudCfg.freeEmailDomains.join(", ")}
+                          onChange={(e) => setFraudCfg({ ...fraudCfg, freeEmailDomains: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                          rows={2}
+                          className="mt-1.5 w-full rounded-lg border border-vault-border bg-white px-3 py-2 text-sm text-jade-ink disabled:opacity-60"
+                          placeholder="gmail.com, yahoo.com, …"
+                        />
+                      </div>
+                    </div>
+                    {isAdminPlus && (
+                      <div className="mt-4 flex items-center gap-2">
+                        <Button size="sm" onClick={saveFraud} disabled={fraudSaving} className="bg-verify-green text-vault-dark hover:bg-verify-green/90 disabled:opacity-40">
+                          <Check className="mr-1.5 h-3.5 w-3.5" /> {fraudSaving ? "Saving…" : "Save fraud tuning"}
+                        </Button>
+                        <span className="text-xs text-jade-muted">Changes apply to new submissions within seconds.</span>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {!sys ? (
@@ -1586,6 +1790,121 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                   </p>
                 </>
               )}
+            </div>
+          )}
+
+          {/* ── Admin team — Phase 3 RBAC (owner only) ── */}
+          {section === "team" && isOwner && (
+            <div className="mt-8 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-jade-ink">Admin team</h2>
+                  <p className="mt-1 text-sm text-jade-muted">
+                    Invite sub-admins with scoped roles. <span className="font-medium text-jade-ink">ADMIN</span> runs every console command except owner-only platform controls; <span className="font-medium text-jade-ink">SUPPORT</span> is read-only. Role changes and suspensions apply to live sessions instantly, and every command is audit-logged against the person who ran it.
+                  </p>
+                </div>
+                <Button size="sm" onClick={() => setInviteForm({ name: "", email: "", role: "SUPPORT" })}
+                  className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
+                  <PlusCircle className="mr-1.5 h-3.5 w-3.5" /> Invite teammate
+                </Button>
+              </div>
+
+              {inviteForm && (
+                <div className="rounded-xl border border-verify-green/30 bg-[#f2f7f4] p-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <Label className="text-jade-ink/80">Name</Label>
+                      <Input value={inviteForm.name} onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
+                        placeholder="Alex Morgan" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                    </div>
+                    <div>
+                      <Label className="text-jade-ink/80">Work email</Label>
+                      <Input type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                        placeholder="alex@company.com" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                    </div>
+                    <div>
+                      <Label className="text-jade-ink/80">Role</Label>
+                      <div className="mt-1.5 flex gap-2">
+                        {[["SUPPORT", "Support · read-only"], ["ADMIN", "Admin · full ops"]].map(([k, lb]) => (
+                          <button key={k} type="button"
+                            onClick={() => setInviteForm({ ...inviteForm, role: k as "ADMIN" | "SUPPORT" })}
+                            className={cn("rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
+                              inviteForm.role === k ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                            {lb}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <Button size="sm" onClick={inviteMember} disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(inviteForm.email.trim())}
+                      className="bg-verify-green text-vault-dark hover:bg-verify-green/90 disabled:opacity-40">
+                      <Check className="mr-1.5 h-3.5 w-3.5" /> Send invite
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setInviteForm(null)} className="border border-vault-border text-jade-muted hover:text-jade-ink">Cancel</Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="overflow-hidden rounded-2xl border border-vault-border bg-white vv-card-shadow">
+                {!team ? (
+                  <div className="flex justify-center py-10"><Spinner label="Reading team…" /></div>
+                ) : (
+                  <table className="w-full">
+                    <thead className="bg-[#f7fbf8]">
+                      <tr>
+                        <th className={cn(th, "text-left")}>Member</th>
+                        <th className={cn(th, "text-left")}>Role</th>
+                        <th className={cn(th, "text-left")}>Status</th>
+                        <th className={cn(th, "text-left")}>Live sessions</th>
+                        <th className={cn(th, "text-right")}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {team.map((m) => (
+                        <tr key={m.id}>
+                          <td className={cn(td, "font-medium")}>
+                            {m.name || "—"}
+                            <span className="block text-xs font-normal text-jade-muted">{m.email}</span>
+                          </td>
+                          <td className={td}>
+                            <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold uppercase",
+                              m.role === "OWNER" ? "bg-jade-ink/10 text-jade-ink" : m.role === "ADMIN" ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700")}>
+                              {m.role}
+                            </span>
+                          </td>
+                          <td className={td}><span className={statusPill(m.status)}>{m.status === "SUSPENDED" ? "Suspended" : "Active"}</span></td>
+                          <td className={td}>{m.liveSessions}</td>
+                          <td className={cn(td, "text-right")}>
+                            {m.role !== "OWNER" && (
+                              <div className="flex justify-end gap-1.5">
+                                <button type="button" onClick={() => setMemberRole(m, m.role === "ADMIN" ? "SUPPORT" : "ADMIN")}
+                                  className="rounded-lg border border-vault-border px-2.5 py-1 text-[11px] font-semibold text-jade-muted transition hover:text-jade-ink"
+                                  title={m.role === "ADMIN" ? "Demote to support (read-only)" : "Promote to admin (full ops)"}>
+                                  {m.role === "ADMIN" ? "Demote" : "Promote"}
+                                </button>
+                                <button type="button" onClick={() => setMemberStatus(m, m.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE")}
+                                  className={cn("rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition",
+                                    m.status === "ACTIVE" ? "border-rose-200 text-rose-500 hover:bg-rose-50" : "border-verify-green/50 text-verify-ink hover:bg-verify-green/10")}>
+                                  {m.status === "ACTIVE" ? "Suspend" : "Reactivate"}
+                                </button>
+                                <button type="button" onClick={() => removeMember(m)}
+                                  className="rounded-lg border border-transparent p-1.5 text-jade-muted transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600" aria-label={`Remove ${m.email}`}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
+                            {m.role === "OWNER" && <span className="text-[11px] text-jade-muted">platform owner</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              <p className="text-center text-[11px] text-[#8aa29c]">
+                Team members sign in at this console with their email + a one-time code. The owner account comes from the SUPERADMIN_EMAIL configuration and cannot be changed here.
+              </p>
             </div>
           )}
 
@@ -1695,6 +2014,45 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
             <p className="mt-1 text-sm text-jade-muted">Emailed to {tempPwShown.email}. It is shown once here — copy it now if you want to hand it over directly.</p>
             <p className="mt-3 rounded-lg border border-vault-border bg-[#f7fbf8] px-4 py-3 text-center font-mono text-lg font-semibold tracking-wide text-jade-ink">{tempPwShown.temp}</p>
             <Button className="mt-4 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90" onClick={() => setTempPwShown(null)}>Done</Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Clone checklist set (Phase 3) ── */}
+      {cloneForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]" onClick={() => setCloneForm(null)}>
+          <div className="w-full max-w-md rounded-2xl border border-vault-border bg-white p-6 vv-card-shadow" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-jade-ink">Clone checklist set</h3>
+            <p className="mt-1 text-sm text-jade-muted">
+              Copy all {cloneForm.from.rows.length} skill row(s) of <span className="font-medium text-jade-ink">{specialtyLabel(cloneForm.from.specialty)} · {cloneForm.from.jobTitle} · {cloneForm.from.profession}</span> to a new set. Skills, categories, question types and N/A options carry over; the copy starts with source “cloned”.
+            </p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <Label className="text-jade-ink/80">New specialty key</Label>
+                <Input value={cloneForm.specialty} onChange={(e) => setCloneForm({ ...cloneForm, specialty: e.target.value.toUpperCase() })}
+                  placeholder="e.g. L&D, OR, ICU_TRAUMA" className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                <p className="mt-1 text-[11px] text-jade-muted">Known keys get their pretty label; anything else is used as-is.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-jade-ink/80">Job title</Label>
+                  <Input value={cloneForm.jobTitle} onChange={(e) => setCloneForm({ ...cloneForm, jobTitle: e.target.value.toUpperCase() })}
+                    className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                </div>
+                <div>
+                  <Label className="text-jade-ink/80">Profession</Label>
+                  <Input value={cloneForm.profession} onChange={(e) => setCloneForm({ ...cloneForm, profession: e.target.value })}
+                    className="mt-1.5 border-vault-border bg-white text-jade-ink" />
+                </div>
+              </div>
+            </div>
+            <div className="mt-5 flex gap-2">
+              <Button size="sm" onClick={runClone} disabled={cloneForm.specialty.trim().length < 2}
+                className="bg-verify-green text-vault-dark hover:bg-verify-green/90 disabled:opacity-40">
+                <Copy className="mr-1.5 h-3.5 w-3.5" /> Clone set
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setCloneForm(null)} className="border border-vault-border text-jade-muted hover:text-jade-ink">Cancel</Button>
+            </div>
           </div>
         </div>
       )}

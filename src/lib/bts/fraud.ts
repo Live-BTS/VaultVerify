@@ -1,14 +1,16 @@
 import { db } from "@/lib/db";
-import { RAPID_COMPLETION_SECONDS } from "./constants";
+import { getFraudConfig } from "./fraudConfig";
 
 // ── Fraud & pattern detection (runs on every submission) ──────
-// Rules from Phase 1 plan:
+// Rules (each switchable from the console via ./fraudConfig):
 //  1. Free email address matching the candidate's surname
 //  2. Duplicate signer IP across a candidate's references
-//  3. Completion in under 60 seconds
+//  3. Completion below the configurable seconds floor (default 60)
 //  4. Employer-domain identity check failed / skipped
-
-const FREE_EMAIL_DOMAINS = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com", "mail.com", "proton.me"];
+//
+// Thresholds and per-rule switches live in the FRAUD_CONFIG PlatformConfig
+// row (see ./fraudConfig) and are edited from the console — no code change
+// needed to tune triage.
 
 export interface FraudContext {
   requestId: string;
@@ -37,11 +39,13 @@ export function emailLocalPart(email: string): string {
 
 export async function runFraudChecks(ctx: FraudContext): Promise<FlagResult[]> {
   const flags: FlagResult[] = [];
+  const cfg = await getFraudConfig();
+  if (!cfg.enabled) return flags;
 
   // 1. Free email + surname match between reference address and candidate surname
   const domain = ctx.refEmail.split("@")[1]?.toLowerCase() ?? "";
   const surname = surnameOf(ctx.candidateName);
-  if (FREE_EMAIL_DOMAINS.includes(domain) && surname.length >= 3) {
+  if (cfg.freeEmailSurname && cfg.freeEmailDomains.includes(domain) && surname.length >= cfg.minSurnameLength) {
     const local = emailLocalPart(ctx.refEmail);
     if (local.includes(surname)) {
       flags.push({
@@ -53,26 +57,28 @@ export async function runFraudChecks(ctx: FraudContext): Promise<FlagResult[]> {
   }
 
   // 2. Duplicate signer IP across the same candidate's references
-  const request = await db.referenceRequest.findUnique({
-    where: { id: ctx.requestId },
-    include: { candidate: { include: { requests: { include: { response: true } } } } },
-  });
-  if (request && ctx.signerIp) {
-    const sibling = request.candidate.requests.find((r) => r.id !== ctx.requestId && r.response?.signerIp === ctx.signerIp && ctx.signerIp !== "");
-    if (sibling) {
-      flags.push({
-        type: "DUPLICATE_IP",
-        detail: `Same IP (${ctx.signerIp}) was also used by "${sibling.refName}'s" reference submission for this candidate.`,
-        severity: "HIGH",
-      });
+  if (cfg.duplicateIp) {
+    const request = await db.referenceRequest.findUnique({
+      where: { id: ctx.requestId },
+      include: { candidate: { include: { requests: { include: { response: true } } } } },
+    });
+    if (request && ctx.signerIp) {
+      const sibling = request.candidate.requests.find((r) => r.id !== ctx.requestId && r.response?.signerIp === ctx.signerIp && ctx.signerIp !== "");
+      if (sibling) {
+        flags.push({
+          type: "DUPLICATE_IP",
+          detail: `Same IP (${ctx.signerIp}) was also used by "${sibling.refName}'s" reference submission for this candidate.`,
+          severity: "HIGH",
+        });
+      }
     }
   }
 
-  // 3. Completion in under 60 seconds
-  if (ctx.durationSeconds > 0 && ctx.durationSeconds < RAPID_COMPLETION_SECONDS) {
+  // 3. Completion below the configured seconds floor
+  if (cfg.rapidCompletion && ctx.durationSeconds > 0 && ctx.durationSeconds < cfg.rapidSeconds) {
     flags.push({
       type: "RAPID_COMPLETION",
-      detail: `Form completed in ${ctx.durationSeconds}s — below the ${RAPID_COMPLETION_SECONDS}s floor for a genuine reference.`,
+      detail: `Form completed in ${ctx.durationSeconds}s — below the ${cfg.rapidSeconds}s floor for a genuine reference.`,
       severity: "MEDIUM",
     });
   }
@@ -81,7 +87,7 @@ export async function runFraudChecks(ctx: FraudContext): Promise<FlagResult[]> {
   //    "ACCOUNT" counts as verified: the referrer created their VaultVerify
   //    account with the exact email the candidate provided on a signed,
   //    single-use link — a stronger anchor than a domain string match.
-  if (ctx.identityMethod === "SKIPPED") {
+  if (cfg.identityUnverified && ctx.identityMethod === "SKIPPED") {
     flags.push({
       type: "IDENTITY_UNVERIFIED",
       detail: "Reference completed the form without creating a VaultVerify account or verifying identity via employer email domain or callback code.",

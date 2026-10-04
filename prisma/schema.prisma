@@ -436,10 +436,13 @@ model EmailVerification {
   createdAt  DateTime  @default(now())
 }
 
-// Superadmin OTP login: a 6-digit code is emailed to SUPERADMIN_EMAIL.
-// Codes are hashed at rest, expire fast, and die after 5 wrong tries.
+// Superadmin OTP login: a 6-digit code is emailed to the requesting admin's
+// address (the OWNER address from SUPERADMIN_EMAIL, or a team member's email
+// from SuperadminAccount). Codes are hashed at rest, expire fast, and die
+// after 5 wrong tries.
 model SuperAdminOtp {
   id         String    @id @default(cuid())
+  email      String    @default("") // identity the code was issued to ("" = legacy, owner address)
   codeHash   String
   expiresAt  DateTime
   consumedAt DateTime?
@@ -447,11 +450,29 @@ model SuperAdminOtp {
   createdAt  DateTime  @default(now())
 }
 
+// Phase 3 RBAC — the admin team. The OWNER row for SUPERADMIN_EMAIL is
+// auto-seeded on first login; sub-admins are invited from the console.
+//   role:   OWNER | ADMIN | SUPPORT   (SUPPORT is read-only by construction)
+//   status: ACTIVE | SUSPENDED        (suspension kills live console sessions)
+model SuperadminAccount {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String   @default("")
+  role      String   @default("SUPPORT")
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Issued after a correct OTP (or the static backup code). The console
-// then authenticates every call with this bearer token.
+// then authenticates every call with this bearer token. Sessions carry the
+// account identity so role changes and suspensions apply immediately.
 model SuperAdminSession {
   id        String   @id @default(cuid())
   token     String   @unique @default(cuid())
+  accountId String?  // set for OTP team logins; null = backup-code/legacy (OWNER)
+  email     String   @default("")
+  role      String   @default("OWNER") // snapshot; authoritative role lives on the account
   expiresAt DateTime
   createdAt DateTime @default(now())
 }

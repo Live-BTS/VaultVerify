@@ -9,12 +9,8 @@ Statuses below were verified against actual git history at the time of writing �
   Credit ledger with hard block, company suspend/read-only, user suspend with session kill, request revoke, fraud-flag decisions, audit console, maintenance mode, connectivity pings (Postgres + Brevo).
 - [x] **Phase 2 — Security & oversight** (commit `3e46ce1`)
   View-as read-only dossiers, security center (password resets + temp passwords + failed-login counters), session revocation incl. platform-wide, shared-links oversight, email delivery health, CSV exports, `/?reset` portal flow.
-
-## Phase 3 — Queued
-
-- [ ] **3-tier RBAC** — role tiers beyond the sole superadmin with scoped permissions (deferred from the Phase 1 blueprint triage; scope per the approved blueprint).
-- [ ] **Fraud tuning UI** — console controls for fraud-flag rules/thresholds so triage tuning does not require code changes.
-- [ ] **Checklist cloning** — duplicate an existing skills-checklist template (questions, extras, scoring) as a starting point for new ones.
+- [x] **Phase 3 — RBAC, fraud tuning, cloning**
+  3-tier RBAC (OWNER / ADMIN / SUPPORT, per-member OTP login, live role changes, session kill on suspend, owner-only commands), fraud detection tuning from the console (per-rule switches + thresholds in PlatformConfig, no redeploy), and checklist set cloning (copy any Profession+JobTitle+Specialty set to a new key).
 
 ## Rejected from blueprint — do not resurrect
 

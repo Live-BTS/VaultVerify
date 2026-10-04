@@ -9,20 +9,29 @@ import { sendNotification } from "@/lib/bts/notifications";
 import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { getPlatformFlag, setPlatformFlag, deletePlatformFlag, MAINTENANCE_KEY } from "@/lib/bts/platform";
+import { getFraudConfig, setFraudConfig, normalizeFraudConfig } from "@/lib/bts/fraudConfig";
 
 // ── POST /api/superadmin — platform administration (OTP + backup code) ──
 // Auth model:
 //   1. PRIMARY — emailed OTP: `request_otp` emails a 6-digit code to the
-//      address in SUPERADMIN_EMAIL; `verify_otp` exchanges it for an 8h
-//      session token that authenticates every subsequent call.
-//   2. BACKUP — the static SUPERADMIN_CODE still works (recovery path when
-//      email is down). Fail-closed: neither configured → nobody gets in.
+//      OWNER address (SUPERADMIN_EMAIL) or to an ACTIVE team member's
+//      address (Phase 3 RBAC); `verify_otp` exchanges it for an 8h session
+//      token that authenticates every subsequent call.
+//   2. BACKUP — the static SUPERADMIN_CODE still works (the owner's recovery
+//      path when email is down; always OWNER privileges). Fail-closed:
+//      neither configured → nobody gets in.
+// Roles (Phase 3):
+//   OWNER   — everything, incl. team management, maintenance, breach nuke.
+//   ADMIN   — everything except those owner-only commands.
+//   SUPPORT — read-only by construction (queries, dossiers, lists, pings).
 // Actions:
-//   request_otp {}                           -> OTP emailed to SUPERADMIN_EMAIL
-//   verify_otp { otp }                       -> { token, ...overview }
-//   auth       { code|token }                -> overview payload
+//   request_otp { email? }                   -> OTP emailed to the address
+//   verify_otp { otp }                       -> { token, identity, ...overview }
+//   auth       { code|token }                -> { identity, ...overview }
 //   import     { code|token, rows }          -> upsert validated templates
-//   toggle / deleteSet / requests / decide / extras* ...
+//   toggle / deleteSet / clone_set / requests / decide / extras* ...
+//   team_list / team_invite / team_set_role / team_set_status / team_remove
+//   fraud_config_get / fraud_config_set
 
 const SUPERADMIN_CODE = process.env.SUPERADMIN_CODE ?? "";
 const SUPERADMIN_EMAIL = (process.env.SUPERADMIN_EMAIL ?? "").trim().toLowerCase();
@@ -30,20 +39,67 @@ const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const SESSION_HOURS = 8;
 
+type AdminRole = "OWNER" | "ADMIN" | "SUPPORT";
+
+interface AdminIdentity {
+  role: AdminRole;
+  email: string;
+  accountId: string | null; // null = backup-code/legacy access → OWNER
+  token: string | null;
+}
+
 function unauthorized(msg = "Invalid superadmin code") {
   return NextResponse.json({ ok: false, error: msg }, { status: 401 });
 }
 
-async function sessionIsValid(token: unknown): Promise<boolean> {
-  if (typeof token !== "string" || !token.startsWith("sas_")) return false;
-  const session = await db.superAdminSession.findUnique({ where: { token } });
-  return !!session && session.expiresAt > new Date();
+function forbidden(msg = "Your console role does not allow this action") {
+  return NextResponse.json({ ok: false, error: msg }, { status: 403 });
 }
 
-async function codeMatches(body: Record<string, unknown>): Promise<boolean> {
-  if (await sessionIsValid(body.token)) return true;
+// ── Phase 3 RBAC: resolve WHO is calling ──
+// The authoritative role lives on the SuperadminAccount row and is re-read on
+// every call, so role changes and suspensions apply to live sessions
+// instantly. Backup-code access is the owner's recovery path → OWNER.
+async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIdentity | null> {
+  const token = typeof body.token === "string" ? body.token : "";
+  if (token.startsWith("sas_")) {
+    const session = await db.superAdminSession.findUnique({ where: { token } });
+    if (session && session.expiresAt > new Date()) {
+      if (session.accountId) {
+        const account = await db.superadminAccount.findUnique({ where: { id: session.accountId } });
+        if (!account || account.status === "SUSPENDED") return null;
+        const role: AdminRole = ["OWNER", "ADMIN", "SUPPORT"].includes(account.role)
+          ? (account.role as AdminRole)
+          : "SUPPORT";
+        return { role, email: account.email, accountId: account.id, token };
+      }
+      return { role: "OWNER", email: session.email || SUPERADMIN_EMAIL, accountId: null, token };
+    }
+  }
   const supplied = typeof body.code === "string" ? body.code.trim() : "";
-  return !!SUPERADMIN_CODE && supplied === SUPERADMIN_CODE.trim();
+  if (SUPERADMIN_CODE && supplied === SUPERADMIN_CODE.trim()) {
+    return { role: "OWNER", email: SUPERADMIN_EMAIL || "owner", accountId: null, token: null };
+  }
+  return null;
+}
+
+// Permission model (documented for the audit):
+//   OWNER   — everything.
+//   ADMIN   — everything except the owner-only platform commands.
+//   SUPPORT — read-only set only.
+const OWNER_ONLY = new Set([
+  "team_list", "team_invite", "team_set_role", "team_set_status", "team_remove",
+  "set_platform", "revoke_all_sessions",
+]);
+const READ_ONLY = new Set([
+  "auth", "system_config", "requests", "impersonate_view", "audit_query",
+  "ledger_query", "shares_list", "notifications_list", "ping", "fraud_config_get",
+]);
+
+function roleAllowed(role: AdminRole, action: string): boolean {
+  if (role === "OWNER") return true;
+  if (role === "ADMIN") return !OWNER_ONLY.has(action);
+  return READ_ONLY.has(action); // SUPPORT
 }
 
 function yearsFrom(manual: number, start: Date | null): number {
@@ -179,7 +235,18 @@ export async function POST(req: NextRequest) {
 
     // ── OTP flow — no prior auth required, heavily rate-limited ──
     if (body.action === "request_otp") {
-      if (!SUPERADMIN_EMAIL) {
+      // Who gets the code: the OWNER address by default, or an ACTIVE team
+      // member invited via the console (Phase 3 RBAC).
+      const requested = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      let target = SUPERADMIN_EMAIL;
+      if (requested && requested !== SUPERADMIN_EMAIL) {
+        const member = await db.superadminAccount.findUnique({ where: { email: requested } });
+        if (!member || member.status !== "ACTIVE") {
+          return NextResponse.json({ ok: false, error: "No active admin account for that address." }, { status: 403 });
+        }
+        target = member.email;
+      }
+      if (!target) {
         return NextResponse.json({ ok: false, error: "No admin email configured. Set SUPERADMIN_EMAIL in the environment." }, { status: 503 });
       }
       // Rate limit: at most 3 codes per 10 minutes — counts EVERY request,
@@ -196,17 +263,17 @@ export async function POST(req: NextRequest) {
       await db.superAdminOtp.updateMany({ where: { consumedAt: null }, data: { consumedAt: new Date() } });
       const otp = String(randomInt(0, 1_000_000)).padStart(6, "0");
       await db.superAdminOtp.create({
-        data: { codeHash: sha256(otp), expiresAt: new Date(Date.now() + OTP_TTL_MS) },
+        data: { email: target, codeHash: sha256(otp), expiresAt: new Date(Date.now() + OTP_TTL_MS) },
       });
       const result = await sendNotification({
         channel: "EMAIL",
         kind: "OTP",
-        to: SUPERADMIN_EMAIL,
+        to: target,
         subject: "VaultVerify admin login code",
         body: `Your VaultVerify admin login code is:\n\n${otp}\n\nIt expires in 5 minutes. Never share this code.`,
       });
       await logAudit({ actorType: "SYSTEM", action: "ADMIN_OTP_REQUESTED", entity: "superAdminOtp", entityId: result.id, detail: { status: result.status } });
-      const masked = SUPERADMIN_EMAIL.replace(/^(.{2}).*(@.*)$/, "$1•••$2");
+      const masked = target.replace(/^(.{2}).*(@.*)$/, "$1•••$2");
       if (result.status === "FAILED") {
         return NextResponse.json({ ok: false, error: "Email delivery failed — use the backup access code." });
       }
@@ -233,20 +300,43 @@ export async function POST(req: NextRequest) {
       await db.superAdminOtp.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
       // consume any older live codes too
       await db.superAdminOtp.updateMany({ where: { consumedAt: null, id: { not: row.id } }, data: { consumedAt: new Date() } });
+      // Resolve WHO logged in from the code's target address. The owner row
+      // is auto-seeded on first login; team members were validated as ACTIVE
+      // at request time and are re-checked here.
+      const otpEmail = (row.email || SUPERADMIN_EMAIL).trim().toLowerCase();
+      let account = await db.superadminAccount.findUnique({ where: { email: otpEmail } });
+      if (!account && otpEmail && otpEmail === SUPERADMIN_EMAIL) {
+        account = await db.superadminAccount.create({ data: { email: otpEmail, name: "Owner", role: "OWNER" } });
+      }
+      if (!account || account.status !== "ACTIVE") {
+        return NextResponse.json({ ok: false, error: "This admin account is no longer active." }, { status: 403 });
+      }
+      const role: AdminRole = ["OWNER", "ADMIN", "SUPPORT"].includes(account.role)
+        ? (account.role as AdminRole)
+        : "SUPPORT";
       const token = `sas_${randomBytes(24).toString("hex")}`;
       await db.superAdminSession.create({
-        data: { token, expiresAt: new Date(Date.now() + SESSION_HOURS * 3600 * 1000) },
+        data: { token, accountId: account.id, email: account.email, role, expiresAt: new Date(Date.now() + SESSION_HOURS * 3600 * 1000) },
       });
-      await logAudit({ actorType: "SYSTEM", action: "ADMIN_OTP_LOGIN", entity: "superAdminSession" });
-      return NextResponse.json({ ok: true, token, ...(await overview()) });
+      await logAudit({ actorType: "SYSTEM", actorId: account.email, action: "ADMIN_OTP_LOGIN", entity: "superAdminSession", detail: { role } });
+      return NextResponse.json({ ok: true, token, identity: { email: account.email, role }, ...(await overview()) });
     }
 
     // Every other action requires a live session token or the backup code.
-    if (!(await codeMatches(body))) return unauthorized();
+    const identity = await resolveIdentity(body);
+    if (!identity) return unauthorized();
+    if (!roleAllowed(identity.role, String(body.action ?? ""))) {
+      return forbidden(
+        identity.role === "SUPPORT"
+          ? "Support access is read-only — this action is not permitted."
+          : "Only the owner can perform this action.",
+      );
+    }
+    const auditActor = identity.email || "superadmin";
 
     switch (body.action) {
       case "auth": {
-        return NextResponse.json({ ok: true, ...(await overview()) });
+        return NextResponse.json({ ok: true, identity: { email: identity.email, role: identity.role }, ...(await overview()) });
       }
 
       case "system_config": {
@@ -259,21 +349,21 @@ export async function POST(req: NextRequest) {
         const status = String(body.status ?? "");
         if (!["ACTIVE", "SUSPENDED", "READ_ONLY"].includes(status)) return NextResponse.json({ ok: false, error: "Unknown status" }, { status: 400 });
         const agency = await db.agency.update({ where: { id: String(body.id) }, data: { status } });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "COMPANY_STATUS_SET", entity: "agency", entityId: agency.id, detail: { status } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "COMPANY_STATUS_SET", entity: "agency", entityId: agency.id, detail: { status } });
         return NextResponse.json({ ok: true, company: agency });
       }
 
       case "set_company_overage": {
         const agency = await db.agency.update({ where: { id: String(body.id) }, data: { allowOverage: !!body.allow } });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "COMPANY_OVERAGE_SET", entity: "agency", entityId: agency.id, detail: { allowOverage: !!body.allow } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "COMPANY_OVERAGE_SET", entity: "agency", entityId: agency.id, detail: { allowOverage: !!body.allow } });
         return NextResponse.json({ ok: true, company: agency });
       }
 
       case "credit_adjust": {
         const delta = Number(body.delta);
-        const result = await creditAdjust(String(body.id), delta, String(body.reason ?? ""), "superadmin");
+        const result = await creditAdjust(String(body.id), delta, String(body.reason ?? ""), auditActor);
         if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "CREDIT_ADJUSTED", entity: "agency", entityId: String(body.id), detail: { delta, reason: body.reason ?? "", balanceAfter: result.balance } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "CREDIT_ADJUSTED", entity: "agency", entityId: String(body.id), detail: { delta, reason: body.reason ?? "", balanceAfter: result.balance } });
         return NextResponse.json({ ok: true, balance: result.balance });
       }
 
@@ -289,7 +379,7 @@ export async function POST(req: NextRequest) {
           await db.checklistAccount.update({ where: { id }, data: { status } });
           if (status === "SUSPENDED") killed = await killCandidateSessions(id);
         }
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: status === "SUSPENDED" ? "USER_SUSPENDED" : "USER_REACTIVATED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: id, detail: { status, sessionsKilled: killed } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: status === "SUSPENDED" ? "USER_SUSPENDED" : "USER_REACTIVATED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: id, detail: { status, sessionsKilled: killed } });
         return NextResponse.json({ ok: true, status, sessionsKilled: killed });
       }
 
@@ -302,7 +392,7 @@ export async function POST(req: NextRequest) {
         });
         // A completed report loses its validity immediately (expiry machinery reused).
         await db.checklistCompletion.updateMany({ where: { requestId: id }, data: { expiresAt: new Date() } });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "CHECKLIST_REQUEST_REVOKED", entity: "checklistRequest", entityId: id, detail: { reason } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "CHECKLIST_REQUEST_REVOKED", entity: "checklistRequest", entityId: id, detail: { reason } });
         return NextResponse.json({ ok: true, request });
       }
 
@@ -318,7 +408,7 @@ export async function POST(req: NextRequest) {
             resolvedAt: new Date(),
           },
         });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "FRAUD_FLAG_DECIDED", entity: "fraudFlag", entityId: flag.id, detail: { decision, note: body.note ?? "" } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "FRAUD_FLAG_DECIDED", entity: "fraudFlag", entityId: flag.id, detail: { decision, note: body.note ?? "" } });
         return NextResponse.json({ ok: true, flag });
       }
 
@@ -349,7 +439,7 @@ export async function POST(req: NextRequest) {
           orderBy: { createdAt: "desc" },
           take: 200,
         });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "AUDIT_VIEWED", detail: { q, actorType, days } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "AUDIT_VIEWED", detail: { q, actorType, days } });
         return NextResponse.json({
           ok: true,
           events: rows.map((r) => ({ id: r.id, at: r.createdAt, actorType: r.actorType, actorId: r.actorId, action: r.action, entity: r.entity, entityId: r.entityId, detail: r.detail, ip: r.ip })),
@@ -362,7 +452,7 @@ export async function POST(req: NextRequest) {
         const on = !!body.value;
         if (on) await setPlatformFlag(key, "1");
         else await deletePlatformFlag(key);
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "PLATFORM_FLAG_SET", entity: "platformConfig", entityId: key, detail: { on } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "PLATFORM_FLAG_SET", entity: "platformConfig", entityId: key, detail: { on } });
         return NextResponse.json({ ok: true, maintenance: on });
       }
 
@@ -385,7 +475,7 @@ export async function POST(req: NextRequest) {
             result.brevo = { ok: false, detail: e instanceof Error ? e.message.slice(0, 140) : "unreachable" };
           }
         }
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "CONNECTIVITY_PING", detail: result as unknown as Record<string, unknown> });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "CONNECTIVITY_PING", detail: result as unknown as Record<string, unknown> });
         return NextResponse.json({ ok: true, ...result });
       }
 
@@ -402,7 +492,7 @@ export async function POST(req: NextRequest) {
             include: { _count: { select: { sessions: true } } },
           });
           if (!r) return NextResponse.json({ ok: false, error: "Recruiter not found" }, { status: 404 });
-          await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "IMPERSONATION_VIEWED", entity: "recruiterAccount", entityId: r.id, detail: { email: r.email } });
+          await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "IMPERSONATION_VIEWED", entity: "recruiterAccount", entityId: r.id, detail: { email: r.email } });
           const invites = await db.checklistInvite.findMany({ where: { recruiterName: r.name }, orderBy: { createdAt: "desc" }, take: 25 });
           return NextResponse.json({
             ok: true,
@@ -425,7 +515,7 @@ export async function POST(req: NextRequest) {
           },
         });
         if (!a) return NextResponse.json({ ok: false, error: "Candidate not found" }, { status: 404 });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "IMPERSONATION_VIEWED", entity: "checklistAccount", entityId: a.id, detail: { email: a.email } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "IMPERSONATION_VIEWED", entity: "checklistAccount", entityId: a.id, detail: { email: a.email } });
         return NextResponse.json({
           ok: true,
           view: {
@@ -456,7 +546,7 @@ export async function POST(req: NextRequest) {
           subject: "Reset your VaultVerify password",
           body: `A password reset was requested for your VaultVerify account by platform support.\n\nSet a new password here (link expires in 60 minutes):\n${originOf(req)}/?reset=${token}\n\nIf you weren't expecting this, ignore the email — your current password still works until the link is used.`,
         });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "PASSWORD_RESET_SENT", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "PASSWORD_RESET_SENT", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
         return NextResponse.json({ ok: true, sentTo: maskEmail(account.email), simulated: result.status === "SIMULATED" });
       }
 
@@ -482,7 +572,7 @@ export async function POST(req: NextRequest) {
           subject: "Your temporary VaultVerify password",
           body: `Platform support issued a temporary password for your VaultVerify account:\n\n${temp}\n\nSign in with it, then set your own password here (expires in 60 minutes):\n${originOf(req)}/?reset=${token}\n\nAll previous sessions were signed out.`,
         });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "TEMP_PASSWORD_ISSUED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "TEMP_PASSWORD_ISSUED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: account.id, detail: { status: result.status, sessionsKilled: true } });
         return NextResponse.json({ ok: true, tempPassword: temp, sentTo: maskEmail(account.email), simulated: result.status === "SIMULATED" });
       }
 
@@ -490,7 +580,7 @@ export async function POST(req: NextRequest) {
         const kind = body.kind === "RECRUITER" ? "RECRUITER" : "CANDIDATE";
         const id = String(body.id);
         const killed = kind === "RECRUITER" ? await killRecruiterSessions(id) : await killCandidateSessions(id);
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "USER_SESSIONS_REVOKED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: id, detail: { killed } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "USER_SESSIONS_REVOKED", entity: kind === "RECRUITER" ? "recruiterAccount" : "checklistAccount", entityId: id, detail: { killed } });
         return NextResponse.json({ ok: true, killed });
       }
 
@@ -501,7 +591,7 @@ export async function POST(req: NextRequest) {
           db.checklistSession.deleteMany({}),
           db.recruiterSession.deleteMany({}),
         ]);
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "ALL_SESSIONS_REVOKED", detail: { candidates: c.count, recruiters: r.count } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "ALL_SESSIONS_REVOKED", detail: { candidates: c.count, recruiters: r.count } });
         return NextResponse.json({ ok: true, candidates: c.count, recruiters: r.count });
       }
 
@@ -536,7 +626,7 @@ export async function POST(req: NextRequest) {
         const id = String(body.id);
         if (kind === "reference") await db.referenceShareLink.update({ where: { id }, data: { revoked: true } });
         else await db.checklistShareLink.update({ where: { id }, data: { revoked: true } });
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "SHARE_REVOKED_ADMIN", entity: kind === "reference" ? "referenceShareLink" : "checklistShareLink", entityId: id });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "SHARE_REVOKED_ADMIN", entity: kind === "reference" ? "referenceShareLink" : "checklistShareLink", entityId: id });
         return NextResponse.json({ ok: true });
       }
 
@@ -581,7 +671,7 @@ export async function POST(req: NextRequest) {
         } else {
           return NextResponse.json({ ok: false, error: "Unknown export" }, { status: 400 });
         }
-        await logAudit({ actorType: "SYSTEM", actorId: "superadmin", action: "DATA_EXPORTED", detail: { what, rows: rows.length } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "DATA_EXPORTED", detail: { what, rows: rows.length } });
         return NextResponse.json({ ok: true, csv: toCsv(rows), count: rows.length, what });
       }
 
@@ -593,7 +683,7 @@ export async function POST(req: NextRequest) {
         if (clean.length) result = await upsertTemplates(clean, "IMPORT");
         await logAudit({
           actorType: "RECRUITER",
-          actorId: "superadmin",
+          actorId: auditActor,
           action: "SKILL_TEMPLATES_IMPORTED",
           entity: "skillTemplate",
           detail: JSON.stringify({ submitted: rows.length, created: result.created, updated: result.updated, rejected: errors.length }),
@@ -637,7 +727,7 @@ export async function POST(req: NextRequest) {
         });
         await logAudit({
           actorType: "RECRUITER",
-          actorId: "superadmin",
+          actorId: auditActor,
           action: body.approve ? "CHECKLIST_REQUEST_APPROVED" : "CHECKLIST_REQUEST_REJECTED",
           entity: "checklistRequest",
           entityId: request.id,
@@ -652,7 +742,7 @@ export async function POST(req: NextRequest) {
         });
         await logAudit({
           actorType: "RECRUITER",
-          actorId: "superadmin",
+          actorId: auditActor,
           action: "SKILL_TEMPLATE_SET_DELETED",
           entity: "skillTemplate",
           detail: JSON.stringify({ specialty: body.specialty, deleted: del.count }),
@@ -674,7 +764,7 @@ export async function POST(req: NextRequest) {
             sortOrder: Number(body.sortOrder) || (kind === "YES_NO" ? 10 : 50),
           },
         });
-        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_CREATED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ kind }) });
+        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_CREATED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ kind }) });
         return NextResponse.json({ ok: true, question: q });
       }
 
@@ -689,20 +779,166 @@ export async function POST(req: NextRequest) {
             specialty: String(body.specialty ?? ""),
           },
         });
-        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_UPDATED", entity: "checklistExtraQuestion", entityId: q.id });
+        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_UPDATED", entity: "checklistExtraQuestion", entityId: q.id });
         return NextResponse.json({ ok: true, question: q });
       }
 
       case "extra.toggle": {
         const q = await db.checklistExtraQuestion.update({ where: { id: String(body.id ?? "") }, data: { active: !!body.active } });
-        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_TOGGLED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ active: q.active }) });
+        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_TOGGLED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ active: q.active }) });
         return NextResponse.json({ ok: true, question: q });
       }
 
       case "extra.delete": {
         await db.checklistExtraQuestion.delete({ where: { id: String(body.id ?? "") } });
-        await logAudit({ actorType: "RECRUITER", actorId: "superadmin", action: "EXTRA_QUESTION_DELETED", entity: "checklistExtraQuestion", entityId: String(body.id ?? "") });
+        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_DELETED", entity: "checklistExtraQuestion", entityId: String(body.id ?? "") });
         return NextResponse.json({ ok: true });
+      }
+
+      // ── Phase 3: RBAC — admin team management (OWNER only) ──
+      case "team_list": {
+        const members = await db.superadminAccount.findMany({ orderBy: { createdAt: "asc" } });
+        const grouped = await db.superAdminSession.groupBy({
+          by: ["accountId"],
+          where: { accountId: { not: null }, expiresAt: { gt: new Date() } },
+          _count: { accountId: true },
+        });
+        const liveByAccount = new Map(grouped.map((g) => [g.accountId, g._count.accountId]));
+        return NextResponse.json({
+          ok: true,
+          team: members.map((m) => ({
+            id: m.id, email: m.email, name: m.name, role: m.role, status: m.status,
+            liveSessions: liveByAccount.get(m.id) ?? 0, createdAt: m.createdAt,
+          })),
+        });
+      }
+
+      case "team_invite": {
+        const email = String(body.email ?? "").trim().toLowerCase();
+        const name = String(body.name ?? "").trim().slice(0, 80);
+        const role = String(body.role ?? "");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return NextResponse.json({ ok: false, error: "Enter a valid email address." }, { status: 400 });
+        if (!["ADMIN", "SUPPORT"].includes(role)) return NextResponse.json({ ok: false, error: "Role must be ADMIN or SUPPORT." }, { status: 400 });
+        if (email === SUPERADMIN_EMAIL) return NextResponse.json({ ok: false, error: "That address is the platform owner." }, { status: 400 });
+        const existing = await db.superadminAccount.findUnique({ where: { email } });
+        if (existing) return NextResponse.json({ ok: false, error: "A team account with this email already exists." }, { status: 409 });
+        const member = await db.superadminAccount.create({ data: { email, name, role } });
+        const result = await sendNotification({
+          channel: "EMAIL",
+          kind: "AUTH",
+          to: email,
+          subject: "You have been added to the VaultVerify admin team",
+          body: [
+            `You have been granted ${role} access to the VaultVerify superadmin console.`,
+            "",
+            `To sign in: open the console, enter ${email} as the team member email, and request a login code — a 6-digit code will be emailed to you.`,
+            "",
+            role === "SUPPORT"
+              ? "Your access is read-only: you can review users, companies, dossiers, the audit log and platform health, but cannot change anything."
+              : "Your access covers all console commands except owner-only platform controls (team management, maintenance mode, platform-wide session revocation).",
+            "",
+            "If you were not expecting this email, you can safely ignore it.",
+          ].join("\n"),
+        });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "SUBADMIN_INVITED", entity: "superadminAccount", entityId: member.id, detail: { email, role, notified: result.status } });
+        return NextResponse.json({ ok: true, member: { id: member.id, email: member.email, role: member.role }, notified: result.status !== "FAILED" });
+      }
+
+      case "team_set_role": {
+        const role = String(body.role ?? "");
+        if (!["ADMIN", "SUPPORT"].includes(role)) return NextResponse.json({ ok: false, error: "Role must be ADMIN or SUPPORT." }, { status: 400 });
+        const member = await db.superadminAccount.findUnique({ where: { id: String(body.id) } });
+        if (!member) return NextResponse.json({ ok: false, error: "Team member not found" }, { status: 404 });
+        if (member.role === "OWNER") return NextResponse.json({ ok: false, error: "The owner role cannot be changed." }, { status: 400 });
+        const updated = await db.superadminAccount.update({ where: { id: member.id }, data: { role } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "SUBADMIN_ROLE_CHANGED", entity: "superadminAccount", entityId: member.id, detail: { email: member.email, from: member.role, to: role } });
+        return NextResponse.json({ ok: true, member: { id: updated.id, role: updated.role } });
+      }
+
+      case "team_set_status": {
+        const status = body.status === "SUSPENDED" ? "SUSPENDED" : "ACTIVE";
+        const member = await db.superadminAccount.findUnique({ where: { id: String(body.id) } });
+        if (!member) return NextResponse.json({ ok: false, error: "Team member not found" }, { status: 404 });
+        if (member.role === "OWNER") return NextResponse.json({ ok: false, error: "The owner account cannot be suspended." }, { status: 400 });
+        const updated = await db.superadminAccount.update({ where: { id: member.id }, data: { status } });
+        let killed = 0;
+        if (status === "SUSPENDED") {
+          const gone = await db.superAdminSession.deleteMany({ where: { accountId: member.id } });
+          killed = gone.count;
+        }
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: status === "SUSPENDED" ? "SUBADMIN_SUSPENDED" : "SUBADMIN_REACTIVATED", entity: "superadminAccount", entityId: member.id, detail: { email: member.email, status, sessionsKilled: killed } });
+        return NextResponse.json({ ok: true, status, sessionsKilled: killed });
+      }
+
+      case "team_remove": {
+        const member = await db.superadminAccount.findUnique({ where: { id: String(body.id) } });
+        if (!member) return NextResponse.json({ ok: false, error: "Team member not found" }, { status: 404 });
+        if (member.role === "OWNER") return NextResponse.json({ ok: false, error: "The owner account cannot be removed." }, { status: 400 });
+        await db.superAdminSession.deleteMany({ where: { accountId: member.id } });
+        await db.superadminAccount.delete({ where: { id: member.id } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "SUBADMIN_REMOVED", entity: "superadminAccount", entityId: member.id, detail: { email: member.email, role: member.role } });
+        return NextResponse.json({ ok: true });
+      }
+
+      // ── Phase 3: fraud tuning (read: any role; write: ADMIN and above) ──
+      case "fraud_config_get": {
+        return NextResponse.json({ ok: true, config: await getFraudConfig() });
+      }
+
+      case "fraud_config_set": {
+        const config = normalizeFraudConfig(body.config);
+        await setFraudConfig(config, identity.email || "superadmin");
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "FRAUD_CONFIG_UPDATED", entity: "platformConfig", entityId: "FRAUD_CONFIG", detail: config as unknown as Record<string, unknown> });
+        return NextResponse.json({ ok: true, config });
+      }
+
+      // ── Phase 3: checklist cloning (ADMIN and above) ──
+      // Copies every template row of one Profession + Job Title + Specialty
+      // set to a new key — the fast path for building near-variant checklists
+      // without re-importing a workbook.
+      case "clone_set": {
+        const from = {
+          profession: String(body.profession ?? ""),
+          jobTitle: String(body.jobTitle ?? ""),
+          specialty: String(body.specialty ?? ""),
+        };
+        const to = {
+          profession: String(body.toProfession ?? from.profession).trim(),
+          jobTitle: String(body.toJobTitle ?? from.jobTitle).trim(),
+          specialty: String(body.toSpecialty ?? "").trim(),
+        };
+        if (!from.profession || !from.jobTitle || !from.specialty) return NextResponse.json({ ok: false, error: "Source set not fully specified." }, { status: 400 });
+        if (!to.specialty) return NextResponse.json({ ok: false, error: "Pick a specialty key for the clone." }, { status: 400 });
+        if (to.profession.toLowerCase() === from.profession.toLowerCase() && to.jobTitle.toLowerCase() === from.jobTitle.toLowerCase() && to.specialty.toLowerCase() === from.specialty.toLowerCase()) {
+          return NextResponse.json({ ok: false, error: "The clone must differ from the source (change the specialty, job title, or profession)." }, { status: 400 });
+        }
+        const source = await db.skillTemplate.findMany({ where: from, orderBy: { sortOrder: "asc" } });
+        if (!source.length) return NextResponse.json({ ok: false, error: "Source set not found." }, { status: 404 });
+        const clash = await db.skillTemplate.count({ where: to });
+        if (clash > 0) return NextResponse.json({ ok: false, error: "A checklist set already exists for that Profession + Job Title + Specialty." }, { status: 409 });
+        await db.skillTemplate.createMany({
+          data: source.map((r, i) => ({
+            profession: to.profession,
+            jobTitle: to.jobTitle,
+            specialty: to.specialty,
+            category: r.category,
+            skillName: r.skillName,
+            questionType: r.questionType,
+            hasNA: r.hasNA,
+            highRisk: r.highRisk,
+            active: r.active,
+            source: "CLONE",
+            sortOrder: i,
+          })),
+        });
+        await logAudit({
+          actorType: "RECRUITER",
+          actorId: auditActor,
+          action: "SKILL_TEMPLATE_SET_CLONED",
+          entity: "skillTemplate",
+          detail: { from: `${from.profession}/${from.jobTitle}/${from.specialty}`, to: `${to.profession}/${to.jobTitle}/${to.specialty}`, rows: source.length },
+        });
+        return NextResponse.json({ ok: true, cloned: source.length });
       }
 
       default:
