@@ -9,7 +9,7 @@ import { ReferenceFlow } from "@/components/bts/ReferenceFlow";
 import { ChecklistPortal } from "@/components/bts/checklist/ChecklistPortal";
 import { ShareView } from "@/components/bts/checklist/ShareView";
 import { ReferenceShareView } from "@/components/bts/checklist/ReferenceShareView";
-import { Spinner, VaultMark } from "@/components/bts/brand";
+import { Spinner, SplashLoader, VaultMark } from "@/components/bts/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -189,11 +189,7 @@ export default function Page() {
   }
 
   if (!booted) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]">
-        <Spinner label="Preparing the workspace…" />
-      </div>
-    );
+    return <SplashLoader label="Preparing the workspace…" />;
   }
 
   const goHome = () => setView("home");
@@ -268,7 +264,6 @@ export default function Page() {
         <LandingView
           agency={agency}
           onRole={(r: Role) => setView(r === "checklist" || r === "candidate" ? "checklist" : "recruiter")}
-          stats={{ completionRate: 86, avgTimeHours: 31 }}
         />
       );
   }

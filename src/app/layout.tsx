@@ -13,14 +13,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VaultVerify — Healthcare Skill Checklist & Verified References",
+  title: "VaultVerify — Verified References & Skills Checklists for Healthcare Hiring",
   description:
-    "VaultVerify turns paper reference forms into a secure two-party digital flow: mobile-first reference forms, anchored rating scales, manager-verified skill badges, fraud flags, and branded PDF packets.",
-  keywords: ["VaultVerify", "nurse references", "healthcare staffing", "reference verification", "skills checklist", "healthcare compliance"],
+    "VaultVerify turns paper reference forms into a secure two-party digital flow: email-verified accounts, consent-gated reference requests, single-use referee links, manager-verified skill badges, a 55+ template checklist library, fraud flags, branded PDF reports and candidate-controlled share links.",
+  keywords: ["VaultVerify", "nurse references", "healthcare staffing", "reference verification", "skills checklist", "healthcare compliance", "verified skills"],
   authors: [{ name: "VaultVerify" }],
   openGraph: {
-    title: "VaultVerify — Healthcare Skill Checklist",
-    description: "References, verified. Skills, proven. Reference checks that finish in 48 hours, not weeks.",
+    title: "VaultVerify — References, verified. Skills, proven.",
+    description:
+      "Consent-gated references, manager-verified skills, single-use secure links and branded PDF reports — reference checks in 48 hours, not weeks.",
     siteName: "VaultVerify",
     type: "website",
   },

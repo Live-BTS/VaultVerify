@@ -99,7 +99,6 @@ export function LandingView({
 }: {
   agency: AgencyInfo | null;
   onRole: (r: Role) => void;
-  stats?: { completionRate: number; avgTimeHours: number } | null;
 }) {
   const name = agency?.name ?? "VaultVerify";
   return (
@@ -113,7 +112,7 @@ export function LandingView({
         <Trust />
         <FinalCta onRole={onRole} />
       </main>
-      <Footer agencyName={name} />
+      <Footer agencyName={name} onRole={onRole} />
     </div>
   );
 }

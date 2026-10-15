@@ -70,7 +70,7 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
             <span className="relative flex h-2 w-2">
               <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full bg-verify-green" />
             </span>
-            Verified nursing references — not just scanned paper
+            Verified healthcare references & skills — not just scanned paper
           </motion.div>
 
           <motion.h1
@@ -85,8 +85,8 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
           </motion.h1>
 
           <motion.p variants={fadeUp} className="mt-6 max-w-xl text-base leading-relaxed text-jade-muted sm:text-lg">
-            {agencyName} replaces the paper reference form with a secure two-party flow: the nurse builds a portable profile once, managers
-            answer ten anchored questions on any phone in 3–5 minutes, and every skill comes back stamped{" "}
+            {agencyName} replaces the paper reference form with a secure two-party flow: the clinician builds a portable profile once, referees
+            answer anchored questions on any phone in 3–5 minutes, and every skill comes back stamped{" "}
             <span className="font-semibold text-verify-ink">Manager-verified</span> or{" "}
             <span className="font-semibold text-jade-ink">Self-reported</span>.
           </motion.p>
@@ -108,9 +108,9 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
 
           <motion.dl variants={fadeUp} className="mt-12 grid max-w-md grid-cols-3 gap-6">
             {[
-              ["86%", "Completion rate"],
-              ["<48h", "Median turnaround"],
+              ["55+", "Checklist templates"],
               ["3–5 min", "Per reference"],
+              ["<48h", "Target turnaround"],
             ].map(([v, l]) => (
               <div key={l}>
                 <dd className="bg-gradient-to-r from-[#03363d] to-verify-deep bg-clip-text text-2xl font-bold text-transparent">{v}</dd>

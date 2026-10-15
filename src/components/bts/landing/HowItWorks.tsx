@@ -6,10 +6,10 @@ import { SectionHeading, staggerParent, fadeUp, EASE_OUT } from "./Primitives";
 
 const STEPS = [
   { icon: UserRound, t: "Nurse builds a profile", d: "Specialty, role, and a self-rated skills checklist with recency — once, reused everywhere.", days: "Day 0" },
-  { icon: BellRing, t: "Secure invites go out", d: "Branded SMS + email with no-login links that expire in 14 days.", days: "Day 0" },
+  { icon: BellRing, t: "Secure invites go out", d: "Branded email with a personal no-login link that expires in 14 days.", days: "Day 0" },
   { icon: Smartphone, t: "Managers answer on mobile", d: "One question per screen, 5-point anchored scale, optional skills confirmation.", days: "Day 0–2" },
   { icon: Fingerprint, t: "Identity + fraud checks", d: "Employer-domain match, duplicate-IP and speed flags run automatically.", days: "Instant" },
-  { icon: FileCheck2, t: "Branded packet lands", d: "PDF + structured data hit the recruiter pipeline; reminders fire at day 2/5/9.", days: "< 48h" },
+  { icon: FileCheck2, t: "The verified record lands", d: "PDF + structured data hit the recruiter pipeline; reminders fire at day 2/5/9, and the candidate can share the result anywhere.", days: "< 48h" },
 ];
 
 export function HowItWorks() {

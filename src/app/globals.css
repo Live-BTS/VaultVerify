@@ -275,6 +275,42 @@
 .vv-scroll::-webkit-scrollbar-track { background: transparent; }
 .vv-scroll::-webkit-scrollbar-thumb { background: rgba(3, 54, 61, 0.18); border-radius: 999px; }
 
+/* ── Splash / boot loader — animated VaultVerify logo ── */
+/* Logo drop-in with a springy overshoot */
+@keyframes vv-splash-pop {
+  0%   { opacity: 0; transform: scale(0.7) translateY(14px); }
+  62%  { opacity: 1; transform: scale(1.06) translateY(0); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.vv-splash-pop { animation: vv-splash-pop 0.9s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Staggered fade-up for wordmark / bar / label */
+@keyframes vv-splash-rise {
+  0%   { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.vv-splash-rise { animation: vv-splash-rise 0.7s ease-out both; }
+
+/* Verified-seal ring sweeping around the logo (loader speed) */
+@keyframes vv-loader-ring {
+  to { transform: rotate(360deg); }
+}
+.animate-loader-ring { animation: vv-loader-ring 1.7s linear infinite; }
+
+/* Indeterminate progress sweep inside the track */
+@keyframes vv-splash-bar {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(280%); }
+}
+.animate-splash-bar { animation: vv-splash-bar 1.5s cubic-bezier(0.45, 0, 0.25, 1) infinite; }
+
+/* Gentle breathing for the status label */
+@keyframes vv-soft-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+.animate-soft-pulse { animation: vv-soft-pulse 2.2s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .animate-marquee,
   .animate-float,
@@ -283,7 +319,12 @@
   .animate-breathe,
   .animate-pulse-dot,
   .animate-gradient-text,
-  .animate-spin-slow {
+  .animate-spin-slow,
+  .animate-loader-ring,
+  .animate-splash-bar,
+  .animate-soft-pulse,
+  .vv-splash-pop,
+  .vv-splash-rise {
     animation: none;
   }
 }

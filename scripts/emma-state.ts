@@ -1,0 +1,10 @@
+import { PrismaClient } from "@prisma/client";
+const db = new PrismaClient();
+const emma = await db.checklistAccount.findUnique({ where: { email: "emma.chen@example.com" } });
+console.log("emma id:", emma?.id);
+const reqs = await db.checklistRequest.findMany({ where: { accountId: emma!.id } });
+console.log("requests:", reqs.map((x) => ({ id: x.id, status: x.status, specialty: x.specialty })));
+const comps = await db.checklistCompletion.findMany({ where: { accountId: emma!.id } });
+console.log("completions:", comps.map((x) => ({ id: x.id, specialty: x.specialty, addl: x.additional !== "[]", att: !!x.attestation })));
+console.log("extraQ count:", await db.checklistExtraQuestion.count());
+await db.$disconnect();

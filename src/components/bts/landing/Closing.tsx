@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { ShieldCheck, ScanFace, Database, UserRound, LayoutDashboard, ChevronRight } from "lucide-react";
 import { SectionHeading, GlowCard, GlowButton, AnimatedCounter, staggerParent, fadeUp } from "./Primitives";
+import { VaultMark } from "../brand";
 
 const TRUST = [
   {
@@ -26,10 +28,10 @@ const TRUST = [
 ];
 
 const METRICS = [
-  { to: 86, suffix: "%", label: "Reference completion rate", note: "target >70% for the pilot" },
-  { to: 48, prefix: "<", suffix: "h", label: "Median two-reference turnaround", note: "vs. 2–3 weeks on paper" },
-  { to: 4, suffix: " min", label: "Average manager completion", note: "one question per screen" },
-  { to: 10, label: "Specialty skills templates", note: "Med-Surg + ICU live today" },
+  { to: 86, suffix: "%", label: "Reference completion rate", note: "chased automatically with day 2/5/9 reminders" },
+  { to: 48, prefix: "<", suffix: "h", label: "Target two-reference turnaround", note: "vs. 2–3 weeks on paper" },
+  { to: 4, suffix: " min", label: "Average referee completion", note: "one question per screen, any phone" },
+  { to: 55, suffix: "+", label: "Specialty skills templates", note: "across 10 healthcare disciplines" },
 ];
 
 export function Trust() {
@@ -104,7 +106,7 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
         <div aria-hidden className="bg-grid-dark absolute inset-0 opacity-30" />
 
         <div className="relative">
-          <p className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-verify-green">Phase 1 · pilot open</p>
+          <p className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-verify-green">Live · open for agencies and clinicians</p>
           <h2 className="mx-auto mt-4 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-5xl sm:leading-[1.1]">
             Ready to retire the <span className="animate-gradient-text bg-gradient-to-r from-[#7fd4de] via-verify-green to-verify-mint bg-clip-text text-transparent">paper reference form?</span>
           </h2>
@@ -126,7 +128,7 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
             </button>
           </p>
           <p className="mt-6 font-mono text-[10px] uppercase tracking-[0.2em] text-[#7fa39d]">
-            Sandbox build · multi-tenant ready · Zipvault-compatible notifications
+            Email-verified accounts · Single-use secure links · Audit-ready records
           </p>
         </div>
       </motion.div>
@@ -134,14 +136,68 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
   );
 }
 
-export function Footer({ agencyName }: { agencyName: string }) {
+export function Footer({ agencyName, onRole }: { agencyName: string; onRole?: (r: "candidate" | "recruiter" | "checklist") => void }) {
+  const year = new Date().getFullYear();
+  const portals: { label: string; role: "candidate" | "recruiter" | "checklist"; hint: string }[] = [
+    { label: "Candidate sign in", role: "checklist", hint: "Skills checklists & references" },
+    { label: "Recruiter sign in", role: "recruiter", hint: "Agency dashboard & pipeline" },
+    { label: "Build my references", role: "candidate", hint: "Start the reference flow" },
+  ];
   return (
     <footer className="mt-auto border-t border-vault-border bg-white/70">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-[#7d938e] sm:flex-row sm:px-6">
-        <span>
-          © {new Date().getFullYear()} {agencyName} · Healthcare Skill Checklist — sandbox build
-        </span>
-        <span className="font-mono text-[10px] uppercase tracking-wider">References, verified. Skills, proven.</span>
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-[1.2fr_1fr_1fr]">
+        {/* brand */}
+        <div>
+          <div className="flex items-center gap-2.5">
+            <VaultMark size={34} />
+            <span className="text-sm font-semibold tracking-tight text-jade-ink">
+              Vault<span className="text-verify-ink">Verify</span>
+            </span>
+          </div>
+          <p className="mt-3 max-w-xs text-xs leading-relaxed text-jade-muted">
+            Verified references and skills checklists for healthcare hiring — built for {agencyName === "VaultVerify" ? "agencies, candidates and referees" : agencyName}.
+          </p>
+          <p className="mt-4 font-mono text-[10px] uppercase tracking-wider text-[#7d938e]">References, verified. Skills, proven.</p>
+        </div>
+
+        {/* portals */}
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-verify-ink/80">Portal</p>
+          <ul className="mt-3 space-y-2.5">
+            {onRole
+              ? portals.map((p) => (
+                  <li key={p.label}>
+                    <button type="button" onClick={() => onRole(p.role)} className="text-left">
+                      <span className="block text-xs font-medium text-jade-ink hover:text-verify-ink">{p.label}</span>
+                      <span className="block text-[11px] text-[#7d938e]">{p.hint}</span>
+                    </button>
+                  </li>
+                ))
+              : null}
+          </ul>
+        </div>
+
+        {/* legal + contact */}
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-verify-ink/80">Legal &amp; contact</p>
+          <ul className="mt-3 space-y-2.5 text-xs">
+            <li>
+              <Link href="/terms" className="font-medium text-jade-ink hover:text-verify-ink">Terms &amp; Conditions</Link>
+            </li>
+            <li>
+              <Link href="/privacy" className="font-medium text-jade-ink hover:text-verify-ink">Privacy Policy</Link>
+            </li>
+            <li>
+              <a href="mailto:myzipvault@gmail.com" className="text-jade-muted hover:text-jade-ink">myzipvault@gmail.com</a>
+            </li>
+          </ul>
+        </div>
+      </div>
+      <div className="border-t border-vault-border/60">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-5 text-xs text-[#7d938e] sm:flex-row sm:px-6">
+          <span>© {year} {agencyName}. All rights reserved.</span>
+          <span className="font-mono text-[10px] uppercase tracking-wider">Consent-gated · fraud-checked · audit-ready</span>
+        </div>
       </div>
     </footer>
   );

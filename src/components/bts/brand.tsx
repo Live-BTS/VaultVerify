@@ -114,3 +114,36 @@ export function Spinner({ label }: { label?: string }) {
     </div>
   );
 }
+
+// ── Splash / boot loader — animated logo, not a static placement ──
+// Layers: radar pulse rings behind → conic verify-green ring sweeping around
+// → logo drops in with a springy overshoot → wordmark, indeterminate progress
+// bar and status label rise in staggered. All CSS, honours reduced motion.
+export function SplashLoader({ label = "Preparing the workspace…" }: { label?: string }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#f4f9f5] px-6">
+      <div className="relative flex h-40 w-40 items-center justify-center">
+        {/* radar pulses radiating outward */}
+        <span className="absolute inset-0 animate-radar rounded-full border border-verify-green/35" aria-hidden="true" />
+        <span className="absolute inset-0 animate-radar rounded-full border border-vault-teal/20 [animation-delay:1.3s]" aria-hidden="true" />
+        {/* conic verified-seal ring sweeping around the mark */}
+        <span
+          className="absolute h-28 w-28 animate-loader-ring rounded-full"
+          style={{ background: "conic-gradient(from 0deg, rgba(124,193,24,0) 0deg, rgba(124,193,24,0.12) 130deg, #7cc118 305deg, #03363d 360deg)" }}
+          aria-hidden="true"
+        />
+        <span className="absolute h-[6.5rem] w-[6.5rem] rounded-full bg-[#f4f9f5]" aria-hidden="true" />
+        {/* the logo itself */}
+        <VaultMark size={52} className="vv-splash-pop relative" />
+      </div>
+      <div className="vv-splash-rise mt-7 flex items-baseline text-xl font-semibold tracking-tight [animation-delay:0.15s]">
+        <span className="text-jade-ink">Vault</span>
+        <span className="text-verify-deep">Verify</span>
+      </div>
+      <div className="vv-splash-rise mt-5 h-1 w-44 overflow-hidden rounded-full bg-vault-teal/10 [animation-delay:0.25s]" aria-hidden="true">
+        <span className="animate-splash-bar block h-full w-2/5 rounded-full bg-gradient-to-r from-vault-teal via-verify-green to-verify-mint" />
+      </div>
+      <p className="vv-splash-rise animate-soft-pulse mt-4 text-sm text-jade-muted [animation-delay:0.35s]">{label}</p>
+    </div>
+  );
+}

@@ -338,7 +338,7 @@ export function Features() {
               <h3 className="text-lg font-semibold text-jade-ink">The two-party flow, finally digital</h3>
             </div>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-jade-muted">
-              The nurse builds a portable profile; managers answer ten anchored questions — one per screen — on any phone. No logins, no fax, no chasing signatures.
+              The nurse builds a portable profile; referees answer anchored questions — one per screen — on any phone. No logins, no fax, no chasing signatures.
             </p>
             <PipelineVisual />
           </GlowCard>
@@ -389,10 +389,10 @@ export function Features() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-verify-green/25 bg-verify-green/10 text-verify-ink">
                 <BadgeCheck className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-jade-ink">10 specialty templates</h3>
+              <h3 className="text-lg font-semibold text-jade-ink">A living checklist library</h3>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-jade-muted">
-              Med-Surg and ICU are live today — eight more ship with the pilot, each with high-risk skills flagged for confirmation.
+              55+ specialty sets across ten disciplines — nurses request from the library, complete once, and stay verified for a year. High-risk skills are flagged for manager confirmation.
             </p>
             <SpecialtiesVisual />
           </GlowCard>
@@ -402,10 +402,10 @@ export function Features() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#2f8d99]/30 bg-[#2f8d99]/10 text-[#2f8d99]">
                 <FileText className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-jade-ink">Branded packets, zero assembly</h3>
+              <h3 className="text-lg font-semibold text-jade-ink">Reports you own — and share</h3>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-jade-muted">
-              Every completion auto-generates a VaultVerify-branded PDF — ratings, remarks, skills badges and e-signature included.
+              Every completion auto-generates a branded PDF, and candidates share results through secure links — one-time or 14-day, with view counts and instant revoke.
             </p>
             <PacketVisual />
           </GlowCard>
