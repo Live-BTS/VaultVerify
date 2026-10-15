@@ -858,7 +858,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
               <div>
                 <h2 className="text-base font-semibold text-jade-ink">Candidate checklist requests</h2>
                 <p className="mt-1 text-sm text-jade-muted">
-                  Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for a year. Approved requests can be revoked; any completed report becomes invalid immediately.
+                  Candidates sign up and ask for a checklist from the library. Approve it and the checklist opens in their portal — completed once, valid for 30 days. Approved requests can be revoked; any completed report becomes invalid immediately.
                 </p>
               </div>
 

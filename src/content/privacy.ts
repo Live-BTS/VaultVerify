@@ -54,7 +54,7 @@ export const PRIVACY: LegalDoc = {
     {
       h: "7. Retention",
       p: [
-        "Account data is kept while your account is active. Verification records — consents, references, signatures, reports and the audit trail behind them — are kept for as long as the resulting reports remain valid (currently one year) and afterwards only where law, dispute resolution or the integrity of already-shared reports requires it.",
+        "Account data is kept while your account is active. Verification records — consents, references, signatures, reports and the audit trail behind them — are kept for as long as the resulting reports remain valid (currently 30 days) and afterwards only where law, dispute resolution or the integrity of already-shared reports requires it.",
         "You can request deletion of your account and personal data at any time; where a record cannot be deleted because of those integrity or legal requirements, we will tell you what is being kept and why.",
       ],
     },

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { recruiterAuthed } from "@/lib/bts/auth";
 import { specialtyLabel, CONSENT_STATEMENT } from "@/lib/bts/checklistShared";
+import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
 import { renderSkillsChecklistPdf, type ChecklistData, type LastPerformed, type Rating } from "@/lib/pdf/skills-checklist-pdf";
 import type { ChecklistCompletion, ChecklistAccount } from "@prisma/client";
 
@@ -89,7 +90,7 @@ function mapChecklistData(
       email: account.email,
       experience: completion.yearsExperience != null ? `${completion.yearsExperience} yr(s)` : "—",
       completedOn: fmtDate(completion.completedAt),
-      validUntil: `${fmtDate(completion.expiresAt)} (1 year)`,
+      validUntil: `${fmtDate(completion.expiresAt)} (${CHECKLIST_VALIDITY_DAYS} days)`,
       source: (completion.source || "") === "RECRUITER" ? "Requested by a recruiter" : "Self-initiated",
     },
     categories,
@@ -101,7 +102,7 @@ function mapChecklistData(
       printedName: att?.printedName || account.name || "",
       signedOn: fmtDate(att?.signedAt ?? completion.completedAt),
     },
-    footerNote: `Self-reported assessment. Completed once by the candidate and valid for 12 months. ${accessClause}`,
+    footerNote: `Self-reported assessment. Completed once by the candidate and valid for ${CHECKLIST_VALIDITY_DAYS} days. ${accessClause}`,
     generatedOn: fmtDate(new Date()),
     sampleNotice: "",
   };

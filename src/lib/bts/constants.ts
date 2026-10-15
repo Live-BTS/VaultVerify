@@ -55,7 +55,8 @@ export const SWAP_PROMPT_DAY = 10;
 export const RAPID_COMPLETION_SECONDS = 60;
 
 // ── Skills Checklist (self-assessment) feature constants ──
-export const CHECKLIST_VALIDITY_DAYS = 365;
+// Completed checklists stay valid for 30 days from completion (product rule).
+export const CHECKLIST_VALIDITY_DAYS = 30;
 export const SHARE_PRESETS = [
   { key: "ONE_TIME", label: "One-time view", days: null as number | null },
   { key: "1", label: "1 day", days: 1 },

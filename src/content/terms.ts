@@ -66,7 +66,7 @@ export const TERMS: LegalDoc = {
       h: "7. Verification scope — what \"verified\" means",
       p: [
         "A skill or statement on VaultVerify is marked \"Manager-verified\" only when a referee — through a single-use link tied to that candidate — has confirmed it in their own response. Everything a candidate enters without such confirmation stays marked \"Self-reported\". This distinction is applied mechanically and is preserved in every report and export.",
-        "VaultVerify verifies the integrity of the process, not the underlying truth. We do not independently investigate referees, we do not contact employers outside the platform, and we do not certify competence. Completed reports are valid for the period shown on them (currently one year from completion) and carry their verification status with them.",
+        "VaultVerify verifies the integrity of the process, not the underlying truth. We do not independently investigate referees, we do not contact employers outside the platform, and we do not certify competence. Completed reports are valid for the period shown on them (currently 30 days from completion) and carry their verification status with them.",
       ],
     },
     {

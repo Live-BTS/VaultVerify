@@ -17,7 +17,7 @@ import { ArrowLeft, ArrowRight, Check, ClipboardList, Download, Eye, Send, UserR
 //         → Discipline (RN, LPN, PT, …) → Specialty (Med-Surg, ICU, …)
 // Step 2: candidate details — Name*, Phone*, Email* are required; anything
 //         else the candidate completes (auto-fetched if they already have
-//         an account). Completed checklists are reusable for 1 year.
+//         an account). Completed checklists are reusable for 30 days.
 
 interface InviteRow {
   id: string; candidateName: string; candidateEmail: string; candidatePhone: string;
@@ -171,7 +171,7 @@ export function RecruiterChecklists({ code, recruiterName }: { code: string; rec
             </div>
             <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
               <p className="font-semibold text-slate-800">{specialtyLabel(specialty)} · {jobTitle} · {profession}</p>
-              <p className="mt-0.5">{selectedSet?.skills.length ?? 0} skill(s) — the candidate completes it once; it stays valid for 1 year.</p>
+              <p className="mt-0.5">{selectedSet?.skills.length ?? 0} skill(s) — the candidate completes it once; it stays valid for 30 days.</p>
               <button type="button" onClick={() => { setStep(1); setSent(null); }} className="mt-1.5 flex items-center gap-1 font-medium text-teal-700 underline"><ArrowLeft className="h-3 w-3" /> Change checklist</button>
             </div>
             {sent ? (

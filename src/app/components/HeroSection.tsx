@@ -104,7 +104,7 @@ function MappingVisual() {
           <div className="h-1.5 w-3/5 rounded-full bg-jade-ink/[0.05] dark:bg-white/[0.05]" />
         </div>
         <p className="mt-2.5 font-mono text-[9px] uppercase tracking-[0.16em] text-jade-muted dark:text-fog">
-          7 skills · 1–4 scale · N/A enabled · valid 1 year
+          7 skills · 1–4 scale · N/A enabled · valid 30 days
         </p>
       </motion.div>
     </div>

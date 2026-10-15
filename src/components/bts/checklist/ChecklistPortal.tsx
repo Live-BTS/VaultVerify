@@ -34,7 +34,7 @@ interface AccountDto extends ProfileData { onboardingComplete: boolean }
 interface MeData { account: AccountDto | null; invites?: InviteDto[]; requests?: RequestDto[]; completions?: CompletionDto[] }
 
 const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-const monthsLeft = (d: string) => Math.max(0, Math.round((new Date(d).getTime() - Date.now()) / (30.4 * 24 * 3600 * 1000)));
+const daysLeft = (d: string) => Math.max(0, Math.ceil((new Date(d).getTime() - Date.now()) / (24 * 3600 * 1000)));
 
 // ── Share dialog ──
 function ShareDialog({ completion, onClose, onCreated }: { completion: CompletionDto; onClose: () => void; onCreated: () => void }) {
@@ -573,7 +573,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
                         <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold",
                           expired ? "border-rose-300 text-rose-600" : "border-verify-green/40 text-verify-ink")}>
                           <CalendarClock className="h-3 w-3" />
-                          {expired ? "Expired — retake to share again" : `Valid for ${monthsLeft(c.expiresAt)} more month(s) · until ${fmt(c.expiresAt)}`}
+                          {expired ? "Expired — retake to share again" : `Valid for ${daysLeft(c.expiresAt)} more day(s) · until ${fmt(c.expiresAt)}`}
                         </span>
                         <span>Completed {fmt(c.completedAt)}</span>
                         <span>· {c.yearsExperience} yr experience · {c.source === "RECRUITER" ? "via recruiter request" : "self-requested"}</span>
@@ -791,7 +791,7 @@ function RequestPanel({ sets, onClose, onRequested }: { sets: CatalogSet[]; onCl
         <div className="flex items-start justify-between">
           <div>
             <h3 className="flex items-center gap-2 text-base font-semibold text-jade-ink"><Plus className="h-4 w-4 text-verify-ink" /> Request a checklist</h3>
-            <p className="mt-1 text-xs text-jade-muted">Pick from the library. A superadmin approves your request, then you complete it once — it stays valid for a year.</p>
+            <p className="mt-1 text-xs text-jade-muted">Pick from the library. A superadmin approves your request, then you complete it once — it stays valid for 30 days.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"><X className="h-4 w-4" /></button>
         </div>

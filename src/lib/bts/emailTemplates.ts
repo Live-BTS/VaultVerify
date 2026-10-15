@@ -195,7 +195,7 @@ export const SYSTEM_TEMPLATES: TemplateSpec[] = [
       ${button("{{setupLink}}", "Open my checklist")}
       ${muted("Or paste this link into your browser:<br>{{setupLink}}")}
       ${hr}
-      ${muted("Complete it once — your checklist stays valid for 1 year and can be shared with any employer.")}`
+      ${muted("Complete it once — your checklist stays valid for 30 days and can be shared with any employer.")}`
     ),
   },
   {

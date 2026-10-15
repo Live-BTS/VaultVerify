@@ -183,7 +183,7 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
             <VaultMark size={40} />
             <div>
               <p className="text-sm font-semibold text-jade-ink">Skills Checklist</p>
-              <p className="text-xs text-jade-muted">Self-assessment · completed once · valid for 1 year</p>
+              <p className="text-xs text-jade-muted">Self-assessment · completed once · valid for 30 days</p>
             </div>
           </div>
           <h1 className="mt-6 text-xl font-semibold text-jade-ink">
@@ -282,7 +282,7 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
                     {effSpec.jobTitle || "RN"} · {set?.label ?? specialtyLabel(effSpec.specialty)} · {Number(years) || 0} yr in specialty
                   </p>
                 </div>
-                <span className="rounded-full bg-verify-green/10 px-3 py-1 text-[11px] font-semibold text-verify-ink">Valid 1 year once submitted</span>
+                <span className="rounded-full bg-verify-green/10 px-3 py-1 text-[11px] font-semibold text-verify-ink">Valid 30 days once submitted</span>
               </div>
               <div className="mt-4 space-y-2 border-t border-vault-border/60 pt-4">
                 <RatingLegend />

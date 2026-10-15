@@ -4,7 +4,7 @@ import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
 
 // ── Idempotent demo seed for the Skills Checklist feature ──
 // Demo candidate: emma.chen@example.com / demo1234
-//  · completed ICU self-assessment (valid 1 year) — ready to share
+//  · completed ICU self-assessment (valid 30 days) — ready to share
 //  · pending request for the GENERAL (Medication Administration) checklist — ready for superadmin approval
 
 export async function seedChecklistDemo() {
