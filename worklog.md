@@ -334,3 +334,19 @@ Work Log:
 
 Stage Summary:
 - Boot/loading screen is now a branded animated logo splash, in-keeping with the site palette; bonus: landing 500 fixed (bad import). Push pending on user's git token — force-with-lease, local is a strict superset of origin/main.
+
+---
+Task ID: PUSH-1
+Agent: Super Z (main)
+Task: User supplied git token (in-chat) — push everything in one go.
+
+Work Log:
+- Pre-push secret scan of the full tree (public repo!): .env (DATABASE_URL w/ prod password) was TRACKED in the sandbox lineage but NEVER pushed; grep confirmed no other secret values (Brevo key only as xkeysib-… doc placeholder; prod probe scripts read env, no hardcoded codes). Note: zipvault2026 admin code is ALREADY public in shipped SuperAdmin.tsx UI (pre-existing) — user should rotate SUPERADMIN_CODE in Vercel.
+- Local build check caught real deploy blockers: node_modules stale (pdfkit missing) → bun install; then bun run build PASS (all routes prerender).
+- Clean push via plumbing: temp-index tree = main's tree minus .env → commit-tree f65d8bd with parent origin/main (44aa0fa) → push = fast-forward 44aa0fa..f65d8bd (no force, GitHub history preserved). Token used once via env credential helper, never stored in config/files.
+- Post-push: fetch + reset main to origin/main (aligned future pushes to normal flow); reset --hard removed tracked .env from disk → RESTORED from old lineage (8189d94) as untracked+ignored file; verified content + ignore status. Working tree clean.
+- GitHub main now = f65d8bd = full current workspace (Index refresh, /terms, /privacy, splash, fixes) minus secrets. Vercel auto-deploy triggered on push.
+
+Stage Summary:
+- PUSHED: f65d8bd on Live-BTS/VaultVerify main (fast-forward). Pushed tree contains NO .env / no hardcoded secrets.
+- USER: revoke the pasted token now (it was shared in chat); watch Vercel deploy; rotate SUPERADMIN_CODE later (public in app UI since earlier commits).
