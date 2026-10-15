@@ -8,10 +8,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useReducedMotion } from "framer-motion";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import {
   RATING_META, RATING_4, RECENCY_META, LAST_PERFORMED, recencyLabel,
-  ATTESTATION_STATEMENTS, type AnswerSummary, type SkillAnswer,
+  ATTESTATION_STATEMENTS, CONSENT_LINKS, type AnswerSummary, type SkillAnswer,
 } from "@/lib/bts/checklistShared";
 import { Eraser } from "lucide-react";
 
@@ -418,6 +419,21 @@ export function AttestationView({ att, fallbackName }: { att: AttestationData | 
             {s}
           </li>
         ))}
+        <li className="flex items-start gap-2 text-xs leading-relaxed text-jade-muted">
+          <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] bg-verify-green text-[9px] font-bold text-white">✓</span>
+          <span>
+            I agree to the{" "}
+            <Link href={CONSENT_LINKS.privacy} target="_blank" rel="noopener noreferrer"
+              className="font-semibold text-verify-ink underline decoration-verify-green/40 underline-offset-2 transition hover:decoration-verify-green">
+              Privacy Policy
+            </Link>{" "}
+            and{" "}
+            <Link href={CONSENT_LINKS.terms} target="_blank" rel="noopener noreferrer"
+              className="font-semibold text-verify-ink underline decoration-verify-green/40 underline-offset-2 transition hover:decoration-verify-green">
+              Terms of Use
+            </Link>.
+          </span>
+        </li>
       </ul>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         <div className="sm:col-span-2">

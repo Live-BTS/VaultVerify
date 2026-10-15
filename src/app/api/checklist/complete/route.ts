@@ -11,7 +11,7 @@ import { LABELS, LAST_PERFORMED } from "@/lib/bts/checklistShared";
 // answers: [{ category, skill, questionType, value, na, lastPerformed }] — every rating row
 //          also records WHEN the skill was last performed (3 | 6 | "6+" | na).
 // additional: [{ id, value }] — the superadmin-managed "Additional questions" snapshot.
-// attestation: { agreed, mode: "draw"|"type"|"upload", signature, printedName }
+// attestation: { agreed, consentAccepted, mode: "draw"|"type"|"upload", signature, printedName }
 
 interface IncomingAnswer { category: string; skill: string; questionType: string; value: number | string | null; na: boolean; lastPerformed?: string }
 
@@ -106,13 +106,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: `Incomplete: ${problems.length} item(s) need attention`, problems: problems.slice(0, 12) }, { status: 400 });
     }
 
-    // ── Attestation — required ──
+    // ── Attestation — required (incl. the Privacy Policy / Terms of Use consent) ──
     const att = body.attestation ?? {};
     const attAgreed = att?.agreed === true;
+    const consentAccepted = att?.consentAccepted === true;
     const attMode = att?.mode === "draw" || att?.mode === "type" || att?.mode === "upload" ? att.mode : null;
     const attSignature = typeof att?.signature === "string" ? att.signature : "";
     const attPrinted = typeof att?.printedName === "string" ? att.printedName.trim().slice(0, 120) : "";
     if (!attAgreed) problems.push("Confirm the candidate attestation");
+    if (!consentAccepted) problems.push("Agree to the Privacy Policy and Terms of Use");
     if (!attMode) problems.push("Choose a signature method (draw, type or upload)");
     if (!attSignature) problems.push("Add your signature");
     else if (attSignature.length > MAX_SIGNATURE_CHARS) problems.push("Signature image is too large — try a smaller scan");
@@ -123,7 +125,7 @@ export async function POST(req: NextRequest) {
     const yearsExperience = Math.max(0, Math.min(60, Number(body.yearsExperience) || 0));
     const now = new Date();
     const expiresAt = new Date(now.getTime() + CHECKLIST_VALIDITY_DAYS * 24 * 60 * 60 * 1000);
-    const attestation = JSON.stringify({ agreed: true, mode: attMode, signature: attSignature, printedName: attPrinted || account.name, signedAt: now.toISOString() });
+    const attestation = JSON.stringify({ agreed: true, consentAccepted: true, mode: attMode, signature: attSignature, printedName: attPrinted || account.name, signedAt: now.toISOString() });
 
     const completion = await db.checklistCompletion.create({
       data: {

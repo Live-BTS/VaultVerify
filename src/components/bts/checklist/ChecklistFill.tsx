@@ -8,11 +8,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useReducedMotion } from "framer-motion";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { RATING_4, RATING_META, ATTESTATION_STATEMENTS, LAST_PERFORMED, specialtyLabel, summarizeAnswers, SIGNATURE_MODES, type SignatureMode, type SkillAnswer } from "@/lib/bts/checklistShared";
+import { RATING_4, RATING_META, ATTESTATION_STATEMENTS, CONSENT_LINKS, LAST_PERFORMED, specialtyLabel, summarizeAnswers, SIGNATURE_MODES, type SignatureMode, type SkillAnswer } from "@/lib/bts/checklistShared";
 import { VaultMark, Spinner } from "../brand";
 import {
   AvgRing, RecentDonut, RecencyStrip, CategoryBars, RatingLegend, RecencyLegend,
@@ -118,6 +119,7 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
 
   // ── Attestation state ──
   const [attAgreed, setAttAgreed] = useState(false);
+  const [consentAgreed, setConsentAgreed] = useState(false);
   const [attMode, setAttMode] = useState<SignatureMode>("draw");
   const [attSignature, setAttSignature] = useState<string | null>(null);
   const [attPrinted, setAttPrinted] = useState("");
@@ -155,7 +157,7 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
         body: JSON.stringify({
           ...effSpec, yearsExperience: Number(years) || 0, answers: payloadAnswers,
           additional: extras.map((q) => ({ id: q.id, value: extraVals[q.id] ?? null })),
-          attestation: { agreed: attAgreed, mode: attMode, signature: attSignature ?? "", printedName: attPrinted },
+          attestation: { agreed: attAgreed, consentAccepted: consentAgreed, mode: attMode, signature: attSignature ?? "", printedName: attPrinted },
         }),
       });
       const d = await res.json();
@@ -244,7 +246,7 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
   // ── Form — report-style flow with live summary panel ──
   const yesNoMissing = extras.filter((q) => q.kind === "YES_NO" && !extraAnswered(q)).length;
   const attReady = attAgreed && !!attSignature;
-  const canSubmit = answeredCount >= total && yesNoMissing === 0 && attReady;
+  const canSubmit = answeredCount >= total && yesNoMissing === 0 && attReady && consentAgreed;
   const today = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
   return (
@@ -410,7 +412,7 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
                 <label className="mt-4 flex cursor-pointer items-start gap-2.5">
                   <input type="checkbox" checked={attAgreed} onChange={(e) => setAttAgreed(e.target.checked)}
                     className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-vault-border accent-[#7cc118]" />
-                  <span className="text-xs font-semibold text-jade-ink">I confirm the statements below and sign this checklist electronically.</span>
+                  <span className="text-xs font-semibold text-jade-ink">I confirm the statement below and sign this checklist electronically.</span>
                 </label>
                 <ul className="mt-2.5 space-y-1.5">
                   {ATTESTATION_STATEMENTS.map((s, i) => (
@@ -420,6 +422,23 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
                     </li>
                   ))}
                 </ul>
+
+                <label className="mt-4 flex cursor-pointer items-start gap-2.5 border-t border-vault-border/60 pt-3.5">
+                  <input type="checkbox" checked={consentAgreed} onChange={(e) => setConsentAgreed(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-vault-border accent-[#7cc118]" />
+                  <span className="text-xs leading-relaxed text-jade-muted">
+                    I agree to the{" "}
+                    <Link href={CONSENT_LINKS.privacy} target="_blank" rel="noopener noreferrer"
+                      className="font-semibold text-verify-ink underline decoration-verify-green/40 underline-offset-2 transition hover:decoration-verify-green">
+                      Privacy Policy
+                    </Link>{" "}
+                    and{" "}
+                    <Link href={CONSENT_LINKS.terms} target="_blank" rel="noopener noreferrer"
+                      className="font-semibold text-verify-ink underline decoration-verify-green/40 underline-offset-2 transition hover:decoration-verify-green">
+                      Terms of Use
+                    </Link>.
+                  </span>
+                </label>
 
                 <div className="mt-5 flex gap-1.5 rounded-xl bg-[#f0f6f2] p-1">
                   {SIGNATURE_MODES.map((m) => {
@@ -552,6 +571,7 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
                 {answeredCount < total && <span>{total - answeredCount} skill item(s) left</span>}
                 {yesNoMissing > 0 && <span>{yesNoMissing} Yes/No question(s) left</span>}
                 {!attAgreed && <span>confirm the attestation</span>}
+                {!consentAgreed && <span>agree to the Privacy Policy and Terms of Use</span>}
                 {!attSignature && <span>add your signature</span>}
               </span>
             ) : (

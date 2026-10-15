@@ -378,3 +378,25 @@ Work Log:
 
 Stage Summary:
 - BRIEF-CHATGPT-1 deliverable now 100% English (placeholders like [Legal entity name], [Governing law jurisdiction]). STANDING RULE for all future turns and deliverables: English only — no CJK glyphs, no CJK punctuation anywhere user-visible. Conversation language: English only.
+
+---
+Task ID: CHECKLIST-CONSENT-2
+Agent: Super Z (main agent)
+Task: User-approved checklist change — remove the old sharing/verification consent sentence at checklist submission and replace it with a single required checkbox "I agree to the Privacy Policy and Terms of Use." with /privacy and /terms as hyperlinks.
+
+Work Log:
+- Located the old sentence in 2 data sources: ATTESTATION_STATEMENTS[1] (src/lib/bts/checklistShared.ts) and the PDF route statements array (src/app/api/checklist/pdf/route.ts); rendered by ChecklistFill.tsx (fill UI) and ReportBits.tsx AttestationView (report/share view).
+- checklistShared.ts: trimmed ATTESTATION_STATEMENTS to the honesty statement only; added CONSENT_STATEMENT + CONSENT_LINKS ({privacy:"/privacy", terms:"/terms"}) as single source of wording.
+- ChecklistFill.tsx: added consentAgreed state + a second checkbox row under the attestation statement (Privacy Policy / Terms of Use as next/link, target _blank); canSubmit now requires consent; sticky footer shows "agree to the Privacy Policy and Terms of Use" hint; payload sends attestation.consentAccepted.
+- api/checklist/complete/route.ts: server-side enforcement (problems.push "Agree to the Privacy Policy and Terms of Use") + stores consentAccepted:true in the attestation JSON.
+- api/checklist/pdf/route.ts: statements[1] now uses CONSENT_STATEMENT (PDF shows the new wording).
+- ReportBits.tsx AttestationView: consent line with ✓ badge + working /privacy and /terms links.
+- ENVIRONMENT REPAIR: prisma/schema.prisma datasource was committed as "postgresql" while the environment is SQLite (.env file: URL) — init db:push failed and the dev server could not start (HTTP 000). Flipped provider to "sqlite" (schema has no enums/Json/natives — fully compatible), ran db:push (in sync, no data loss), regenerated client, restarted dev server (200 OK).
+- Browser verification (agent-browser, demo account emma.chen@example.com via seeded creds): old sentence absent from fill form; consent checkbox present with correct hrefs (/privacy, /terms, target _blank); with everything filled except consent -> Submit disabled + footer hint; checking consent enables Submit; real end-to-end submit of a new approved MEDSURG request succeeded; DB attestation JSON shows consentAccepted:true; report view shows consent line with links; PDF contains "I agree to the Privacy Policy and Terms of Use." and 0 occurrences of the old sentence; / /privacy /terms all 200; no console errors (one pre-existing framer-motion container warning).
+- Lint: src/ clean; only pre-existing errors are require() imports in scripts/vv-brief-*.js docx generators (unrelated to the app).
+- Test helpers saved: scripts/approve-demo-request.ts, scripts/verify-demo-account.ts, scripts/new-test-request.ts, scripts/check-attestation.ts; evidence screenshot download/consent-checkbox-report-view.png.
+
+Stage Summary:
+- The checklist consent flow now matches the locked product decision: a single "I agree to the Privacy Policy and Terms of Use." checkbox (hyperlinked, required, enforced server-side, recorded on the completion). Sharing/verification substance remains only in the Terms & Conditions per the brief (D1 clause 6).
+- 5 app files changed; schema.prisma datasource repaired to sqlite. Old consent sentence removed everywhere (fill UI, report view, share view, PDF).
+- STILL QUEUED awaiting user approval: (a) CHECKLIST_VALIDITY_DAYS 365 -> 30 (UI currently says "12 more months", PDF says "1 year"); (b) landing-page copy rewrite per brief D3 (still shows 48-hour/fraud-radar positioning); (c) /terms and /privacy full legal text once ChatGPT drafts arrive; (d) SUPERADMIN_CODE rotation.

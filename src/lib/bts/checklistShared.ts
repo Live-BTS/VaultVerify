@@ -76,11 +76,16 @@ export const DEFAULT_EXTRA_QUESTIONS = [
   { kind: "TEXT", prompt: "Add any extra certifications, training or notes the recruiter should know about.", placeholder: "Certifications, workshops, preceptorship, anything worth highlighting", sortOrder: 60 },
 ] as const;
 
-// Attestation statements (candidate signs before the checklist is shared)
+// Attestation statement (candidate confirms before the checklist can be submitted)
 export const ATTESTATION_STATEMENTS = [
   "I confirm that the ratings above are my own and reflect my real experience. I understand that inaccurate information may affect my eligibility for placement.",
-  "I agree that VaultVerify may share this self-assessment with the recruiters and employers I authorize, and that it may be verified against my references.",
 ] as const;
+
+// Privacy Policy / Terms of Use consent — a separate required checkbox at submit time.
+// In the UI, "Privacy Policy" and "Terms of Use" are hyperlinks to /privacy and /terms.
+// Sharing, verification and recipient rules live in the Terms of Use, not in this consent.
+export const CONSENT_STATEMENT = "I agree to the Privacy Policy and Terms of Use.";
+export const CONSENT_LINKS = { privacy: "/privacy", terms: "/terms" } as const;
 
 export const SIGNATURE_MODES = [
   { key: "draw", label: "Draw" },

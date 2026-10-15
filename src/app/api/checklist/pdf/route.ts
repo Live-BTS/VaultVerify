@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { recruiterAuthed } from "@/lib/bts/auth";
-import { specialtyLabel } from "@/lib/bts/checklistShared";
+import { specialtyLabel, CONSENT_STATEMENT } from "@/lib/bts/checklistShared";
 import { renderSkillsChecklistPdf, type ChecklistData, type LastPerformed, type Rating } from "@/lib/pdf/skills-checklist-pdf";
 import type { ChecklistCompletion, ChecklistAccount } from "@prisma/client";
 
@@ -70,11 +70,11 @@ function mapChecklistData(
     });
   }
 
-  // Attestation: the app captures one agreement covering both approved statements.
+  // Attestation: the app captures the honesty statement + the Privacy Policy / Terms of Use consent.
   // signature: type mode stores plain text; draw/upload store a data-URL image.
   const statements = [
     "I confirm that the ratings above are my own and reflect my real experience. I understand that inaccurate information may affect my eligibility for placement.",
-    "I agree that VaultVerify may share this self-assessment with the recruiters and employers I authorize, and that it may be verified against my references.",
+    CONSENT_STATEMENT,
   ];
   const sig = att?.signature ?? "";
   const isImage = sig.startsWith("data:image");
