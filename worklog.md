@@ -438,3 +438,21 @@ Stage Summary:
 - GitHub Live-BTS/VaultVerify main is now at 5fb48af — consent checkbox flow and 30-day validity enforcement are on the remote; Vercel (GitHub-integrated) will auto-deploy this SHA.
 - Token persisted sandbox-side for future pushes; advised the user to rotate/revoke it when convenient since it passed through chat.
 - Remaining queued work unchanged: landing-copy rewrite (48-hour/fraud-radar), real /terms + /privacy legal text from ChatGPT drafts, SUPERADMIN_CODE rotation.
+
+---
+Task ID: UXPLAN-OPTION2-1
+Agent: Super Z (main agent)
+Task: Option 2 — produce VAULTVERIFY_PRODUCT_UX_PLAN.md (planning/analysis ONLY; explicitly no code/DB/config/commit/deploy changes).
+
+Work Log:
+- Viewed the 3 uploaded images: all decorative stock photos (nurse at laptop, recruiter with candidate-profile tablet, clinician with paper questionnaire) — treated as mood references, not wireframes; noted in the plan.
+- Read-only evidence pass (grep/read/browser): mapped the SPA view switcher (page.tsx:86,237-266), 28 Prisma models, all API routes + auth models, both reference mechanisms (legacy Phase-1 pipeline vs checklist-collected), SuperAdmin's 11 sections, share enforcement states, empty/loading/error copy with line numbers.
+- Live read-only verification 2026-10-16: homepage claims (Hero.tsx:82 "48 hours", Features.tsx:378 "fraud radar"), /terms /privacy 30-day wording, candidate portal tabs/badges, PDF text, and GET /api/checklist/reference → HTTP 500 (CollectedReference model absent from schema; CollectedRefsPanel/CollectedRefForm unmounted → broken+orphaned feature).
+- Key findings baked into the plan: P0 unauthenticated GET /api/candidate?email= (route.ts:23-49) exposing reference pipeline + tokens + callback codes; P0 verification-language overclaims incl. ShareView.tsx:265 "verified against" and layout.tsx meta "55+ template checklist library" (actual: 5 sets / 55 skills, DB-verified); P0 shared RECRUITER_CODE agency-wide pipeline exposing referee identities (api/recruiter/route.ts:11,24-31); SkillVerification model dead (0 API uses) while skillsVerified flag is written by referee flow (reference/[token]/route.ts:268) and shown as "Skills verified" (ReferencesPanel.tsx:248); no checklist draft/resume model exists; static catalog ~21 realistic combos vs 190+ target.
+- Wrote VAULTVERIFY_PRODUCT_UX_PLAN.md at repo root (552 lines): executive summary; current-state inventory w/ verified-vs-unverified matrix + citations; candidate/recruiter/referee/admin journeys; proposed nav (4-concept structure matching the brief: Skills Checklist / References / My Reports / Sharing & Consent) + 5 text wireframes; checklist/reference/report-PDF/consent UX recommendation tables; homepage corrections table (7 items w/ file:line evidence) + proposed copy labeled RECOMMENDATION; accessibility review; P0-P3 priorities; backend dependencies; acceptance criteria; 7 product-owner questions; final summary + exact files for a future implementation phase.
+- Stop conditions respected: git status shows ONLY the untracked plan file — no application files modified, nothing committed or pushed.
+
+Stage Summary:
+- Deliverable: /home/z/my-project/VAULTVERIFY_PRODUCT_UX_PLAN.md (uncommitted, for product-owner review).
+- Awaiting PO decisions: Section 17 questions (account unification, referee skills-flag fate, recruiter pipeline consent model, collected-references repair-or-remove, catalog wording, email-verification gating, expired-report vs expired-link UX).
+- Option 1 remains pending pending the technical audit review, per the user's framing.
