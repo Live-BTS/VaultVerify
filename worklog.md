@@ -476,3 +476,42 @@ Stage Summary:
 - Deliverable: /home/z/my-project/VAULTVERIFY_PRODUCT_UX_PLAN.md Revision 2 (669 lines, ~10.8k words) - fully aligned to confirmed preferences; all seven Section 17 owner questions remain open.
 - Key new evidence: Features.tsx:395 stale "verified for a year" claim (P0 copy), catalog live-falsified homepage numbers, audit-row-writing GET endpoints documented (why live E2E was not run).
 - Awaiting PO: Section 17 answers + Phase 0-4 approval; Option 1 technical audit still pending per user framing.
+
+---
+Task ID: IMPL-PHASE1-B1
+Agent: Super Z (main agent)
+Task: Implementation Phase 1, Batch 1 - copy-truth sweep. PO approved all seven Section 17 decisions (Q1-Q7) with conditions: small reviewable batches, no destructive migrations, affected files + DB implications + acceptance criteria before each batch, NO push/deploy until explicit delivery approval.
+
+PO decisions recorded: Q1 one account YES (non-destructive); Q2 rename "Skills verified" -> "Confirmed by referee", reference reports only; Q3 recruiters see only explicitly shared reports, audit access paths first, preserve legit admin access; Q4 collected-references DEFER deletion (trace + document + recommend first); Q5 honest catalog wording after verifying counts; Q6 email verification YES as intended policy (inspect first); Q7 distinguish expired report vs expired/revoked link.
+
+Work Log:
+- Batch 1 scope presented: pure copy, zero DB impact. Files: layout.tsx, Hero.tsx, Features.tsx, Closing.tsx, HowItWorks.tsx, LegalShell.tsx, ShareView.tsx, ReferencesPanel.tsx, ReferenceShareView.tsx, ControlledSharingPanel.tsx, skills-checklist-pdf.ts (11 files after HowItWorks found via K9 gate).
+- TS baseline captured pre-edit: 46 errors. Applied edits: hero h1/subhead/eyebrow/stat chips/CTA/mock chip; Features skills+fraud+library cards + mock chip labels; Closing 4 strings; LegalShell footer tagline; HowItWorks "The signed record lands"/"Referee-paced"/sub; layout title/description/keywords/OG; ShareView "mapped to"; ReferencesPanel Q2 badge rename + 3 strings; ReferenceShareView header label; ControlledSharingPanel revoke confirm hint + toast + footer (11.3 keep-copies language); PDF header tagline + page-1 stamp "Self-assessed - not independently verified".
+- Regression: tsc 46=46 (zero new); K9 claim-family grep CLEAN on all touched surfaces; homepage browser-verified (new copy present, "FRAUD RADAR"/"48 HOURS" absent); portal login smoke OK (demo emma.chen); badge rename source-verified (badge not rendered for emma's data states). Note: GET share resolve increments viewCount/consumes one-time links, so ShareView was NOT live-called (write-avoidance).
+- Deferred claim-family hits documented in 8 files: terms.ts (LEGAL COPY - needs explicit PO approval), emailTemplates.ts (own copy pass), RecruiterChecklists.tsx (Batch 2), page.tsx, seed.ts (demo data), brand.tsx + HeroSection.tsx (dead code A1), CollectedRefForm.tsx (Q4 orphan).
+- Committed LOCALLY as a047d81 (12 files, +45/-41). NOT pushed - awaiting PO review of the batch per delivery instruction.
+
+Stage Summary:
+- Batch 1 complete and committed locally; user reviews before any push.
+- Next: Batch 2 = Q3 access-path audit (read-only) THEN session-gate /api/candidate + recruiter least-privilege; Batch 3 = Q4 trace/report; Batch 4 = Q6 inspect/document; Batch 5 = Q7 verify/adjust.
+- PO actions flagged: SUPERADMIN_CODE rotation (Vercel + sandbox .env) is a user-side ops step; terms.ts legal wording alignment awaits explicit approval.
+
+---
+Task ID: DELIVERY-B1
+Agent: Super Z (main agent)
+Task: PO-ordered read-only pre-push review of a047d81, then PO-approved security-first delivery of Batch 1.
+
+Work Log:
+- Pre-push review (no code/DB changes): full diff audit — 11 src files within Batch 1 scope; unexpected db/custom.db blob flagged (F1). 30-day validity re-verified in logic: constants.ts:59 = 30; complete/route.ts:127 computes expiry; share/route.ts:20 rejects checklist_expired (403); PDF prints "(30 days)" (pdf/route.ts:93,105). Remaining "365" hits are share-LINK duration caps only — not report validity.
+- PDF stamp verified in an ACTUAL generated PDF via the real renderer (scripts/review-pdf-stamp.ts, route-mirroring fixture, zero DB access): stamp "Self-assessed — not independently verified" top-right of page-1 dark header, high contrast, readable; page-2 slim header stamp-free (plan section 396 page-1 scope). Evidence: download/batch1-pdf-stamp-review.pdf.
+- Wording verified against server truth: revoked -> 404 (share/route.ts:17); recipient message ShareView.tsx:196 contains the quoted phrase; revoke copy matches plan section 11.3. "Confirmed by referee" badge only on reference rows with referee skillsVerified=true; no "Skills verified" strings remain in live code.
+- Regression rerun: tsc 46=46 baseline (zero new; skills-checklist-pdf.ts:609 error pre-existing, unrelated lines); K9 claim-family grep clean on touched surfaces; remaining hits confined to 8 documented deferred files. Browser smoke skipped (writes DB rows) to honor no-DB-change constraint.
+- Findings: F1 = db/custom.db blob in commit beyond presented scope; F2 = brand.tsx SkillBadge is LIVE (RecruiterDashboard.tsx:494, CandidateDashboard.tsx:183), earlier note misclassified it as dead code — "Verified" chip + "Manager-verified by reference" tooltip remain (Batch 2); F3 = ReferencesPanel.tsx:165 "VaultVerify verifies your experience and capabilities…" verb-form overclaim missed by K9 noun gate (Batch 2).
+- PO approved push ("keep security in mind"): reworked history — a047d81 -> e62049a with IDENTICAL 11-file src diff (+45/-41), db/custom.db blob EXCLUDED (security-first: newest session/audit/token rows stay out of remote history); 6a2fde7 worklog record folded into this entry. Verified: git diff a047d81 HEAD = db blob + worklog only; src tree identical to reviewed revision.
+- Security sweep of push content: 12 files, no .env/credentials; zero NEW secret values (cmusu5v5…/zipvault2026 pre-exist on origin in worklog history + shipped SuperAdmin.tsx — rotation still pending, user-side); sandbox mode-bit noise (100644->100755, content-identical) normalized.
+- PUSH BLOCKED: sandbox recycled since last push — ~/.git-credentials and credential.helper gone; no GH token in env/gh config/netrc. Awaiting fresh PAT (fine-grained, Contents:R/W on Live-BTS/VaultVerify) to configure credential store (chmod 600, outside repo) and push e62049a + this entry.
+
+Stage Summary:
+- Batch 1 is reworked, review-equivalent, and committed LOCALLY as e62049a (+ this worklog entry); NOT on origin — no deployment triggered.
+- Batch 2 queue: F2 brand.tsx SkillBadge rename; F3 ReferencesPanel.tsx:165 verb fix; RecruiterChecklists.tsx "reusable for a year"; then Q3 access-path audit (read-only) -> session-gate /api/candidate + recruiter least-privilege.
+- PO ops reminders: rotate SUPERADMIN_CODE (public in shipped UI since earlier commits); consider untracking db/custom.db (A2) as its own approved batch.
