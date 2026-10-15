@@ -456,3 +456,23 @@ Stage Summary:
 - Deliverable: /home/z/my-project/VAULTVERIFY_PRODUCT_UX_PLAN.md (uncommitted, for product-owner review).
 - Awaiting PO decisions: Section 17 questions (account unification, referee skills-flag fate, recruiter pipeline consent model, collected-references repair-or-remove, catalog wording, email-verification gating, expired-report vs expired-link UX).
 - Option 1 remains pending pending the technical audit review, per the user's framing.
+
+---
+Task ID: UXPLAN-OPTION2-2
+Agent: Super Z (main agent)
+Task: Option 2 Revision 2 - align VAULTVERIFY_PRODUCT_UX_PLAN.md to the product owner's confirmed preference set (deep-dive, mixed audience, everything scope, moderate ambition, effort matrix, phased roadmap, KPIs, brief references, separated tech-debt appendix, strictest boundary: no code/config/DB/dependency/commit/push changes).
+
+Work Log:
+- Discovered prior session's deliverable already existed (552 lines) plus two platform auto-commits (3fcf0b8, 2f17fbe) containing plan + worklog, LOCAL ONLY; verified remote main still at 5fb48af - nothing pushed, Vercel unaffected. Informed user in summary.
+- Gap analysis vs confirmed preferences: missing effort estimates/matrix, phased roadmap, KPIs/baselines, pattern references, tech-debt appendix, per-item risks.
+- Read-only re-verification of every load-bearing citation: P0-1 (api/candidate/route.ts:23-49 email-only, no session), P0-3 (api/recruiter/route.ts:11,24-31 shared code, agency-wide), share enforcement (share/route.ts:17-20), 30-day rule (constants.ts:59, complete/route.ts:127), dead code (HeroSection 410 lines, CollectedRefsPanel 401 + CollectedRefForm 351, zero importers), SkillVerification zero API refs, CollectedReference zero schema matches. Neither P0 endpoint live-called because both WRITE AuditEvent rows - inspection kept strictly read-only.
+- NEW verified findings 12.1h-12.1j: Hero.tsx:88-91 "Manager-verified or Self-reported" universal-stamp claim; Hero.tsx:111,113 "55+ Checklist templates" + "<48h" chips; Features.tsx:395 "55+ specialty sets across ten disciplines ... stay verified for a year" - STALE 365-DAY CLAIM that survived the 30-day sweep (phrase reads "stay verified").
+- Live catalog verification: GET /api/checklists (pure read, side-effect-free - route read before calling) = 5 sets / 55 skills, all Nursing|RN (ER/GENERAL/ICU/MEDSURG/TELE).
+- DB baselines via read-only SELECT-only Prisma script scripts/metrics-baseline.ts (untracked, not committed): 7 completions, 4 accounts, 4 invites, 6 share links/5 views/1 revoked, 18 ref requests (SENT 7/OPENED 2/IN_PROGRESS 1/COMPLETED 5/FLAGGED 3), 8 responses, 45 notifications, 168 audit events, 55 active templates, 0 recruiter accounts.
+- Applied 8 additive edits to the plan: header Revision 2 block; exec-summary note; 12.1 table grown 7->10 rows + method note; 14 item 2 and 16 P0-2 ranges updated to 12.1a-12.1j; new 14.1 priority x effort matrix (21 items, effort S/M/L + risk-if-deferred + dependencies); new 18 Success metrics K1-K10 with baseline requirements + sandbox illustrations; new 19 pattern references (LinkedIn/NMC/DocuSign/Google Drive/Stripe, inspiration-only framing); new 20 phased roadmap (Phase 0 pre-flight, Phase 1 safety-and-truth, Phase 2 one-account, Phase 3 usability/a11y, Phase 4 polish, gates + sequencing rules + consolidated file lists); Appendix A tech debt A1-A8 (security kept in main findings per requirement); Appendix B revision verification log + restated stop condition. Old 18 content folded into 20, nothing removed.
+- Boundary verified post-edit: git status shows ONLY modified plan + untracked script; worklog.md appended per protocol; no commits, no pushes.
+
+Stage Summary:
+- Deliverable: /home/z/my-project/VAULTVERIFY_PRODUCT_UX_PLAN.md Revision 2 (669 lines, ~10.8k words) - fully aligned to confirmed preferences; all seven Section 17 owner questions remain open.
+- Key new evidence: Features.tsx:395 stale "verified for a year" claim (P0 copy), catalog live-falsified homepage numbers, audit-row-writing GET endpoints documented (why live E2E was not run).
+- Awaiting PO: Section 17 answers + Phase 0-4 approval; Option 1 technical audit still pending per user framing.

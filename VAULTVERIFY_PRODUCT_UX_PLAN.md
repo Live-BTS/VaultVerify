@@ -5,6 +5,7 @@
 **Prepared by:** Z.ai coding agent (planning phase — no code, database, configuration, commit, or deployment changes were made)
 **Status:** For product-owner review and approval. All proposed copy, structures, and changes in this document are RECOMMENDATIONS unless explicitly marked as verified existing behavior.
 **Related:** Option 1 remains pending until the Z.ai technical audit results are reviewed. This plan (Option 2) was prepared without waiting for that audit, per instruction.
+**Revision 2 (2026-10-16, same day):** aligned to the product owner's confirmed preference set (deep-dive depth; mixed product-owner/developer audience; everything scope; moderate ambition; tables + journeys + per-screen specs; text specs with ASCII wireframes where they clarify; full copy guide; P0-P3 with effort estimates and a priority/effort matrix; phased roadmap; full-flow read-only inspection; separated technical-debt appendix; KPIs with baseline requirements; brief pattern references; strictest boundary). Added: 14.1 (priority × effort matrix with per-item risks), Section 18 (success metrics and baselines), Section 19 (pattern references), Section 20 (phased implementation roadmap), Appendix A (technical debt, separated), Appendix B (this revision's verification log). Re-verification re-checked every load-bearing citation; three additional homepage copy defects were found and added as 12.1h-12.1j. Revision 1's §18 (completion summary) was folded into Section 20; no findings, recommendations, or open questions were removed.
 
 ---
 
@@ -26,7 +27,7 @@ The good news: the checklist product already implements most of the authoritativ
 The critical problems, in priority order:
 
 1. **P0 — An unauthenticated API returns a candidate's full reference pipeline to anyone who knows their email** (`GET /api/candidate?email=…`, `src/app/api/candidate/route.ts:23-49`): referee feedback, fraud flags, reference tokens/links, and callback codes. This is the legacy product's login-by-email model still wired into production code paths (the checklist portal's References tab calls it, `src/components/bts/checklist/ReferencesPanel.tsx:87`).
-2. **P0 — Verification language overclaims**: homepage promises ("48 hours", "fraud radar on every submission", "Manager-verified badges when a reference confirms"), meta description claims ("55+ template checklist library" — the implemented library is 5 checklist sets / 55 skills), and a share-view line "Self-reported assessment **verified against** the RN skill template" (`src/components/bts/checklist/ShareView.tsx:265`).
+2. **P0 — Verification language overclaims**: homepage promises ("48 hours", "fraud radar on every submission", "Manager-verified badges when a reference confirms"), meta description claims ("55+ template checklist library" — the implemented library is 5 checklist sets / 55 skills), and a share-view line "Self-reported assessment **verified against** the RN skill template" (`src/components/bts/checklist/ShareView.tsx:265`). Revision 2 re-verification expanded the homepage portion of this finding to ten verified items (12.1a–12.1j), including a stale "stay verified for a year" claim (12.1j) that survived the 30-day sweep.
 3. **P0 — Legacy recruiter access model**: a single environment access code (`RECRUITER_CODE`, `src/app/api/recruiter/route.ts:11,24-31`) unlocks the entire agency reference pipeline including referee identities, without per-candidate, per-report consent.
 4. **P1 — A broken, orphaned "collected references" feature**: `GET/POST /api/checklist/reference` returns HTTP 500 at runtime (verified live) because its Prisma model `CollectedReference` does not exist in `prisma/schema.prisma`; its UI (`CollectedRefsPanel.tsx`, `CollectedRefForm.tsx`) is not mounted anywhere.
 
@@ -436,8 +437,13 @@ Existing (verified): presets one-time/1d/7d/14d/custom; view counting; revoke; e
 | 12.1e | "Self-reported assessment **verified against** the RN skill template" | `src/components/bts/checklist/ShareView.tsx:265` | The word "verified" on a recruiter-facing share view implies independent verification. Change to "mapped to the RN skill template". |
 | 12.1f | "Want **manager-verified** references instead?" | `src/components/bts/landing/Closing.tsx:125` | Acceptable ONLY if "manager-verified" stays scoped to the References product; recommend "Manager-verified references" as a References-product label or rephrase to "independent manager references". |
 | 12.1g | "valid 1 year" remnants | `src/app/components/HeroSection.tsx:107` | Already corrected to "valid 30 days" (2026-10-16); component currently unmounted (dead code) — delete or keep corrected. |
+| 12.1h | Hero subhead: "every skill comes back stamped **Manager-verified** or Self-reported" | `src/components/bts/landing/Hero.tsx:88-91` (visible on live homepage) | Presents manager verification as the product's universal outcome — but checklists are never manager-verified; only a referee's optional skills-confirm step (References product) produces a "confirmed" mark (12.3). Same defect class as 12.1c, on the highest-traffic surface. |
+| 12.1i | Stat chips: "**55+** Checklist templates" and "**<48h** Target turnaround" | `src/components/bts/landing/Hero.tsx:111,113` | Catalog claim is false (live-verified 2026-10-16: 5 sets / 55 skills, all Nursing-RN — Section 2.5); turnaround promise is un-substantiatable (referee-dependent). |
+| 12.1j | "**55+ specialty sets across ten disciplines** — nurses request from the library, complete once, and **stay verified for a year**. High-risk skills are flagged for manager confirmation." | `src/components/bts/landing/Features.tsx:395` | Three defects in one sentence: (1) false catalog claim (5 sets, one profession); (2) **stale 365-day validity promise that contradicts the enforced 30-day rule** — a leftover the 2026-10-16 sweep missed because the phrase reads "stay verified", not "valid 1 year"; (3) "flagged for manager confirmation" implies a manager-verification workflow that does not exist for checklists. Highest-urgency homepage copy fix. |
 
 No invented customer counts, success rates, certifications, or integrations were found on the homepage (checked: Hero, Features, HowItWorks, Closing) — good; keep it that way.
+
+Revision 2 method note: the corrections table grew from 7 to 10 verified items because the re-verification pass grepped for claim *families* ("48 hours", "<48h", "55+", "a year", "Manager-verified", "verified against") instead of exact sentences — the reliable approach after any validity or catalog change, and the recommended release-gate check (K9 in Section 18).
 
 ### 12.2 Proposed positioning (ALL COPY BELOW = RECOMMENDATION, pending product-owner approval)
 
@@ -486,7 +492,7 @@ Prioritization rule applied: changes that improve completion rates and prevent p
 
 **P0 — misleading/privacy-critical (fix before any redesign implementation)**
 1. Close `GET /api/candidate?email=` unauthenticated data exposure (`api/candidate/route.ts:23-49`) — require a session; migrate `ReferencesPanel.tsx:87` to it.
-2. Verification-language sweep: 12.1a–12.1e items + revoke-consent copy (11.3) + PDF "SELF-ASSESSED — NOT INDEPENDENTLY VERIFIED" stamp (10).
+2. Verification-language sweep: 12.1a–12.1j items (three added in Revision 2) + revoke-consent copy (11.3) + PDF "SELF-ASSESSED — NOT INDEPENDENTLY VERIFIED" stamp (10).
 3. Product decision + fix on legacy recruiter pipeline access (shared `RECRUITER_CODE` exposing agency-wide data incl. referee identities) — least-privilege replacement.
 4. Rotate exposed `SUPERADMIN_CODE`; plan shared-code retirement (Q3).
 5. Remove or repair the live-500 `/api/checklist/reference` endpoint (Q4).
@@ -499,6 +505,36 @@ Prioritization rule applied: changes that improve completion rates and prevent p
 
 **P3 — cosmetic**
 21. Terminology micro-copy polish; icon unification; dead-code cleanup (`HeroSection.tsx`, orphaned collected-refs UI if removed); PDF layout polish.
+
+### 14.1 Priority × effort matrix with per-item risks (added in Revision 2)
+
+Effort scale: **S** ≤ half day · **M** = 1-3 days · **L** = 3+ days, for one experienced developer at sandbox scale; re-estimate before committing to calendar dates. "Risk if deferred" names the concrete exposure while the item waits. Cross-references: dependencies in Section 15, acceptance criteria in Section 16, owner decisions in Section 17.
+
+| Item (Section 14 #) | Priority | Effort | Risk if deferred | Depends on |
+|---|---|---|---|---|
+| 1. Close `GET /api/candidate?email=` exposure | P0 | S | Any candidate's referee feedback, tokens, and callback codes are readable by anyone who knows the email; a holder can act on referee links | None — ship alone, immediately on approval |
+| 2. Verification-language sweep (12.1a–12.1j, 11.3, PDF stamp) | P0 | M | Ongoing misrepresentation of the product's core promise on every share and page view | None |
+| 3. Legacy recruiter pipeline least-privilege | P0 | M-L | Agency-wide referee identities sit behind one shared code; a single code leak exposes everything | Q3 decision |
+| 4. Rotate `SUPERADMIN_CODE`; plan shared-code retirement | P0 | S | Admin surface accessible to anyone holding a static code | None (ops action) |
+| 5. Remove or repair broken `/api/checklist/reference` 500 | P0 | S (remove) / L (repair) | Live failing endpoint in production paths; silent feature debt | Q4 decision |
+| 6. One account for checklist + references | P1 | L | Checklist-only candidates cannot use references without re-onboarding into a second account model | 15.2 migration plan |
+| 7. Unified My Reports + expired-report recovery | P1 | M | Expired reports dead-end candidates; two report types stay visually mixed | None (UI consolidation) |
+| 8. Unified Sharing & Consent screen | P1 | M | Active access split across two panels; revoke consequences unstated (11.3 pairs here) | None |
+| 9. Recruiter unified "Reports shared with me" + access banner | P1 | M | Recruiters lack one legitimate-access list; scope confusion persists | Partially 6 |
+| 10. Plain-language status pipeline for references | P1 | S | Internal codes (SENT, FLAGGED) leak into candidate-facing UX | None |
+| 11. Admin session-revocation UI | P1 | S | Incident response currently requires code/DB access | None |
+| 12. Email-verification gating decision | P1 | S | An unverified email can carry a named report | Q6 decision |
+| 13. Progress indicator + keyboard rating groups + touch targets + contrast | P2 | M | Completion friction; WCAG exposure | None |
+| 14. Draft autosave | P2 | M-L | Lost work on accidental tab close mid-checklist | 15.1 draft model |
+| 15. Recruiter card layouts on mobile | P2 | S | Tables unusable on phones | None |
+| 16. SuperAdmin email-health + fraud-oversight cards | P2 | M | Operational blind spots | None |
+| 17. Specific error messages; aria-live announcements | P2 | S | Dead-end errors; screen-reader users miss status changes | None |
+| 18. Settings: download data / delete account entries | P2 | M | Published retention commitments (/privacy §7) not actionable in-product | Small API (15) |
+| 19. Referee "save and finish later" | P2 | S | Multi-screen referee form abandoned mid-way | None (client-side) |
+| 20. "Next reminder on <date>" display | P2 | S | Candidates nudge blindly | None |
+| 21. Micro-copy polish; icon unification; PDF layout polish | P3 | M | Cosmetic only | After 1-5 |
+
+**Matrix reading:** every P0 is S-to-M effort — the entire safety-and-truth phase is roughly one week of focused work, and items 1, 2 (the copy portion), and 4 are shippable the same day they are approved. Nothing in the P0 band depends on the account-unification backend work (15.2), so there is no defensible reason to sequence visual or structural work ahead of it.
 
 ---
 
@@ -516,7 +552,7 @@ Prioritization rule applied: changes that improve completion rates and prevent p
 ## 16. Acceptance criteria (per key recommendation)
 
 - **P0-1:** an unauthenticated request to `/api/candidate` returns 401; `ReferencesPanel` loads via session-authenticated endpoint; audit log records access; candidate sees identical data as before.
-- **P0-2:** zero occurrences of the phrases in 12.1a–12.1e in built output (`grep` clean); share view says "mapped to the … template"; PDF carries the self-assessed stamp.
+- **P0-2:** zero occurrences of the phrases in 12.1a–12.1j in built output (`grep` clean); share view says "mapped to the … template"; PDF carries the self-assessed stamp.
 - **P0-3:** no endpoint returns another candidate's data without either (a) that candidate's share token or (b) explicit per-candidate authorization; legacy code path disabled or gated behind a flag with PO sign-off.
 - **P1 My Reports:** candidate sees both report types in one list with type badges; expired report shows recovery CTA; clicking a report opens the correct view.
 - **P1 Sharing & Consent:** single screen lists all links across both products with Active/Expired/Revoked states; revoke shows the cannot-recall-copy warning; states match server truth (spot-check revoked link → 404).
@@ -534,19 +570,100 @@ Prioritization rule applied: changes that improve completion rates and prevent p
 6. **Email verification:** require verified email before checklist completion (recommended) or keep open for the pilot?
 7. **Validity display for shared links:** when a share link outlives the report (possible today), should the share UI show "report expired" distinctly from "link expired" (server already distinguishes: `checklist_expired` vs `expired`)?
 
-## 18. Completion summary — highest-priority recommendations and likely file changes
+## 18. Success metrics and baseline requirements (added in Revision 2)
 
-**Top five, in order:** (1) close the unauthenticated candidate-data endpoint; (2) verification-language sweep across homepage, meta, and share view; (3) least-privilege recruiter access decision + implementation; (4) unified My Reports + Sharing & Consent experience; (5) resolve the broken collected-references feature.
+No product analytics exist today (there is no event tracking anywhere in `src/`), so every metric below starts from a **baseline captured at implementation start**, not from assumption. Measurement sources split into (a) **server-truth aggregates that already exist** — counts, timestamps, `ChecklistShareLink.viewCount`, status transitions, `AuditEvent` rows — and (b) **new instrumentation** that must ship in the same phase as the change it measures. The sandbox figures quoted below are demo-data illustrations (captured 2026-10-16 via a read-only SELECT-only query: 7 checklist completions, 4 checklist accounts, 4 invites, 6 share links with 5 total views, 1 revoked, 18 reference requests of which 8 have responses, 45 notification-log rows) and **must not be treated as product baselines**.
 
-**Exact files a future approved implementation phase would touch (nothing changed in this phase):**
-- `src/app/api/candidate/route.ts`, `src/app/api/candidate/actions/route.ts` (auth + migration)
-- `src/components/bts/checklist/ReferencesPanel.tsx`, `SharingPanel.tsx`, `ControlledSharingPanel.tsx`, `ChecklistPortal.tsx` (unified surfaces)
-- `src/components/bts/checklist/ShareView.tsx`, `src/lib/pdf/skills-checklist-pdf.ts`, `src/app/api/checklist/pdf/route.ts` (language + stamps)
-- `src/components/bts/landing/Hero.tsx`, `Features.tsx`, `Closing.tsx`, `src/app/layout.tsx`, `src/app/components/HeroSection.tsx` (positioning)
-- `src/app/api/recruiter/route.ts`, `src/components/bts/RecruiterDashboard.tsx` (access model)
-- `src/app/api/checklist/reference/route.ts`, `CollectedRefsPanel.tsx`, `CollectedRefForm.tsx`, `prisma/schema.prisma` (repair-or-remove)
-- `src/app/api/auth/route.ts`, `src/lib/bts/checklistAuth.ts` (account unification)
-- `src/components/bts/SuperAdmin.tsx`, `src/lib/bts/platform.ts` (admin additions)
-- `prisma/schema.prisma` + new draft route (autosave, if approved)
+| # | KPI | Definition | Source | Baseline requirement |
+|---|---|---|---|---|
+| K1 | Checklist completion rate | completions ÷ checklists started (request approved or invite claimed → completion row) | new `CHECKLIST_STARTED` event + existing `ChecklistCompletion` | capture from day 1 of any funnel change; target direction ↑ |
+| K2 | Median time-to-complete | start → submit per completion | existing timestamps (completion vs session/invite) | snapshot before any P2 fill-flow change; the 5-10 min design target is the reference band |
+| K3 | Share-link yield | links created ÷ eligible completions; views ÷ links | existing `ChecklistShareLink` (viewCount, createdAt) | snapshot before the Sharing & Consent redesign (item 8) |
+| K4 | One-time link conversion | one-time links viewed ÷ created | existing `viewedAt` | snapshot before any share-dialog copy change |
+| K5 | Referee response ≤ 7 days | responses within 7 days of invite | existing `ReferenceRequest.sentAt` / `ReferenceResponse.submittedAt` | snapshot before reminder-copy changes; demo data already suggests high variance (18 requests → 8 responses) |
+| K6 | Expired-report retake rate | retakes started ÷ reports expiring | new `EXPIRED_REPORT_VIEWED` event + existing completion rows | requires item 7 (expired-state card) to exist first |
+| K7 | Revocation usage | revokes ÷ active links — a candidate-trust indicator, not a leak metric | existing `revoked` flag + `AuditEvent` | snapshot before the Sharing & Consent redesign |
+| K8 | Recruiter invite → authorized view | invite sent → PDF/portal view of that invite's report | existing invite rows + PDF access records | snapshot before recruiter dashboard changes |
+| K9 | Copy-truth release gate | grep for the 12.1a–12.1j claim phrases returns zero matches in built output | build check (binary, blocking) | adopt immediately with P0 item 2; it is a gate, not a trend |
+| K10 | Failure-state support load | renders of invalid/used/expired share states | new event on `ShareView` failure render | baseline before adding "Ask for a new link" actions (4.5) |
 
-**Stop-condition statement:** per the phase instructions, this document is the deliverable. No application, database, configuration, or deployment changes were made, and nothing was committed or pushed. Implementation awaits product-owner review and approval of the P0 scope (and answers to Section 17).
+**Baseline discipline:** capture the (a)-source baselines with the read-only query pattern from this planning phase (Appendix B) immediately before Phase 1 begins, and store the snapshot in the implementation ticket — not in the repository. Metrics that need new events (K1's started event, K6, K10) ship their instrumentation in the same phase as the UX change, never later, or the "before" measurement is lost forever.
+
+## 19. Pattern references (added in Revision 2; brief, by design)
+
+Wording/structure inspiration only — none of these imply copying features, and each maps to a specific recommendation in this plan:
+
+- **LinkedIn Skill Assessments** — keeps "assessment passed" language strictly separate from endorsements and shows recency/expiry on badges. Inspiration for the fixed "Self-assessed" vs "Confirmed by referee" vocabulary (8.8, 12.3) and validity display (3.5).
+- **NMC revalidation / Turas-style self-declarations** (UK nursing) — signed self-declarations that explicitly frame themselves as declarations, not verifications. Inspiration for the attestation wording and the planned PDF stamp "SELF-ASSESSED — NOT INDEPENDENTLY VERIFIED" (Section 10).
+- **DocuSign certificates** — separate the document from recipient actions, with per-recipient identity tags and timestamps. Inspiration for the two-block report structure (candidate context vs referee feedback; 9.7, Section 10) and identity-verification tags.
+- **Google Drive sharing dialog** — scope presets, an explicit access list, revoke, and honest handling of the fact that downloaded copies cannot be recalled. Direct inspiration for the Sharing & Consent screen and the 11.3 revoke copy.
+- **Stripe Dashboard status language** — plain-language status chips plus contextual access banners instead of internal codes. Inspiration for 9.2 (status pipeline) and the 4.3 recruiter access banner.
+
+## 20. Phased implementation roadmap (added in Revision 2 — final section of this plan)
+
+**Top five, in order (carried forward from Revision 1):** (1) close the unauthenticated candidate-data endpoint; (2) verification-language sweep across homepage, meta, and share view; (3) least-privilege recruiter access decision + implementation; (4) unified My Reports + Sharing & Consent experience; (5) resolve the broken collected-references feature.
+
+Each phase ends with a gate; do not enter the next phase until its gate passes. Effort figures roll up from 14.1. **No implementation begins in the current planning phase** — starting any phase requires product-owner approval of that phase's scope and of the Section 17 answers marked as gating.
+
+**Phase 0 — Pre-flight (S; no user-visible change)**
+- Capture KPI baselines (Section 18, (a)-sources) with read-only queries; store the snapshot in the implementation ticket.
+- Rotate `SUPERADMIN_CODE` and legacy shared codes (item 4; ops action).
+- Confirm the demo-database disposition (Appendix A, A5) before any schema-touching phase.
+- Gate: baselines recorded; codes rotated.
+
+**Phase 1 — Safety and truth (P0 items 1-5; S-M each; ~1 week total)**
+- 1: session-gate `/api/candidate` + migrate `ReferencesPanel.tsx:87` (acceptance: §16 P0-1).
+- 2: language sweep 12.1a–12.1j + 11.3 revoke copy + PDF stamp (acceptance: §16 P0-2; K9 gate).
+- 3: recruiter least-privilege per Q3 decision (acceptance: §16 P0-3).
+- 5: remove or repair `/api/checklist/reference` per Q4 decision.
+- Files: `src/app/api/candidate/route.ts`, `src/app/api/candidate/actions/route.ts`, `src/components/bts/checklist/ReferencesPanel.tsx`, `src/components/bts/landing/Hero.tsx`, `Features.tsx`, `Closing.tsx`, `src/app/layout.tsx`, `src/components/bts/checklist/ShareView.tsx`, `src/lib/pdf/skills-checklist-pdf.ts`, `src/app/api/recruiter/route.ts`, `src/components/bts/RecruiterDashboard.tsx`, `src/app/api/checklist/reference/route.ts` (+ orphaned UI if Q4 = remove).
+- Gate: §16 P0-1..P0-3 pass; K9 grep clean; no endpoint returns candidate data without session, consent, or token.
+
+**Phase 2 — One account, one reports list (P1 items 6-12; L overall)**
+- 6 account unification (backend dependency 15.2 — the largest single item; sequence after its migration plan is approved), 7 My Reports + expired recovery, 8 Sharing & Consent (with 11.1/11.2), 9 recruiter unified list + access banner, 10 plain-language statuses, 11 admin session revocation, 12 email-verification decision.
+- Files: `ChecklistPortal.tsx`, `SharingPanel.tsx`, `ControlledSharingPanel.tsx`, `src/app/api/auth/route.ts`, `src/lib/bts/checklistAuth.ts`, `src/components/bts/SuperAdmin.tsx`, `src/lib/bts/platform.ts`.
+- Gate: §16 P1 rows pass; K3/K5/K7 baselines still interpretable (new instrumentation shipped where required).
+
+**Phase 3 — Usability and accessibility (P2 items 13-20; M each)**
+- 13 progress/a11y pack, 14 draft autosave (15.1 schema), 15 mobile cards, 16 SuperAdmin ops cards, 17 errors/aria-live, 18 data-download/delete entries, 19 referee save-and-finish, 20 reminder display.
+- Gate: §16 P2 rows pass; K2 median time-to-complete not regressed; keyboard-only fill possible.
+
+**Phase 4 — Polish and approved debt cleanup (P3 item 21 + Appendix A items with product-owner sign-off)**
+- Terminology micro-copy, icon unification, PDF layout polish, dead-code removal (`HeroSection.tsx`, 410 lines; orphaned collected-refs UI, 752 lines, if Q4 = remove), demo-DB untracking if approved (A5).
+- Gate: K9 still clean; no user-visible regressions; Appendix A re-reviewed for any newly created debt.
+
+**Sequencing rule:** Phase 1 contains no backend-dependency items and must not be traded against Phases 2-4 — the privacy and misrepresentation exposures are live today. Inside Phase 2, the only hard sequencing constraint is 6 (account unification) before 9 (the recruiter unified list reads the unified model); items 7, 8, and 10-12 can ship independently within the phase.
+
+**Exact files a future approved implementation phase would touch (consolidated from Revision 1 §18):** the per-phase lists above cover every file previously enumerated — `src/app/api/checklist/pdf/route.ts` (language + stamps) and `prisma/schema.prisma` (draft model, repair-or-remove, unification migration) included — and no previously listed file was dropped.
+
+---
+
+## Appendix A — Technical debt inventory (added in Revision 2; separated per confirmed preference)
+
+Security and privacy problems are **not** in this appendix — they live in the main findings (Sections 1 and 14, P0 band) and stay there. This appendix lists engineering debt that does not directly harm users today, each with the review it needs before an implementation phase spends effort on it.
+
+| # | Item | Evidence | Why it is debt, not a user-facing defect | Suggested disposition |
+|---|---|---|---|---|
+| A1 | `HeroSection.tsx` dead code, 410 lines | zero importers (grep, re-verified in Revision 2); its "valid 1 year" copy was already corrected 2026-10-16 | Unmounted component; misleads future contributors; contains superseded claims | Delete in Phase 4, or re-mount deliberately with approved copy |
+| A2 | Orphaned collected-references UI, 752 lines (`CollectedRefsPanel.tsx` 401 + `CollectedRefForm.tsx` 351) | zero importers (grep, re-verified); the route's live 500 is tracked as P0 item 5 in the main findings | UI ships nothing; the endpoint failure is a main-findings item, the dead UI is debt | Delete together with the route if Q4 = remove |
+| A3 | `SkillVerification` model unused | model exists (`schema.prisma:137`), zero API reads/writes (grep across `src/app/api`, re-verified) | Dead schema implies a verification workflow that does not exist — a documentation trap | Drop at the next deliberate migration; until then, do not "rediscover" it as a feature |
+| A4 | `typescript.ignoreBuildErrors: true` | `next.config.ts:31-32` | Type errors cannot fail Vercel builds; the tsconfig `exclude` tightening (5fb48af) reduced but did not eliminate app-side risk | Small ticket: fix app-side TS errors, then flip the flag; keep `scripts/` excluded |
+| A5 | Demo database committed to the repo | `db/custom.db` tracked in git (verified via `git ls-files` in Revision 2) | Demo persona rows (Emma Chen, referee names) ship with every clone; rewriting published history is NOT recommended | `git rm --cached` + `.gitignore` in Phase 0/4 with product-owner sign-off; keep a seed script instead |
+| A6 | Simulated notification provider as sandbox default | `notifications.ts:32-64`; 10 email templates | Correct for sandbox, but every "sent" email before provider configuration is simulated; ops must verify provider health (SuperAdmin system section) before real pilots | No code change; document in the pilot runbook |
+| A7 | `AuditEvent` growth unbounded | 168 rows in demo data; every dashboard view writes a row (`api/candidate/route.ts:46`, `api/recruiter/route.ts:51`) | Fine at pilot scale; needs retention/rotation at production scale | Backlog note alongside the /privacy §7 retention commitments |
+| A8 | Read-only inspection tooling in `scripts/` | `scripts/metrics-baseline.ts` (this revision) | Tooling lives beside app code; already excluded from type-check (5fb48af) | Keep; no action |
+
+## Appendix B — Revision 2 verification log (evidence for this revision)
+
+Every load-bearing claim was re-checked on 2026-10-16 before this revision was written. Results:
+
+- **Copy claims (source + live):** 12.1a–12.1g re-confirmed at the cited lines. **Three new verified defects added (12.1h–12.1j):** `Hero.tsx:88-91` ("every skill comes back stamped Manager-verified or Self-reported"), `Hero.tsx:111,113` ("55+ Checklist templates", "<48h Target turnaround"), and `Features.tsx:395` ("55+ specialty sets across ten disciplines … stay verified for a year … flagged for manager confirmation") — the last is a **stale 365-day validity claim that survived the 2026-10-16 30-day sweep** because the sweep targeted "valid"/"year" phrasing and this sentence reads "stay verified". The 30-day rule itself is intact in product code: `constants.ts:59`, `complete/route.ts:127`, share enforcement `share/route.ts:17-20` (all re-read this revision).
+- **Security citations:** `api/candidate/route.ts:23-49` re-read — email-only lookup, no session check, returns requests + responses + flags + callback codes + referee links (P0 item 1 stands). `api/recruiter/route.ts:11,24-31` re-read — shared env code, agency-wide pipeline including referee identities (P0 item 3 stands). Neither endpoint was live-called: both **write** `AuditEvent` rows (`route.ts:46` and `route.ts:51`), and this revision's inspection is strictly read-only.
+- **Dead code:** `HeroSection.tsx`, `CollectedRefsPanel.tsx`, `CollectedRefForm.tsx` — zero importers re-confirmed by grep. `SkillVerification` — zero API references re-confirmed. `CollectedReference` — zero schema matches re-confirmed (P0 item 5 stands).
+- **Catalog (live-verified):** `GET /api/checklists` (pure read, no side effects — verified by reading the route before calling it) returned exactly 5 sets / 55 skills, all `Nursing\|RN`, in ER, GENERAL, ICU, MEDSURG, TELE — confirming Section 2.5 and falsifying every "55+ sets / ten disciplines" claim on the homepage.
+- **Baseline query:** read-only Prisma script (`scripts/metrics-baseline.ts`, SELECT-only, no writes) captured the sandbox aggregates quoted as illustrations in Section 18. The script is a tool, not an application change; it lives in the already-excluded `scripts/` directory and is not committed.
+- **Boundary compliance:** no application, configuration, database, or dependency files were modified in this revision. Changed files: this document (the deliverable) and `worklog.md` (project protocol log). Nothing was committed or pushed by this revision. Transparency note: Revision 1's plan file and worklog were picked up by two platform auto-commits (`3fcf0b8`, `2f17fbe`) that exist **locally only** — remote `main` remains at `5fb48af` and has not received them.
+- **Not re-verified live (unchanged from Revision 1 §0):** full referee submission E2E, recruiter dashboard with live data, SuperAdmin OTP login — these flows' entry points mutate state (OTP rows, status transitions, audit events) and are therefore assessed from source plus previously recorded verified sessions, marked "source-verified" where cited.
+- **Relocation note:** Revision 1 §18 ("Completion summary") content — top-five ordering, the file list, and the stop condition — was folded into Section 20 and this appendix; no finding, recommendation, or open question from Revision 1 was removed or altered in meaning. All seven Section 17 product-owner questions remain open.
+
+**Stop condition (restated):** this document is the deliverable of the planning phase. No implementation work has begun; Phases 0-4 above await product-owner approval, and the Section 17 questions await answers.
