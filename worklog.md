@@ -350,3 +350,18 @@ Work Log:
 Stage Summary:
 - PUSHED: f65d8bd on Live-BTS/VaultVerify main (fast-forward). Pushed tree contains NO .env / no hardcoded secrets.
 - USER: revoke the pasted token now (it was shared in chat); watch Vercel deploy; rotate SUPERADMIN_CODE later (public in app UI since earlier commits).
+
+---
+Task ID: BRIEF-CHATGPT-1
+Agent: Super Z (main)
+Task: User corrections (190+ disciplines, NOT 10; report valid 30 days, NOT 365) + request for a detailed product-functionality brief to hand to ChatGPT for content writing. Consent at submit must become a single checkbox "I agree to the Privacy Policy and Terms of Use." (old sharing/verification sentence moves into T&C). No code changes yet (user's standing "tell me first, do not make").
+
+Work Log:
+- Verified product reality in code: catalog.ts (4 professions / 17 static disciplines, library = SkillTemplate imports), constants.ts CHECKLIST_VALIDITY_DAYS=365 (used in api/checklist/complete), checklistShared.ts (RATING_4 1-4 scale, LAST_PERFORMED recency, ATTESTATION_STATEMENTS[1] = the old sentence to remove, SIGNATURE_MODES draw/type/upload, SHARE_PRESETS one-time/1/7/14/custom), ChecklistOnboarding fields, skills-checklist-pdf.ts report structure.
+- Loaded docx skill full chain (SKILL.md, routes/create.md, design-system.md R1+DS-1, common-rules.md, docx-js-core.md, toc.md).
+- Built scripts/vv-brief-{lib,content1,content2,content3,main}.js + vv-brief-postfix.py → download/VaultVerify-Product-Content-Brief.docx (~14 pages, 33 TOC headings, 5 tables, R1 cover DS-1 palette).
+- Post-process: add_toc_placeholders.py --auto (exit 0, 33 entries), footer instrText patched (ROMAN/arabic), empty pgNumType stripped. postcheck.py: 8/9 pass, 0 errors (1 acceptable warning: compact table-cell line spacing). Visual PDF render verified cover/TOC/body/tables.
+
+Stage Summary:
+- DELIVERED: /home/z/my-project/download/VaultVerify-Product-Content-Brief.docx — Parts: how-to-use, canonical fact table (Table 1 with both corrections), guardrails/blacklist, 8-step candidate journey, report spec, recruiter/admin (confidential), 7 deliverable briefs (D1 T&C 15 clauses, D2 Privacy 11 sections, D3 landing sections, D4 FAQ, D5 exact UI strings incl. new consent checkbox, D6 emails, D7 recruiter one-pager), voice + banned/approved vocabulary (Table 4), 10 open questions for owner (Table 5), ChatGPT session instructions.
+- QUEUED CODE CHANGES (NOT made, awaiting user go-ahead): CHECKLIST_VALIDITY_DAYS 365→30, replace ATTESTATION_STATEMENTS[1] with checkbox "I agree to the Privacy Policy and Terms of Use." linking /privacy + /terms, landing copy rewrite per brief D3, /terms + /privacy replacement once ChatGPT output returns.
