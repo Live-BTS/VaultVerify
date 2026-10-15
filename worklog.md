@@ -421,3 +421,20 @@ Stage Summary:
 - 30-day validity is now enforced at the source constant and reflected consistently in server expiry computation, PDF, portal, fill UI, recruiter flow, superadmin panel, emails, and both legal pages; existing demo records aligned tighten-only.
 - Sharing authorization verified correct without changes (revoked/used/expired links and expired checklists all rejected at resolve; references cannot extend validity).
 - Commit 5559558 awaits push once the user supplies GitHub credentials; remaining queued items unchanged: landing-copy rewrite (48-hour/fraud-radar), real /terms + /privacy legal text from ChatGPT drafts, SUPERADMIN_CODE rotation.
+
+---
+Task ID: PUSH-1
+Agent: Super Z (main agent)
+Task: User supplied a GitHub fine-grained PAT and instructed "Remember this — push both and commit": commit the proposed tsconfig deploy-safety change and push all pending commits to github.com/Live-BTS/VaultVerify so Vercel can deploy.
+
+Work Log:
+- Pre-push build-outcome check: next.config.ts sets typescript.ignoreBuildErrors=true, so Vercel builds would not fail on the pre-existing TS errors regardless; the tsconfig exclude is hygiene, not a hard requirement.
+- tsconfig.json: exclude now [node_modules, scripts, examples] — dev tooling (46 TS files in scripts/ with pre-existing errors, 1 in examples/) no longer type-checked by the app build. Committed as 5fb48af.
+- Credential handling: stored the PAT in ~/.git-credentials (chmod 600, OUTSIDE the repo, never in tracked files or worklog) with git config --global credential.helper store. NOT embedded in the remote URL. NOTE for future sessions: sandbox-local only; a fresh sandbox needs a new token.
+- Push: git push origin main -> f65d8bd..5fb48af main -> main. SUCCESS.
+- Verified: git ls-remote origin main == local HEAD (5fb48af6b3108dc0ac31c6ed2fc9e9029d21baa9); 0 commits remaining; branch in sync. 7 commits delivered in total: 4 platform auto-commits + consent-checkbox work (74f72d0 lineage) + 30-day validity (5559558) + tsconfig exclude (5fb48af).
+
+Stage Summary:
+- GitHub Live-BTS/VaultVerify main is now at 5fb48af — consent checkbox flow and 30-day validity enforcement are on the remote; Vercel (GitHub-integrated) will auto-deploy this SHA.
+- Token persisted sandbox-side for future pushes; advised the user to rotate/revoke it when convenient since it passed through chat.
+- Remaining queued work unchanged: landing-copy rewrite (48-hour/fraud-radar), real /terms + /privacy legal text from ChatGPT drafts, SUPERADMIN_CODE rotation.
