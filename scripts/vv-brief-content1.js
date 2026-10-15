@@ -10,7 +10,7 @@ function part1() {
   c.push(p([
     { t: "Three product facts were recently corrected and override anything you may have seen in earlier drafts or on the current website: " },
     { t: "the catalog covers 190+ disciplines (not 10), each completed checklist is valid for 30 days (not 365), and the checklist is a pure self-assessment completed in 5 to 10 minutes with no reference or manager verification step", b: true },
-    { t: ". Wherever this brief and any older material disagree, this brief wins. Text in 【full-width brackets】 marks a decision or detail that only the product owner can supply; the writer should keep the placeholder visible rather than inventing an answer." },
+    { t: ". Wherever this brief and any older material disagree, this brief wins. Text in [SQUARE BRACKETS] marks a decision or detail that only the product owner can supply; the writer should keep the placeholder visible rather than inventing an answer." },
   ]));
   c.push(p("Recommended workflow: read Part 2 and Part 3 first for the mental model, then Part 7 for the exact writing assignments. When writing the Terms of Use and Privacy Policy, answer the open questions in Part 9 first (or ask the owner), because jurisdiction and entity details change the legal text materially.", { after: 200 }));
 

@@ -6,18 +6,18 @@ function part3() {
 
   // ── 9. Open questions ──
   c.push(h1("9. Information Still Needed From the Owner"));
-  c.push(p("The writer must not invent any of the following. Each row gives the question, why it matters, and the placeholder to replace once answered. Until an answer exists, keep the 【placeholder】 visible in drafts so nothing false ships."));
+  c.push(p("The writer must not invent any of the following. Each row gives the question, why it matters, and the placeholder to replace once answered. Until an answer exists, keep the [placeholder] visible in drafts so nothing false ships."));
   c.push(...tbl("Table 5 — Open questions and placeholders", ["Question", "Why it matters", "Placeholder used"], [
-    ["Legal entity name, registered address, and country of operation", "Required in both legal documents; changes consumer-protection framing", "【Legal entity name】 / 【Registered address】"],
-    ["Governing law and dispute venue", "Governing-law clause and the rights framework in the Privacy Policy (GDPR, UK GDPR, US state laws, or other)", "【Governing law jurisdiction】"],
-    ["Contact emails for support, legal, and privacy", "Notice and complaint routes in both documents", "【Support/legal email】"],
-    ["Pricing / credit model for recruiters (if any)", "Terms clause on fees; FAQ cost answer", "【Pricing/credit model】"],
-    ["Exact service providers to name (hosting, database, email, payments)", "Privacy Policy processor list accuracy", "【Processor list】 — currently assumed: hosting 【Vercel】, database 【Supabase】, email 【email provider】"],
-    ["Data retention period after account closure or report expiry", "Retention section of the Privacy Policy", "【Retention schedule】"],
-    ["Analytics actually deployed?", "Determines whether a cookies/analytics section is needed", "【Analytics: yes/no】"],
-    ["American or British English, and preferred date format", "Consistency across every deliverable", "【Spelling convention】"],
-    ["Effective date for the legal documents", "Both documents open with one", "【Effective date】"],
-    ["Brand voice adjectives the owner wants emphasized (e.g., calm, precise, friendly)", "Fine-tunes tone across D3-D6", "【Voice adjectives】"],
+    ["Legal entity name, registered address, and country of operation", "Required in both legal documents; changes consumer-protection framing", "[Legal entity name] / [Registered address]"],
+    ["Governing law and dispute venue", "Governing-law clause and the rights framework in the Privacy Policy (GDPR, UK GDPR, US state laws, or other)", "[Governing law jurisdiction]"],
+    ["Contact emails for support, legal, and privacy", "Notice and complaint routes in both documents", "[Support/legal email]"],
+    ["Pricing / credit model for recruiters (if any)", "Terms clause on fees; FAQ cost answer", "[Pricing/credit model]"],
+    ["Exact service providers to name (hosting, database, email, payments)", "Privacy Policy processor list accuracy", "[Processor list] — currently assumed: hosting [Vercel], database [Supabase], email [email provider]"],
+    ["Data retention period after account closure or report expiry", "Retention section of the Privacy Policy", "[Retention schedule]"],
+    ["Analytics actually deployed?", "Determines whether a cookies/analytics section is needed", "[Analytics: yes/no]"],
+    ["American or British English, and preferred date format", "Consistency across every deliverable", "[Spelling convention]"],
+    ["Effective date for the legal documents", "Both documents open with one", "[Effective date]"],
+    ["Brand voice adjectives the owner wants emphasized (e.g., calm, precise, friendly)", "Fine-tunes tone across D3-D6", "[Voice adjectives]"],
   ], [34, 40, 26]));
 
   // ── 10. Instructions for ChatGPT ──

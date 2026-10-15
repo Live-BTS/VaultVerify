@@ -365,3 +365,16 @@ Work Log:
 Stage Summary:
 - DELIVERED: /home/z/my-project/download/VaultVerify-Product-Content-Brief.docx — Parts: how-to-use, canonical fact table (Table 1 with both corrections), guardrails/blacklist, 8-step candidate journey, report spec, recruiter/admin (confidential), 7 deliverable briefs (D1 T&C 15 clauses, D2 Privacy 11 sections, D3 landing sections, D4 FAQ, D5 exact UI strings incl. new consent checkbox, D6 emails, D7 recruiter one-pager), voice + banned/approved vocabulary (Table 4), 10 open questions for owner (Table 5), ChatGPT session instructions.
 - QUEUED CODE CHANGES (NOT made, awaiting user go-ahead): CHECKLIST_VALIDITY_DAYS 365→30, replace ATTESTATION_STATEMENTS[1] with checkbox "I agree to the Privacy Policy and Terms of Use." linking /privacy + /terms, landing copy rewrite per brief D3, /terms + /privacy replacement once ChatGPT output returns.
+
+---
+Task ID: BRIEF-CHATGPT-1a
+Agent: Super Z (main)
+Task: User angry feedback — document contained 【full-width CJK brackets】 placeholders (docx-skill Chinese convention) which user read as Chinese content. User re-demanded ENGLISH-ONLY for all conversation and deliverables.
+
+Work Log:
+- sed-replaced all 【/】 with ASCII [/] across vv-brief-content1/2/3.js; reworded the placeholder-convention sentence to "[SQUARE BRACKETS]".
+- Regenerated docx; reran add_toc_placeholders.py (exit 0), footer ROMAN/arabic patch, pgNumType strip, postcheck (8/9, 0 errors).
+- Verified programmatically: 0 CJK characters in word/document.xml. Visual render of T&C clause page confirms clean English placeholders ([Legal entity name] etc.).
+
+Stage Summary:
+- BRIEF-CHATGPT-1 deliverable now 100% English (placeholders like [Legal entity name], [Governing law jurisdiction]). STANDING RULE for all future turns and deliverables: English only — no CJK glyphs, no CJK punctuation anywhere user-visible. Conversation language: English only.
