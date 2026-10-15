@@ -70,25 +70,26 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
             <span className="relative flex h-2 w-2">
               <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full bg-verify-green" />
             </span>
-            Verified healthcare references & skills — not just scanned paper
+            Healthcare references & skills checklists — clearly labeled, candidate-controlled
           </motion.div>
 
           <motion.h1
             variants={fadeUp}
             className="mt-6 text-4xl font-semibold leading-[1.08] tracking-tight text-jade-ink sm:text-5xl lg:text-[3.4rem]"
           >
-            Reference checks that finish in{" "}
+            Reference checks and skills checklists,{" "}
             <span className="animate-gradient-text bg-gradient-to-r from-[#0d6b77] via-verify-deep to-verify-green bg-clip-text text-transparent">
-              48 hours
+              without the paper chase
             </span>
-            , not weeks.
+            .
           </motion.h1>
 
           <motion.p variants={fadeUp} className="mt-6 max-w-xl text-base leading-relaxed text-jade-muted sm:text-lg">
-            {agencyName} replaces the paper reference form with a secure two-party flow: the clinician builds a portable profile once, referees
-            answer anchored questions on any phone in 3–5 minutes, and every skill comes back stamped{" "}
-            <span className="font-semibold text-verify-ink">Manager-verified</span> or{" "}
-            <span className="font-semibold text-jade-ink">Self-reported</span>.
+            {agencyName} replaces the paper reference form with a secure two-party flow: the clinician completes a self-assessed skills
+            checklist in 5–10 minutes, referees answer anchored questions on any phone in 3–5 minutes, and every statement stays clearly
+            labeled{" "}
+            <span className="font-semibold text-verify-ink">Self-reported</span> or{" "}
+            <span className="font-semibold text-jade-ink">Confirmed by referee</span>.
           </motion.p>
 
           <motion.div variants={fadeUp} className="mt-9 flex flex-col gap-3 sm:flex-row">
@@ -102,15 +103,15 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
           <motion.p variants={fadeUp} className="mt-4 text-xs text-[#7d938e]">
             Here for the reference flow?{" "}
             <button type="button" onClick={() => onRole("candidate")} className="font-semibold text-verify-ink underline-offset-2 hover:underline">
-              Build my verified references →
+              Build my references →
             </button>
           </motion.p>
 
           <motion.dl variants={fadeUp} className="mt-12 grid max-w-md grid-cols-3 gap-6">
             {[
-              ["55+", "Checklist templates"],
-              ["3–5 min", "Per reference"],
-              ["<48h", "Target turnaround"],
+              ["5", "Ready checklists"],
+              ["55", "Skills rated"],
+              ["30 days", "Report validity"],
             ].map(([v, l]) => (
               <div key={l}>
                 <dd className="bg-gradient-to-r from-[#03363d] to-verify-deep bg-clip-text text-2xl font-bold text-transparent">{v}</dd>
@@ -212,7 +213,7 @@ export function Hero({ agencyName, onRole }: { agencyName: string; onRole: (r: "
                   <span className="font-mono text-[10px]">J. Rivera · signed 14:09</span>
                 </div>
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-verify-ink">
-                  <ShieldCheck className="h-3 w-3" /> Verified
+                  <ShieldCheck className="h-3 w-3" /> Signed
                 </span>
               </motion.div>
             </div>

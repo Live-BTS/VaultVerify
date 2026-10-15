@@ -71,7 +71,7 @@ export function LegalShell({ doc, other }: { doc: LegalDoc; other: { href: strin
 
       <footer className="border-t border-vault-border bg-white/70">
         <div className="mx-auto flex max-w-4xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-[#7d938e] sm:flex-row sm:px-6">
-          <span>© {new Date().getFullYear()} VaultVerify · References, verified. Skills, proven.</span>
+          <span>© {new Date().getFullYear()} VaultVerify · Honest references. Clearly labeled skills.</span>
           <span className="flex items-center gap-4">
             <Link href="/terms" className="hover:text-jade-ink">Terms &amp; Conditions</Link>
             <Link href="/privacy" className="hover:text-jade-ink">Privacy Policy</Link>

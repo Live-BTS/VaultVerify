@@ -84,7 +84,7 @@ export function ControlledSharingPanel({ onGoShare }: { onGoShare: (tab: "mine" 
       setMsg({
         kind: "ok",
         text: action === "revoke"
-          ? "Access revoked — the link is dead immediately, even if someone saved it."
+          ? "Access revoked — the link is dead immediately. Anyone who already viewed or downloaded the report keeps their copy."
           : `Access extended — the link is now valid until ${fmt(d.expiresAt)}.`,
       });
       setConfirmRevoke(null);
@@ -159,6 +159,9 @@ export function ControlledSharingPanel({ onGoShare }: { onGoShare: (tab: "mine" 
             )}
             {!dead && (confirmRevoke === l.id ? (
               <span className="flex items-center gap-1">
+                <span className="mr-1 hidden max-w-[190px] text-right text-[10px] leading-tight text-rose-500 sm:inline">
+                  Future visits fail. Copies already viewed or downloaded stay with the recipient.
+                </span>
                 <button type="button" disabled={busyId === l.id} onClick={() => act(l, "revoke")}
                   className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50">
                   Confirm
@@ -250,7 +253,7 @@ export function ControlledSharingPanel({ onGoShare }: { onGoShare: (tab: "mine" 
       )}
 
       <p className="flex items-center justify-center gap-2 pt-2 text-[11px] text-jade-muted/80">
-        <VaultMark size={14} /> Revoking is instant and permanent — the recipient sees &quot;link was revoked by the candidate&quot;.
+        <VaultMark size={14} /> Revoking is instant and permanent — the recipient sees &quot;link was revoked by the candidate&quot;. Copies already viewed or downloaded cannot be recalled.
       </p>
     </div>
   );

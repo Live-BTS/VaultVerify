@@ -9,7 +9,7 @@ const STEPS = [
   { icon: BellRing, t: "Secure invites go out", d: "Branded email with a personal no-login link that expires in 14 days.", days: "Day 0" },
   { icon: Smartphone, t: "Managers answer on mobile", d: "One question per screen, 5-point anchored scale, optional skills confirmation.", days: "Day 0–2" },
   { icon: Fingerprint, t: "Identity + fraud checks", d: "Employer-domain match, duplicate-IP and speed flags run automatically.", days: "Instant" },
-  { icon: FileCheck2, t: "The verified record lands", d: "PDF + structured data hit the recruiter pipeline; reminders fire at day 2/5/9, and the candidate can share the result anywhere.", days: "< 48h" },
+  { icon: FileCheck2, t: "The signed record lands", d: "PDF + structured data hit the recruiter pipeline; reminders fire at day 2/5/9, and the candidate can share the result anywhere.", days: "Referee-paced" },
 ];
 
 export function HowItWorks() {
@@ -23,7 +23,7 @@ export function HowItWorks() {
               Five steps between <span className="animate-gradient-text bg-gradient-to-r from-[#0d6b77] via-verify-green to-verify-mint bg-clip-text text-transparent">paper and packet</span>
             </>
           }
-          sub="The whole loop a reference used to take three weeks to crawl — compressed into two days."
+          sub="The whole loop a reference used to take weeks to crawl — with every step visible and every statement labeled."
         />
 
         <div className="relative mt-16">

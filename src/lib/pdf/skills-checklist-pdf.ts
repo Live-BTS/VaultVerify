@@ -352,9 +352,9 @@ function draw(data: ChecklistData, assetsDir: string, total: number): Promise<{ 
   rrect(M, 17, 54, 54, 14, "#F3F8F4");
   doc.image(logo, M + 4, 21, { width: 46, height: 46 });
   text(M + 68, 43, "VaultVerify", "PB", 21, WHITE);
-  text(M + 69, 60, "References, verified. Skills, proven.", "PL", 8.5, "#BFE3C7");
+  text(M + 69, 60, "Honest references. Clearly labeled skills.", "PL", 8.5, "#BFE3C7");
   text(W - M, 40, "Skills Checklist", "PM", 15, WHITE, "r");
-  text(W - M, 56, "Self-assessment completed by the candidate", "PL", 8, "#BFD6D3", "r");
+  text(W - M, 56, "Self-assessed — not independently verified", "PM", 8, "#8BE39A", "r");
 
   // ---- candidate card (overlaps the header)
   const CT = 78;

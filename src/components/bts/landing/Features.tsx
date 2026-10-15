@@ -158,7 +158,7 @@ function SkillsVisual() {
             }
           >
             {s.verified ? <BadgeCheck className="h-3 w-3" /> : <CircleDot className="h-3 w-3" />}
-            {s.verified ? "Verified" : "Self"}
+            {s.verified ? "Confirmed" : "Self"}
           </span>
         </motion.div>
       ))}
@@ -362,10 +362,10 @@ export function Features() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-verify-green/25 bg-verify-green/10 text-verify-ink">
                 <ListChecks className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-jade-ink">Skills, proven — not claimed</h3>
+              <h3 className="text-lg font-semibold text-jade-ink">Skills, clearly labeled</h3>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-jade-muted">
-              Self-rated levels become Manager-verified badges when a reference confirms them. Recruiters filter on truth.
+              Checklist ratings stay clearly marked as self-assessed. References carry the referee's own confirmations, always attributed to them — the two never blend.
             </p>
             <SkillsVisual />
           </GlowCard>
@@ -375,10 +375,10 @@ export function Features() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-400/25 bg-rose-100 text-rose-600">
                 <Radar className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-jade-ink">A fraud radar on every submission</h3>
+              <h3 className="text-lg font-semibold text-jade-ink">Consistency checks on reference submissions</h3>
             </div>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-jade-muted">
-              Identity checks and pattern detection run before a packet ever reaches a recruiter — suspicious pairs are surfaced automatically.
+              Identity checks and consistency rules run on every reference submission — suspicious patterns are flagged for recruiter review. A screening aid, not a guarantee.
             </p>
             <FraudVisual />
           </GlowCard>
@@ -392,7 +392,7 @@ export function Features() {
               <h3 className="text-lg font-semibold text-jade-ink">A living checklist library</h3>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-jade-muted">
-              55+ specialty sets across ten disciplines — nurses request from the library, complete once, and stay verified for a year. High-risk skills are flagged for manager confirmation.
+              5 ready checklists covering 55 skills today — RN first, expanding toward 190+ disciplines. Checklists are self-assessed, signed, and valid for 30 days.
             </p>
             <SpecialtiesVisual />
           </GlowCard>

@@ -163,13 +163,13 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
         <p className="mt-3 text-sm font-semibold text-jade-ink">No reference profile yet</p>
         <p className="mx-auto mt-1 max-w-md text-sm text-jade-muted">
           VaultVerify verifies your experience and capabilities through professional references. Request them one at a time — there&apos;s no limit — and each
-          referee receives a secure SMS + email link. They sign off within 14 days and the verified results land right here in your vault.
+          referee receives a secure SMS + email link. They sign off within 14 days and their signed results land right here in your vault.
         </p>
         <div className="mx-auto mt-5 grid max-w-lg gap-2 text-left text-xs text-jade-muted sm:grid-cols-3">
           {[
             ["1", "Request a reference", "One referee per request — a supervisor or charge nurse who saw your practice firsthand"],
             ["2", "They sign securely", "Identity-checked form with a signature and audit trail"],
-            ["3", "Results land here", "Verified references live next to your skill checklists"],
+            ["3", "Results land here", "Signed references live next to your skill checklists"],
           ].map(([n, t, d]) => (
             <div key={n} className="rounded-xl border border-vault-border bg-white p-3">
               <p className="flex items-center gap-1.5 font-semibold text-verify-ink"><span className="flex h-4 w-4 items-center justify-center rounded-full bg-verify-green/20 text-[10px] font-bold">{n}</span> {t}</p>
@@ -245,7 +245,7 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
               <div className="mt-3">
                 <p className="text-sm text-jade-ink">
                   Completed{r.response.overallRating != null && <> — average rating <strong>{r.response.overallRating.toFixed(1)}/5</strong></>}
-                  {r.response.skillsVerified && <span className="ml-2 rounded-full border border-verify-green/40 bg-verify-green/10 px-2 py-0.5 text-[11px] font-semibold text-verify-ink">Skills verified</span>}
+                  {r.response.skillsVerified && <span className="ml-2 rounded-full border border-verify-green/40 bg-verify-green/10 px-2 py-0.5 text-[11px] font-semibold text-verify-ink">Confirmed by referee</span>}
                   {r.status === "FLAGGED" && <span className="ml-1 text-rose-600">(under review)</span>}
                   <span className="block text-xs text-jade-muted">Signed {r.completedAt ? fmt(r.completedAt) : ""} · view it, download the PDF, or share it with anyone below.</span>
                 </p>
@@ -384,7 +384,7 @@ function RefShareDialog({ request, onCreated }: { request: { id: string; refName
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Share {request.refName}&apos;s verified reference</DialogTitle>
+          <DialogTitle>Share {request.refName}&apos;s reference report</DialogTitle>
         </DialogHeader>
         {!created ? (
           <>

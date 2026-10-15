@@ -94,7 +94,7 @@ export function ReferenceShareView({ token, onExit }: { token: string; onExit: (
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90"><VaultMark size={26} /></div>
             <div className="leading-tight text-white">
               <p className="text-sm font-semibold">{report.agency.name}</p>
-              <p className="text-[11px] text-white/80">Verified reference report</p>
+              <p className="text-[11px] text-white/80">Reference report — signed by the referee</p>
             </div>
           </div>
           <span className="flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-medium text-white">

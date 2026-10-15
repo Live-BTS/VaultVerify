@@ -111,7 +111,7 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
             Ready to retire the <span className="animate-gradient-text bg-gradient-to-r from-[#7fd4de] via-verify-green to-verify-mint bg-clip-text text-transparent">paper reference form?</span>
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-[#9fc4bd]">
-            Join the VaultVerify pilot — build your profile in minutes, or see the live recruiter pipeline with fraud flags and verified skill badges.
+            Join the VaultVerify pilot — complete your skills checklist in minutes, or preview how a shared report looks from the recruiter side.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <GlowButton onClick={() => onRole("checklist")} className="px-7 py-3.5 text-base">
@@ -122,7 +122,7 @@ export function FinalCta({ onRole }: { onRole: (r: "candidate" | "recruiter" | "
             </GlowButton>
           </div>
           <p className="mt-5 text-xs text-[#7fa39d]">
-            Want manager-verified references instead?{" "}
+            Want independent manager references instead?{" "}
             <button type="button" onClick={() => onRole("candidate")} className="font-semibold text-verify-green hover:underline">
               Start the reference flow →
             </button>
@@ -155,9 +155,9 @@ export function Footer({ agencyName, onRole }: { agencyName: string; onRole?: (r
             </span>
           </div>
           <p className="mt-3 max-w-xs text-xs leading-relaxed text-jade-muted">
-            Verified references and skills checklists for healthcare hiring — built for {agencyName === "VaultVerify" ? "agencies, candidates and referees" : agencyName}.
+            Honest references and skills checklists for healthcare hiring — built for {agencyName === "VaultVerify" ? "agencies, candidates and referees" : agencyName}.
           </p>
-          <p className="mt-4 font-mono text-[10px] uppercase tracking-wider text-[#7d938e]">References, verified. Skills, proven.</p>
+          <p className="mt-4 font-mono text-[10px] uppercase tracking-wider text-[#7d938e]">Honest references. Clearly labeled skills.</p>
         </div>
 
         {/* portals */}

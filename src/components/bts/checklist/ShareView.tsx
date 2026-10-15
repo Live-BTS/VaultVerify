@@ -262,7 +262,7 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
             <p className="mt-1 text-sm text-jade-muted">
               {completion.candidateTitle} · {completion.specialtyLabel || specialtyLabel(completion.specialty)} · {completion.profession} · {completion.yearsExperience} yr experience
             </p>
-            <p className="mt-1 text-xs text-[#8aa29c]">Completed {fmt(completion.completedAt)} · Self-reported assessment verified against the {completion.jobTitle} skill template</p>
+            <p className="mt-1 text-xs text-[#8aa29c]">Completed {fmt(completion.completedAt)} · Self-reported assessment mapped to the {completion.jobTitle} skill template</p>
           </div>
           <span className="rounded-full bg-verify-green/10 px-3 py-1 text-[11px] font-semibold text-verify-ink">{summary.total} skill(s) assessed</span>
         </div>
