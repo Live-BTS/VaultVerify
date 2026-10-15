@@ -515,3 +515,17 @@ Stage Summary:
 - Batch 1 is reworked, review-equivalent, and committed LOCALLY as e62049a (+ this worklog entry); NOT on origin — no deployment triggered.
 - Batch 2 queue: F2 brand.tsx SkillBadge rename; F3 ReferencesPanel.tsx:165 verb fix; RecruiterChecklists.tsx "reusable for a year"; then Q3 access-path audit (read-only) -> session-gate /api/candidate + recruiter least-privilege.
 - PO ops reminders: rotate SUPERADMIN_CODE (public in shipped UI since earlier commits); consider untracking db/custom.db (A2) as its own approved batch.
+
+---
+Task ID: DELIVERY-B1 (completion addendum)
+Agent: Super Z (main agent)
+Task: Complete the approved push after PO supplied a fresh PAT.
+
+Work Log:
+- PAT stored at ~/.git-credentials (chmod 600, outside repo); credential.helper=store configured globally. Push succeeded: 3ecbf49..95fbe73 main->main.
+- Origin/main now: e62049a (Batch 1 — 11-file copy sweep, DB-free, identical to reviewed diff) + 8f1e923 (worklog) + 95fbe73 (platform UUID auto-commit created by the environment during push, NOT by the agent) which carried db/custom.db runtime drift (458752->462848) and scripts/review-pdf-stamp.ts (review fixture, no secrets) to origin.
+- Net security read: the reviewed batch commit itself stays DB-free as approved; the DB blob reached origin anyway via the platform's own auto-commit — A2 (untrack db/custom.db + .gitignore) should be the next approved change, otherwise every future platform auto-commit re-publishes runtime drift.
+- Vercel auto-deploy triggered by the push (approved delivery step).
+
+Stage Summary:
+- Batch 1 DELIVERED to origin; deployment triggered. Batch 2 queue unchanged: F2 brand.tsx SkillBadge rename; F3 ReferencesPanel.tsx:165 verb fix; RecruiterChecklists.tsx "reusable for a year"; then Q3 access-path audit (read-only) before recruiter least-privilege.
