@@ -546,3 +546,20 @@ Work Log:
 Stage Summary:
 - Audit + fixes complete on audit/tech-fixes; 40/40 tests; zero new tsc errors; build green. Awaiting PO review and explicit delivery approval (merge to main + push decision belongs to the PO).
 - Top deferred decisions: H2 route disposition, H3 recruiter scoping (schema), H4 demo-seed gate, SUPERADMIN_CODE/RECRUITER_CODE rotation, terms.ts wording.
+
+---
+Task ID: SEC-AUDIT-1
+Agent: Super Z (main agent)
+Task: Option 3 — read-only security & privacy audit; deliver VAULTVERIFY_SECURITY_PRIVACY_AUDIT.md. No fixes, no code/DB/config/git changes.
+
+Work Log:
+- Baseline recorded: main @ a4fcf33 (2 ahead of origin 0292ec7), clean tree; nothing reset/switched; local commits preserved.
+- Inspected all 20 API routes + auth/token/guard/sharePolicy/audit/notifications/seed libs + schema (21 models) + next.config/proxy/Caddyfile/.env.example/.gitignore/DEPLOY.md; tests enumerated only.
+- Verified prior fixes in-tree: C1-C6 gates, H1 policy parity (resolve+answers), M1 referee minimization, M6 P2002, M7 suspension kills, M8 newToken() at every active creation site; 30-day validity enforced end-to-end; workflow separation clean (no reference path writes checklist data; only superadmin decide-reject touches completion expiry).
+- New confirmed findings (22 total, IDs SEC-01..25): SEC-01 recruiter cross-tenant visibility (no per-recipient share binding; payload leaks referee PII + signerIp/UA + flags); SEC-02 checklist-PDF IDOR via invite path + platform-wide invite list/lookup PII + live claim tokens; SEC-03 burned static codes still armed (zipvault2026 public in SuperAdmin.tsx:735-742 dev-gated + scripts/history; RECRUITER_CODE still opens invite surface); SEC-04/05 one-time share links never consumed by either PDF route; SEC-06 collectedReference 500 (model absent, 8 tsc errors); SEC-07 unauth /api/bootstrap seeds demo1234 account into every env incl. prod Supabase; SEC-08 callback code derivable from token (h*31 mod 1e6); SEC-09 no signin lockout/throttle; unauth resend email trigger; SEC-10 db/custom.db still tracked+published (22 history commits; gitignore ineffective while tracked); SEC-11 worklog.md tracked+published; SEC-12 one-time consumption race; SEC-13 unverified-account password overwrite; SEC-14 unauth POST /api/candidate outbound email; SEC-15/16/17 screening-data overexposure, unversioned consent, unbounded token-bearing logs + missing share-PDF audit + self-reported recruiter attribution; SEC-19..25 hardening/ops (timing compares, unhashed sessions/tokens, db:push --accept-data-loss env guard, CSP unsafe-inline, reference-PDF cache-control).
+- Git history (value-safe): .env committed initially held ONLY local file: DSN (no cloud creds); xkeysib matches are a masked DEPLOY.md placeholder (strict format 0 hits); no Supabase cred in history. DB structural scan (mode=ro): 28 tables, synthetic-scale counts; no record values read.
+- Regression evidence: tsc --noEmit = 46 errors (46=46 baseline, zero new). Test suite NOT run (tests/setup.ts invokes prisma db push — excluded by audit constraint).
+- Deliverable: VAULTVERIFY_SECURITY_PRIVACY_AUDIT.md (repo root, uncommitted; copy in download/). Only files changed by this audit: the report + this worklog entry.
+
+Stage Summary:
+- Audit complete; report at HEAD-adjacent (untracked). 4 P0 items await owner decisions: rotate static codes; gate prod seeding; invite/PDF ownership binding; recruiter per-recipient share model. Nothing pushed; 2 local commits remain unpushed from TECH-AUDIT-1 (awaiting approval).
