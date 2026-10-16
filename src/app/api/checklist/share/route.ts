@@ -150,6 +150,15 @@ export async function POST(req: NextRequest) {
     const account = await getAccount();
     if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
 
+    // CH-09: actions that EXPAND access (create / extend) require a verified
+    // email. Revoking stays open for everyone — reducing access must never
+    // wait on verification; listMine is the candidate's own ledger.
+    const needsVerifiedEmail = () =>
+      account.emailVerified ? null : NextResponse.json(
+        { ok: false, error: "Verify your email before sharing — check your inbox for the confirmation link.", needsVerification: true },
+        { status: 403 },
+      );
+
     // ── revoke: { token } — candidate withdraws a share link ──
     if (body.action === "revoke") {
       const link = await db.checklistShareLink.findUnique({ where: { token: String(body.token ?? "") }, include: { completion: true } });
@@ -161,6 +170,8 @@ export async function POST(req: NextRequest) {
 
     // ── extend: { token, days } — push the expiry out (DURATION links) ──
     if (body.action === "extend") {
+      const gated = needsVerifiedEmail();
+      if (gated) return gated;
       const link = await db.checklistShareLink.findUnique({ where: { token: String(body.token ?? "") }, include: { completion: true } });
       if (!link || link.completion.accountId !== account.id) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
       if (link.revoked) return NextResponse.json({ ok: false, error: "This link was revoked — create a new one" }, { status: 400 });
@@ -177,6 +188,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, expiresAt });
     }
 
+    // ── create — the share itself ──
+    const gated = needsVerifiedEmail();
+    if (gated) return gated;
     const completion = await db.checklistCompletion.findUnique({ where: { id: String(body.completionId ?? "") } });
     if (!completion || completion.accountId !== account.id) return NextResponse.json({ ok: false, error: "Checklist not found" }, { status: 404 });
     if (completion.expiresAt < new Date()) return NextResponse.json({ ok: false, error: "This checklist has expired — retake it to share again" }, { status: 400 });

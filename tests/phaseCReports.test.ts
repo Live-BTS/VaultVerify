@@ -19,6 +19,8 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { isWithinSaveWindow, evaluateCompanionRead, SHARE_SAVE_WINDOW_MINUTES } from "@/lib/bts/sharePolicy";
 import { POST as checklistSharePost } from "@/app/api/checklist/share/route";
+import { POST as refSharePost } from "@/app/api/reference/share/route";
+import { POST as completePost } from "@/app/api/checklist/complete/route";
 import { GET as checklistAnswersGet } from "@/app/api/checklist/share/answers/route";
 import { GET as checklistPdfGet } from "@/app/api/checklist/pdf/route";
 import { GET as refPdfGet } from "@/app/api/pdf/[requestId]/route";
@@ -26,6 +28,9 @@ import { GET as refPdfGet } from "@/app/api/pdf/[requestId]/route";
 // ── CH-08 fixtures: one account, one completion, one-time + duration links ──
 let candId = "";
 let candSessionId = "";
+// CH-09: an explicitly UNVERIFIED account proves the email-verification gates
+let cand2Id = "";
+let cand2SessionId = "";
 let completionId = "";
 let recruiterAId = "";
 let sessionAId = "";
@@ -71,6 +76,14 @@ beforeAll(async () => {
   await db.checklistSession.create({
     data: { id: candSessionId, accountId: candId, expiresAt: new Date(Date.now() + 86400_000) },
   });
+  const cand2 = await db.checklistAccount.create({
+    data: { email: "cand2-unverified@phasec.local", name: "Cand Unverified", passwordHash: "x", emailVerified: false },
+  });
+  cand2Id = cand2.id;
+  cand2SessionId = `cks_${crypto.randomUUID().replaceAll("-", "")}`;
+  await db.checklistSession.create({
+    data: { id: cand2SessionId, accountId: cand2Id, expiresAt: new Date(Date.now() + 86400_000) },
+  });
   sessionAId = `rcs_${crypto.randomUUID().replaceAll("-", "")}`;
   await db.recruiterSession.create({
     data: { id: sessionAId, accountId: recruiterAId, expiresAt: new Date(Date.now() + 86400_000) },
@@ -104,6 +117,10 @@ beforeAll(async () => {
 
 function useCandidate() {
   CANDIDATE_COOKIE = candSessionId;
+  RECRUITER_COOKIE = null;
+}
+function useUnverifiedCandidate() {
+  CANDIDATE_COOKIE = cand2SessionId;
   RECRUITER_COOKIE = null;
 }
 function useRecruiterA() {
@@ -351,4 +368,47 @@ describe("CH-08 reference PDF (?share=) — same policy, deliver-once", () => {
 });
 
 // silence unused warnings if a fixture helper changes shape later
-void candId; void agencyId; void candidateRowId;
+void candId; void cand2Id; void agencyId; void candidateRowId;
+
+describe("CH-09 — email verification gates (candidate side)", () => {
+  it("checklist completion is blocked for an unverified account — before any validation", async () => {
+    useUnverifiedCandidate();
+    const res = await completePost(jsonReq("/api/checklist/complete", {}));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.needsVerification).toBe(true);
+  });
+
+  it("a verified account passes the gate (reaches spec validation, fails only on missing invite/request)", async () => {
+    useCandidate();
+    const res = await completePost(jsonReq("/api/checklist/complete", {}));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Specify an invite or an approved request");
+  });
+
+  it("sharing (create) is blocked for an unverified account", async () => {
+    useUnverifiedCandidate();
+    const res = await checklistSharePost(jsonReq("/api/checklist/share", { action: "create", completionId, accessType: "DURATION", durationDays: 7, audience: "ANYONE" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).needsVerification).toBe(true);
+  });
+
+  it("extending a link is blocked for an unverified account", async () => {
+    useUnverifiedCandidate();
+    const res = await checklistSharePost(jsonReq("/api/checklist/share", { action: "extend", token: "whatever", days: 7 }));
+    expect(res.status).toBe(403);
+  });
+
+  it("revoking stays OPEN for an unverified account (reducing access never waits)", async () => {
+    useUnverifiedCandidate();
+    const res = await checklistSharePost(jsonReq("/api/checklist/share", { action: "revoke", token: "no-such-token" }));
+    expect(res.status).toBe(404); // past the gate — ownership lookup answered
+  });
+
+  it("reference share create is blocked for an unverified account", async () => {
+    useUnverifiedCandidate();
+    const res = await refSharePost(jsonReq("/api/reference/share", { action: "create", requestId: "whatever", accessType: "DURATION", durationDays: 7 }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).needsVerification).toBe(true);
+  });
+});

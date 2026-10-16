@@ -24,6 +24,14 @@ export async function POST(req: NextRequest) {
     const account = await getAccount();
     if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
 
+    // CH-09: a checklist is a signed self-attestation — completing one requires
+    // a verified email address (PO decision: email verification gates checklist
+    // completion, report sharing, and outbound invitations; the recruiter side
+    // was gated in Phase B). Existing completions are never touched.
+    if (!account.emailVerified) {
+      return NextResponse.json({ ok: false, error: "Verify your email before completing a checklist — check your inbox for the confirmation link.", needsVerification: true }, { status: 403 });
+    }
+
     const inviteId = typeof body.inviteId === "string" ? body.inviteId : null;
     const requestId = typeof body.requestId === "string" ? body.requestId : null;
     if (!inviteId === !requestId) {

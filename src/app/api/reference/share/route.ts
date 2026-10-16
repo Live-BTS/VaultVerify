@@ -174,6 +174,15 @@ export async function POST(req: NextRequest) {
     const account = await getAccount();
     if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
 
+    // CH-09: actions that EXPAND access (create / extend) require a verified
+    // email. Revoking stays open for everyone — reducing access must never
+    // wait on verification; the GET ledger is the candidate's own data.
+    const needsVerifiedEmail = () =>
+      account.emailVerified ? null : NextResponse.json(
+        { ok: false, error: "Verify your email before sharing — check your inbox for the confirmation link.", needsVerification: true },
+        { status: 403 },
+      );
+
     const loadOwned = async (token: string) => {
       const link = await db.referenceShareLink.findUnique({
         where: { token },
@@ -192,6 +201,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.action === "extend") {
+      const gated = needsVerifiedEmail();
+      if (gated) return gated;
       const link = await loadOwned(String(body.token ?? ""));
       if (!link) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
       if (link.revoked) return NextResponse.json({ ok: false, error: "This link was revoked — create a new one" }, { status: 400 });
@@ -209,6 +220,8 @@ export async function POST(req: NextRequest) {
     }
 
     // create — { requestId, accessType, durationDays?, label?, audience?, recipientEmail? }
+    const gated = needsVerifiedEmail();
+    if (gated) return gated;
     const request = await db.referenceRequest.findUnique({
       where: { id: String(body.requestId ?? "") },
       include: { candidate: true, response: true },
