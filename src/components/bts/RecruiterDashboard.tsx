@@ -16,7 +16,7 @@ import { AuthPanel } from "./AuthPanel";
 import { RecruiterOnboarding } from "./RecruiterOnboarding";
 import { PortalShell } from "./shell/PortalShell";
 import { cn } from "@/lib/utils";
-import { LogIn, RefreshCcw, Download, ShieldAlert, Activity, Inbox, Users, Clock3, Star, Flag, Database, LayoutDashboard, ClipboardList, BellRing, FileSearch } from "lucide-react";
+import { LogIn, RefreshCcw, ShieldAlert, Activity, Inbox, Users, Clock3, Star, Flag, Database, LayoutDashboard, ClipboardList, BellRing, FileSearch } from "lucide-react";
 
 interface ReqRow {
   id: string;
@@ -70,14 +70,9 @@ const IDENTITY_LABEL: Record<string, string> = {
   SKIPPED: "Not verified — skipped",
 };
 const identityLabel = (m: string) => IDENTITY_LABEL[m] ?? m;
-// Candidate share links are the ONLY authorized PDF path for recruiters.
-const activeShareToken = (shares: { token: string; accessType: string; expiresAt: string | Date | null; viewedAt: string | Date | null; revoked: boolean }[] | undefined): string | null => {
-  const now = Date.now();
-  const hit = (shares ?? []).find((l) => !l.revoked
-    && !(l.accessType === "ONE_TIME" && l.viewedAt)
-    && !(l.expiresAt && new Date(l.expiresAt).getTime() < now));
-  return hit?.token ?? null;
-};
+// SEC-01(a)/SEC-15/CH-05: share tokens are the candidate's bearer capability —
+// they are no longer sent to recruiters at all (payload minimization), so the
+// recruiter UI no longer builds share-token PDF links.
 
 export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   const { toast } = useToast();
@@ -150,20 +145,6 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
     }
   };
 
-  const unflag = async (requestId: string) => {
-    const res = await fetch("/api/recruiter", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "unflag_request", requestId }),
-    });
-    const d = await res.json();
-    if (res.ok) {
-      toast({ title: d.message });
-      setDetail(null);
-      if (code) load(code);
-    } else toast({ title: d.error ?? "Failed", variant: "destructive" });
-  };
-
   const signOut = async () => {
     try { await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "signout" }) }); } catch { /* session may already be gone */ }
     sessionStorage.removeItem("bts_recruiter_code");
@@ -214,7 +195,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
               Enter the access code issued by VaultVerify.
               {process.env.NODE_ENV === "development" && (
-                <> Sandbox demo code: <button type="button" className="font-mono font-semibold text-teal-700 underline" onClick={() => { setCode("meds2026"); load("meds2026"); }}>meds2026</button></>
+                <> Sandbox access code: set via RECRUITER_CODE in your sandbox .env (never hard-coded here).</>
               )}
             </p>
             <form className="mt-6 space-y-4" onSubmit={(e) => { e.preventDefault(); if (code.trim()) load(code.trim()); }}>
@@ -303,7 +284,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                     <button key={r.id} type="button" onClick={() => { setSection("references"); setDetail(r); }}
                       className="flex w-full items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-2 text-left text-sm transition hover:bg-rose-50">
                       <span className="text-slate-800">{r.candidate.fullName} · {r.refName}</span>
-                      <span className="text-xs font-semibold text-rose-600">{r.flags.filter((f) => !f.resolved).length} open</span>
+                      <span className="text-xs font-semibold text-rose-600">In review</span>
                     </button>
                   ))}
                   {flaggedRequests.length === 0 && <p className="py-3 text-sm text-slate-400">Nothing flagged — pipeline is clean.</p>}
@@ -334,7 +315,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
         <div className="space-y-3">
           <p className="text-sm text-slate-500">Employment &amp; capability verification — one request per reference. Click a row for the full verified report.</p>
           {data.requests.map((r) => {
-                const openFlags = r.flags.filter((f) => !f.resolved);
+                const inReview = r.status === "FLAGGED";
                 return (
                   <Card
                     key={r.id}
@@ -358,9 +339,9 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                       </div>
                       <div className="w-24">{r.response?.overallRating != null && <RatingPips value={r.response.overallRating} />}</div>
                       <div className="w-24">
-                        {openFlags.length > 0 && (
+                        {inReview && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
-                            <ShieldAlert className="h-3 w-3" /> {openFlags.length}
+                            <ShieldAlert className="h-3 w-3" /> review
                           </span>
                         )}
                       </div>
@@ -438,24 +419,9 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                   </div>
                 </div>
 
-                {detail.flags.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fraud & review flags</p>
-                    <div className="mt-2 space-y-2">
-                      {detail.flags.map((f) => (
-                        <div key={f.id} className={cn("rounded-lg border p-3", f.resolved ? "border-slate-200 opacity-60" : f.severity === "HIGH" ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50")}>
-                          <div className="flex items-center justify-between gap-2">
-                            <FlagChip type={f.type} severity={f.severity} />
-                            {!f.resolved && (
-                              <Button size="sm" variant="outline" onClick={() => unflag(detail.id)}>
-                                Mark reviewed
-                              </Button>
-                            )}
-                          </div>
-                          <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{f.detail}</p>
-                        </div>
-                      ))}
-                    </div>
+                {detail.status === "FLAGGED" && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-slate-600">
+                    This report is in trust &amp; safety review. Screening details are handled by VaultVerify's team — the review outcome appears here once complete.
                   </div>
                 )}
 
@@ -514,15 +480,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                     )}
 
                     {detail.status === "COMPLETED" || detail.status === "FLAGGED" ? (
-                      activeShareToken((detail as { shares?: { token: string; accessType: string; expiresAt: string | Date | null; viewedAt: string | Date | null; revoked: boolean }[] }).shares) ? (
-                      <Button asChild className="w-full bg-teal-700 hover:bg-teal-800">
-                        <a href={`/api/pdf/${detail.id}?share=${activeShareToken((detail as { shares?: { token: string; accessType: string; expiresAt: string | Date | null; viewedAt: string | Date | null; revoked: boolean }[] }).shares)}`} target="_blank" rel="noreferrer">
-                          <Download className="mr-1.5 h-4 w-4" /> Download branded PDF packet
-                        </a>
-                      </Button>
-                      ) : (
-                      <p className="text-center text-xs text-slate-400">The candidate's share link is no longer active — ask them to re-share to download the packet.</p>
-                      )
+                      <p className="text-center text-xs text-slate-400">Report PDFs are moving to authenticated recruiter access (bearer links are being retired) — downloads return with the sharing update.</p>
                     ) : (
                       <p className="text-center text-xs text-slate-400">Branded PDF packet generates automatically once this reference is signed.</p>
                     )}

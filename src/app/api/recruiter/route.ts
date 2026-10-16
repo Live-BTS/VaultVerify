@@ -41,6 +41,10 @@ export async function GET(req: NextRequest) {
 
   // Explicitly shared requests only: any request that currently has an active
   // share link granted by a candidate. Revoked/expired/consumed links cut access.
+  // SEC-01(a)/SEC-15/CH-05: explicit field projection — the recruiter payload
+  // carries report CONTENT only. Screening metadata (signerIp/signerUserAgent),
+  // fraud-flag rows (admin console keeps those), and raw bearer share tokens
+  // are never sent to recruiters.
   const all = await db.referenceRequest.findMany({
     orderBy: { sentAt: "desc" },
     include: {
@@ -50,11 +54,51 @@ export async function GET(req: NextRequest) {
       shares: true,
     },
   });
-  const requests = all.filter((r) => r.shares.some(linkIsActive));
+  const requests = all.filter((r) => r.shares.some(linkIsActive)).map((r) => ({
+    id: r.id,
+    status: r.status,
+    sentAt: r.sentAt,
+    completedAt: r.completedAt,
+    daysOpen: Math.floor((Date.now() - new Date(r.sentAt).getTime()) / 86400000),
+    candidate: {
+      fullName: r.candidate.fullName,
+      email: r.candidate.email,
+      role: r.candidate.role,
+      specialty: r.candidate.specialty,
+      city: r.candidate.city,
+      state: r.candidate.state,
+    },
+    refName: r.refName,
+    refTitle: r.refTitle,
+    refEmail: r.refEmail,
+    facilityName: r.facilityName,
+    relationship: r.relationship,
+    response: r.response
+      ? {
+          overallRating: r.response.overallRating,
+          identityMethod: r.response.identityMethod,
+          confirmedRelationship: r.response.confirmedRelationship,
+          confirmedFacility: r.response.confirmedFacility,
+          confirmedDates: r.response.confirmedDates,
+          answers: r.response.answers,
+          q8Discipline: r.response.q8Discipline,
+          q8Explanation: r.response.q8Explanation,
+          remarks: r.response.remarks,
+          signatureName: r.response.signatureName,
+          signedAt: r.response.signedAt,
+          durationSeconds: r.response.durationSeconds,
+          skillChecks: r.response.skillChecks,
+        }
+      : null,
+    // Share STATE without capabilities: no token field is exposed.
+    shares: r.shares.map((l) => ({ accessType: l.accessType, expiresAt: l.expiresAt, viewedAt: l.viewedAt, revoked: l.revoked })),
+  }));
 
   const completed = requests.filter((r) => r.status === "COMPLETED" || r.status === "FLAGGED");
   const active = requests.filter((r) => r.status !== "COMPLETED" && r.status !== "FLAGGED" && r.status !== "EXPIRED");
-  const flagged = requests.filter((r) => r.status === "FLAGGED" || r.flags.length > 0);
+  // Flag-derived stats are computed server-side from the pre-projection rows;
+  // flag details themselves stay in the admin console (SEC-15).
+  const flagged = all.filter((r) => r.shares.some(linkIsActive) && (r.status === "FLAGGED" || r.flags.length > 0));
   const durations = completed.map((r) => r.response?.durationSeconds ?? 0).filter((d) => d > 0).sort((a, b) => a - b);
   const median = durations.length > 0 ? durations[Math.floor(durations.length / 2)] : null;
   const ratings = completed.map((r) => r.response?.overallRating).filter((v): v is number => v != null);
@@ -63,7 +107,7 @@ export async function GET(req: NextRequest) {
   await logAudit({ actorType: "RECRUITER", actorId: recruiter.id, action: "DASHBOARD_VIEWED", entity: "recruiter", ip: clientIp(req) });
 
   return NextResponse.json({
-    agency: requests[0]?.candidate.agency ?? null,
+    agency: all.find((r) => r.shares.some(linkIsActive))?.candidate.agency ?? null,
     stats: {
       totalRequests: requests.length,
       completedCount: completed.length,
@@ -73,12 +117,7 @@ export async function GET(req: NextRequest) {
       medianCompletionSeconds: median,
       avgRating,
     },
-    requests: requests.map((r) => ({
-      ...r,
-      shares: r.shares.map((l) => ({ token: l.token, accessType: l.accessType, expiresAt: l.expiresAt, viewedAt: l.viewedAt, revoked: l.revoked })),
-      refLink: null, // invitation links are the candidate's capability — never exposed to recruiters
-      daysOpen: Math.floor((Date.now() - new Date(r.sentAt).getTime()) / 86400000),
-    })),
+    requests,
     // Platform notification/audit tails are internal ops data — not recruiter-visible.
     notifications: [],
     audit: [],

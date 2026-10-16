@@ -259,7 +259,10 @@ describe("GET /api/recruiter — session-only, explicitly-shared scope (C5/C6)",
     expect(ids).toContain(requestId); // has an active share link
     const other = await db.referenceRequest.findFirst({ where: { candidate: { email: OTHER_EMAIL } } });
     expect(ids).not.toContain(other!.id); // only a revoked link → must NOT appear
-    for (const r of d.requests) expect(r.refLink).toBeNull();
+    // CH-05: the payload is a projection — invitation links and share tokens
+    // are not merely nulled, the fields no longer exist at all.
+    for (const r of d.requests) expect("refLink" in r).toBe(false);
+    for (const r of d.requests) expect("token" in (r.shares?.[0] ?? {})).toBe(false);
     expect(d.notifications).toEqual([]);
     expect(d.audit).toEqual([]);
   });
