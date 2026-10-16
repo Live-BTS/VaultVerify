@@ -615,3 +615,21 @@ Stage Summary:
 - Deliverable: /home/z/my-project/VAULTVERIFY_IMPLEMENTATION_ROADMAP.md (uncommitted, for owner review).
 - Open confirmed: 19 items (4 High: SEC-01/02/03/07). Previously fixed & verified: 18. Unverified: 8 environment/production items (owner-side checks listed in Section 12.2).
 - Awaiting: Gate 1 (audit acceptance) + OD-01/OD-04/OD-08/OD-10 answers before Batch A-1 (CH-01..CH-05) can start.
+
+---
+Task ID: ROADMAP-RECON-1
+Agent: Super Z (main agent)
+Task: Owner-requested reconciliation of the local roadmap draft against GitHub main @ 13915de; verify the five owner-identified security priorities in current source; present the four P0 owner decisions verbatim, Batch A-1 file-level scope, and tests/acceptance criteria; confirm no production/DB access. Read-only.
+
+Work Log:
+- Baseline: origin/main local ref = 13915de (matches the owner's stated remote SHA; no fetch/pull/push performed). Local main = 529331a = 13915de + exactly ONE local-only commit (platform UUID auto-commit, not agent-made) carrying only VAULTVERIFY_IMPLEMENTATION_ROADMAP.md (457 ln) + worklog.md (+19). Tree clean; 0 behind. Roadmap draft confirmed intact on disk — reconciled, NOT overwritten.
+- Re-verified all five priorities in current source (file:line evidence): SEC-01 recruiter/route.ts:33-53 (session required; findMany over ALL requests filtered to any-active-share; recruiter.id never used in query; :77-78 spreads full request incl. flags and returns raw share tokens). SEC-02 invite/route.ts:69 (recruiterAuthed accepts session OR legacy code), :74-93 (lookup: any-email account PII), :97-137 (list: platform-wide, 60 newest, includes candidateName/Email/Phone + live claimUrl tokens) + checklist/pdf/route.ts:136-144 (invite path: any recruiter session/code authorizes ANY invite's completion PDF; no ownership or candidate-share check). SEC-03 superadmin/route.ts:36,80 (SUPERADMIN_CODE backup path armed, grants OWNER) + auth.ts:156-157 (RECRUITER_CODE accepted) + SuperAdmin.tsx:735-742 (published literal in dev-gated client source; prod-bundle presence unverified per audit §15.4). SEC-07 bootstrap/route.ts:9-18 (public GET, no auth, no NODE_ENV gate; unconditional ensureSeed + seedBuiltinTemplates + seedChecklistDemo). SEC-10/11 git ls-files confirms db/custom.db + worklog.md tracked at tip. package.json:10 --accept-data-loss confirmed (CH-04).
+- Closed items honored per owner instruction: /api/candidate GET session gate verified present (candidate/route.ts:29-37 — 401 without account, 403 on email mismatch); NOT reported as open. 30-day validity chain intact (constants.ts:59 CHECKLIST_VALIDITY_DAYS=30).
+- Extracted §14 owner decisions verbatim from VAULTVERIFY_SECURITY_PRIVACY_AUDIT.md (12 total; the four P0 = items 1-4: static codes SEC-03, recruiter sharing model SEC-01, invite model SEC-02, demo data in production SEC-07; §14 item 5 additionally gates CH-03 untracking).
+- Presented Batch A-1 (CH-01..CH-05 + owner-side rotation) file-level scope + tests/acceptance; flagged CH-06/CH-07 (schema-bearing full SEC-01/SEC-02 binding) as the immediate follow-up batch requiring OD-02/OD-03, with the owner's new rule recorded: existing invitations/links whose owner cannot be established must NOT silently gain broad access (default-deny backfill recommendation).
+- Production/DB access: NONE. No Vercel/Supabase contact (no credentials exist in sandbox; deploys are owner-side push-triggered). Zero DB queries this session; no .env reads; no secret values printed (published literals referenced by file:line only).
+- Boundary: NO code, config, schema, DB, history, commit, push, or deploy changes. Sole working-tree delta: this worklog append.
+
+Stage Summary:
+- Reconciliation complete: roadmap draft is consistent with remote main 13915de — its five security priorities match the owner's exactly, the candidate GET gate is already marked fixed in the register, and no finding conflicts. One textual drift noted: roadmap completion note says the two files are "uncommitted"; the platform auto-commit has since captured them as local-only 529331a (never pushed).
+- Awaiting owner: (1) Batch A-1 scope approval or re-scope (option to pull CH-06/CH-07 forward), (2) answers to OD-01/OD-04/OD-08/OD-10, (3) delivery decision for local-only commit 529331a. Nothing committed or pushed until explicit approval.
