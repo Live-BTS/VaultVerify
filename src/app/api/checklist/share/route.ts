@@ -92,11 +92,31 @@ export async function POST(req: NextRequest) {
       }
 
       const account = await db.checklistAccount.findUnique({ where: { id: link.completion.accountId } });
-      const firstView = link.accessType === "ONE_TIME" && !link.viewedAt;
-      await db.checklistShareLink.update({
-        where: { id: link.id },
-        data: { viewedAt: link.viewedAt ?? new Date(), viewCount: { increment: 1 } },
-      });
+      // CH-08: one-time consumption is a single conditional UPDATE (… WHERE
+      // viewedAt IS NULL) — under concurrent opens exactly one request wins
+      // (count === 1); every other request sees the link as already used.
+      // Identical semantics on SQLite and Postgres.
+      const now = new Date();
+      let firstView = false;
+      if (link.accessType === "ONE_TIME") {
+        // Deliver exactly once: the resolve view IS the delivery. A link that
+        // is already consumed — or that just lost the concurrent race for it —
+        // never re-delivers. (The save window only covers companion reads:
+        // the answers fetch and the PDF save of the already-delivered view.)
+        const claimed = await db.checklistShareLink.updateMany({
+          where: { id: link.id, viewedAt: null },
+          data: { viewedAt: now, viewCount: { increment: 1 } },
+        });
+        if (claimed.count === 0) {
+          return NextResponse.json({ ok: false, reason: "used" }, { status: 403 });
+        }
+        firstView = true;
+      } else {
+        await db.checklistShareLink.update({
+          where: { id: link.id },
+          data: { viewedAt: link.viewedAt ?? now, viewCount: { increment: 1 } },
+        });
+      }
       if (firstView) {
         await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ oneTime: true }) });
       }

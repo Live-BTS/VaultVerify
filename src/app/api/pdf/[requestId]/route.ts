@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
+import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
+import { viewerAllowedByRecipient, isWithinSaveWindow } from "@/lib/bts/sharePolicy";
 import { buildReferencePacket, type PacketData } from "@/lib/bts/pdf";
 import { specialtyLabel, PROFICIENCY_META } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
@@ -9,7 +11,10 @@ import { QUESTIONS } from "@/lib/bts/questions";
 // ── GET /api/pdf/[requestId] — branded reference packet (AUTHORIZED ACCESS ONLY) ──
 // Two legitimate paths:
 //   ?share=<ReferenceShareLink token>  — public download through a candidate-
-//       controlled share link (revoked / expired / consumed links are rejected).
+//       controlled share link. CH-08: enforces the SAME policy as the /?rs=
+//       resolve view — revoked / consumed / expired + CH-06 recipient binding.
+//       A fresh ONE_TIME link is consumed atomically by this download; a
+//       just-consumed link stays downloadable inside its save window.
 //   owner session                      — the candidate downloads their own packet.
 // Anything else returns 401: requestIds alone must never grant access.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ requestId: string }> }) {
@@ -34,8 +39,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
   if (shareToken) {
     const link = request.shares.find((l) => l.token === shareToken);
     if (!link || link.revoked) return NextResponse.json({ error: "Link not found" }, { status: 404 });
-    if (link.accessType === "ONE_TIME" && link.viewedAt) return NextResponse.json({ error: "This link was already used" }, { status: 403 });
+    // CH-08: same one-time rule as the resolve view — a consumed link is
+    // readable only inside its bounded save window (the just-delivered view's
+    // "save the PDF" moment), then rejected for good.
+    if (link.accessType === "ONE_TIME" && link.viewedAt && !isWithinSaveWindow(link.viewedAt)) {
+      return NextResponse.json({ error: "This link was already used" }, { status: 403 });
+    }
     if (link.expiresAt && link.expiresAt < new Date()) return NextResponse.json({ error: "This link has expired" }, { status: 403 });
+    // CH-06: a bound link downloads only for the recruiter the candidate named.
+    const viewer = await getRecruiterSessionAccount();
+    if (!viewerAllowedByRecipient(link, viewer ? { recruiterId: viewer.id, recruiterEmail: viewer.email } : null)) {
+      return NextResponse.json({ error: "This link is reserved for the recruiter it was shared with" }, { status: 403 });
+    }
+    // Deliver-once: a fresh ONE_TIME link is consumed by THIS download, via a
+    // single conditional UPDATE — a concurrent open can never both win.
+    if (link.accessType === "ONE_TIME" && !link.viewedAt) {
+      const claimed = await db.referenceShareLink.updateMany({
+        where: { id: link.id, viewedAt: null },
+        data: { viewedAt: new Date(), viewCount: { increment: 1 } },
+      });
+      if (claimed.count === 1) {
+        await logAudit({ actorType: "RECRUITER", actorId: "ref-share-link", action: "REFERENCE_SHARE_VIEWED", entity: "referenceShareLink", entityId: link.id, detail: JSON.stringify({ oneTime: true, via: "pdf" }) });
+      }
+    }
     actor = `share:${link.id}`;
   } else {
     const account = await getAccount();
@@ -126,6 +152,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="reference-${request.candidate.fullName.replace(/\s+/g, "-").toLowerCase()}-${request.refName.replace(/\s+/g, "-").toLowerCase()}.pdf"`,
+      "Cache-Control": "private, no-store",
     },
   });
 }

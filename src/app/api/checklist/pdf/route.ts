@@ -2,13 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { getRecruiterSessionAccount } from "@/lib/bts/auth";
+import { logAudit } from "@/lib/bts/audit";
 import { specialtyLabel, CONSENT_STATEMENT } from "@/lib/bts/checklistShared";
 import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
+import { evaluateCompanionRead, viewerAllowedByRecipient } from "@/lib/bts/sharePolicy";
 import { renderSkillsChecklistPdf, type ChecklistData, type LastPerformed, type Rating } from "@/lib/pdf/skills-checklist-pdf";
 import type { ChecklistCompletion, ChecklistAccount } from "@prisma/client";
 
 // ── GET /api/checklist/pdf — approved Skills-Checklist PDF (pdfkit renderer) ──
-// ?share=<token>                    public via share link (validates without consuming one-time)
+// ?share=<token>                    public via share link — CH-08: enforces the
+//                                   SAME policy as the resolve view (sharePolicy
+//                                   single source of truth: revoked/used/expired/
+//                                   report-expired + CH-06 recipient binding).
+//                                   A fresh ONE_TIME link is consumed atomically
+//                                   by this download; a just-consumed link stays
+//                                   downloadable inside its save window.
 // ?completion=<id>                  signed-in candidate (own checklist)
 // ?invite=<id>                      the recruiter who SENT the invite (session) —
 //                                   CH-07: ownership-checked; an invitation alone
@@ -123,11 +131,38 @@ export async function GET(req: NextRequest) {
 
     if (shareToken) {
       const link = await db.checklistShareLink.findUnique({ where: { token: shareToken }, include: { completion: true } });
-      if (!link || link.revoked) return new NextResponse("Link not found", { status: 404 });
-      if (link.expiresAt && link.expiresAt < new Date()) return new NextResponse("Link expired", { status: 403 });
-      if (link.completion.expiresAt < new Date()) return new NextResponse("Checklist expired", { status: 403 });
+      // CH-08: identical decision to the resolve view — plus the bounded save
+      // window so the just-delivered one-time view can still save its PDF.
+      const decision = evaluateCompanionRead(link, link?.completion);
+      if (!decision.ok) {
+        const msg =
+          decision.reason === "invalid" ? "Link not found"
+          : decision.reason === "used" ? "This link was already used"
+          : decision.reason === "expired" ? "Link expired"
+          : "Checklist expired";
+        return new NextResponse(msg, { status: decision.status });
+      }
+      if (!link || !link.completion) return new NextResponse("Link not found", { status: 404 });
+      // CH-06: a bound link downloads only for the recruiter the candidate named.
+      const viewer = await getRecruiterSessionAccount();
+      if (!viewerAllowedByRecipient(link, viewer ? { recruiterId: viewer.id, recruiterEmail: viewer.email } : null)) {
+        return new NextResponse("This link is reserved for the recruiter it was shared with", { status: 403 });
+      }
+      // Deliver-once: a fresh ONE_TIME link is consumed by THIS download, via a
+      // single conditional UPDATE — a concurrent open can never both win.
+      if (link.accessType === "ONE_TIME" && !link.viewedAt) {
+        const claimed = await db.checklistShareLink.updateMany({
+          where: { id: link.id, viewedAt: null },
+          data: { viewedAt: new Date(), viewCount: { increment: 1 } },
+        });
+        if (claimed.count === 1) {
+          await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ oneTime: true, via: "pdf" }) });
+        }
+      }
       completion = link.completion;
       account = await db.checklistAccount.findUnique({ where: { id: completion.accountId } });
+      // SEC-04/05 matrix: the public share-PDF download is audited like the view.
+      await logAudit({ actorType: "RECRUITER", actorId: viewer?.id ?? "share-link", action: "SHARE_PDF_DOWNLOADED", entity: "checklistShareLink", entityId: link.id });
     } else if (completionId) {
       const acc = await getAccount();
       if (!acc) return new NextResponse("Sign in first", { status: 401 });

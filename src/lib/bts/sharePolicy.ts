@@ -88,3 +88,39 @@ export function resolveNewShareBinding(
   }
   return { ok: true, audience: "SPECIFIC", recipientEmail: email };
 }
+
+// ── CH-08: one-time links deliver protected content ONCE — atomically ──
+// Consumption is a single conditional UPDATE (… WHERE viewedAt IS NULL), so
+// two concurrent requests can never both win — on SQLite and Postgres alike.
+// The consumption event is the FIRST protected-content delivery: the resolve
+// view, or a direct PDF download when the link was never resolved. After
+// consumption, the same viewing session keeps a bounded save window (print /
+// save the just-delivered report — the view's own copy promises this), then
+// every public surface rejects the link for good.
+
+/** Minutes a consumed ONE_TIME link stays readable for saving/printing. */
+export const SHARE_SAVE_WINDOW_MINUTES = 30;
+
+/** True while a consumed one-time link is still inside its save window. */
+export function isWithinSaveWindow(viewedAt: Date | null | undefined, now: Date = new Date()): boolean {
+  if (!viewedAt) return false;
+  return now.getTime() - new Date(viewedAt).getTime() <= SHARE_SAVE_WINDOW_MINUTES * 60 * 1000;
+}
+
+/**
+ * Companion-read decision: same policy as evaluateChecklistShare, except a
+ * consumed ONE_TIME link is still readable inside its save window. Used by the
+ * answers fetch and PDF downloads that belong to the delivery the resolve view
+ * just made ("save the PDF if you need it") — never a second full delivery.
+ */
+export function evaluateCompanionRead(
+  link: (ShareLinkLike & { recipientRecruiterId: string | null; recipientEmail: string | null }) | null,
+  completion: CompletionLike | undefined,
+  now: Date = new Date(),
+): ShareDecision {
+  const decision = evaluateChecklistShare(link, completion, now);
+  if (!decision.ok && decision.reason === "used" && isWithinSaveWindow(link?.viewedAt, now)) {
+    return { ok: true, status: 200 };
+  }
+  return decision;
+}
