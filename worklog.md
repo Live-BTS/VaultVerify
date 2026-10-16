@@ -596,3 +596,22 @@ Work Log:
 Stage Summary:
 - TECH-AUDIT-1 + SEC-AUDIT-1 + green test run DELIVERED to origin; deployment triggered.
 - Pending owner decisions (SEC-AUDIT-1 section 14): rotate SUPERADMIN_CODE/RECRUITER_CODE; H4 demo-seed gate before real users; invite/PDF ownership binding; recruiter per-recipient share model; H2 collected-reference route disposition; hygiene batch: untrack db/custom.db (A2) + gitignore tests/test-audit.db.
+
+---
+Task ID: IMPL-ROADMAP-O4
+Agent: Super Z (main agent)
+Task: Option 4 — consolidated implementation roadmap. Planning/sequencing/approval preparation ONLY; explicitly no fixes, no code/DB/config/commit/push changes.
+
+Work Log:
+- Baseline recorded before work: main @ 13915de, clean tree, 0/0 vs origin/main (local ref; no fetch/pull/push). Nothing reset/rewritten.
+- Reviewed all four reports in full: TECHNICAL_AUDIT (142 ln), SECURITY_PRIVACY_AUDIT (475 ln), PRODUCT_UX_PLAN (684 ln, key sections), FIX_REPORT (81 ln). Roadmap file did not previously exist (no overwrite risk).
+- Verified against current source (read-only): 30-day chain (constants.ts:59 + sharePolicy + PDF); 12.1a-j copy zero-hits (K9 green); Manager-verified remnant only terms.ts:68 + brand.tsx comment; zipvault2026 literal still in SuperAdmin.tsx + 6 scripts; bootstrap seeding unguarded (no NODE_ENV check); db/custom.db + worklog.md still tracked; collectedReference 8 refs, tsc 46=46 (re-run); clamp-validity-30d.ts exists; Hero.tsx:88 "self-assessed" confirmed.
+- Reconciled conflict: UX plan Appendix A3 ("SkillVerification unused") is STALE — code shows referee submit writes it via nested skillChecks.create (reference/[token]/route.ts:276-284) and referee GET reads it (:23). Security audit's account is correct; documented as a correction in the roadmap register.
+- Wrote VAULTVERIFY_IMPLEMENTATION_ROADMAP.md (457 lines): 15 required sections + completion confirmation; consolidated register with dedupe mapping and status per finding (Fixed-verified / Confirmed / Unverified / Recommendation / Owner decision); Phases A-F with entry/exit criteria; 20-row implementation matrix (CH-01..CH-20); OD-01..OD-16 decision list; first batch = CH-01..CH-05 + owner rotation action.
+- Secret hygiene: report contains no burned admin code, no PAT; only demo1234 (already public, the finding's subject).
+- Boundary verified: NO application/DB/config changes, NO commits, NO pushes. Only files changed: the new roadmap + this worklog entry (both intentionally uncommitted per Option 4).
+
+Stage Summary:
+- Deliverable: /home/z/my-project/VAULTVERIFY_IMPLEMENTATION_ROADMAP.md (uncommitted, for owner review).
+- Open confirmed: 19 items (4 High: SEC-01/02/03/07). Previously fixed & verified: 18. Unverified: 8 environment/production items (owner-side checks listed in Section 12.2).
+- Awaiting: Gate 1 (audit acceptance) + OD-01/OD-04/OD-08/OD-10 answers before Batch A-1 (CH-01..CH-05) can start.
