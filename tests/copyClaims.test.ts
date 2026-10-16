@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 // ── K9 claim-family gate (regression for the copy-truth sweep) ──
@@ -21,13 +22,15 @@ const CLAIM_FAMILIES: [string, RegExp][] = [
   // The reference PDF title overclaimed ("Verified Reference Packet") — the
   // honest title is "Reference Report — referee-attested".
   ["verified-packet title", /verified reference packet/i],
+  // CH-10: Collected References was retired — the route/components referenced a
+  // Prisma model that never existed in any committed schema (dead code). The
+  // vocabulary must not reappear, and the route directory must stay gone.
+  ["collected-references vocabulary", /collectedReference|CollectedRef|checklist\/reference|\?cr=/],
 ];
 
 const ALLOWLIST: Record<string, string[]> = {
   // Dead code kept pending the A1 cleanup and the Q4 decision:
   "src/app/components/HeroSection.tsx": ["48-hour turnaround"],
-  // Q4 orphan (references a dropped model; feature disabled pending PO decision):
-  "src/components/bts/checklist/CollectedRefForm.tsx": ["retired taglines"],
   // Legal copy describes the referee-confirmation mechanic with legacy wording —
   // changing it requires explicit PO approval (audit finding L9):
   "src/content/terms.ts": ["manager-verified vocabulary"],
@@ -69,5 +72,11 @@ describe("K9 copy claim gate", () => {
       hits.map((h) => `${h.file}:${h.line} [${h.family}] ${h.text}`),
       "Copy overclaims regressed — remove them or extend the documented allowlist",
     ).toEqual([]);
+  });
+
+  it("CH-10: the retired Collected References feature stays retired", () => {
+    expect(existsSync(path.join(ROOT, "src/app/api/checklist/reference"))).toBe(false);
+    expect(existsSync(path.join(ROOT, "src/components/bts/checklist/CollectedRefForm.tsx"))).toBe(false);
+    expect(existsSync(path.join(ROOT, "src/components/bts/checklist/CollectedRefsPanel.tsx"))).toBe(false);
   });
 });
