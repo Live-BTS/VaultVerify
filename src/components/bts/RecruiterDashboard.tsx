@@ -65,7 +65,9 @@ interface RecruiterData {
 
 const IDENTITY_LABEL: Record<string, string> = {
   EMAIL_DOMAIN: "Employer email domain (self-attested)",
-  CALLBACK_CODE: "Phone callback code with the candidate",
+  // SEC-08 honesty: the callback code is arranged between referee and candidate
+  // (derivable from the invite token) — it is NOT an independent platform check.
+  CALLBACK_CODE: "Phone callback code (self-arranged, not independently checked)",
   ACCOUNT: "VaultVerify account with verified email",
   SKIPPED: "Not verified — skipped",
 };

@@ -156,7 +156,7 @@ export async function GET(req: NextRequest) {
           data: { viewedAt: new Date(), viewCount: { increment: 1 } },
         });
         if (claimed.count === 1) {
-          await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ oneTime: true, via: "pdf" }) });
+          await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: { oneTime: true, via: "pdf" } });
         }
       }
       completion = link.completion;

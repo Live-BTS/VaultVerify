@@ -11,7 +11,7 @@ import { CalendarClock, Check, Copy, Eye, Infinity as InfinityIcon, Link2, Shiel
 
 // ── Controlled Sharing — the candidate's share ledger ──
 // Every checklist share link they've ever created (revoke / extend / copy)
-// plus the recruiters who can see their verified references.
+// plus the recruiters who can see their completed reference reports.
 
 export interface ShareCompletion {
   id: string;
@@ -120,7 +120,7 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
 
   return (
     <div className="mt-6 space-y-6">
-      {/* reference share ledger — the verified references the candidate controls */}
+      {/* reference share ledger — the completed reference reports the candidate controls */}
       <section>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -284,13 +284,13 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
               <span className={cn("inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold",
                 r.status === "COMPLETED" ? "border-verify-green/40 text-verify-ink" : "border-vault-border text-jade-muted")}>
                 {r.status === "COMPLETED" && <Check className="h-3 w-3" />}
-                {r.status === "COMPLETED" ? "Verified & delivered" : "Checklist requested"}
+                {r.status === "COMPLETED" ? "Completed & delivered" : "Checklist requested"}
               </span>
             </div>
           ))}
           {recruiterAccess.length === 0 && (
             <div className="rounded-xl border border-dashed border-vault-border bg-white/60 p-6 text-center text-sm text-jade-muted">
-              No recruiter requests yet — when a recruiter requests your checklist, their access to your verified references shows up here.
+              No recruiter requests yet — when a recruiter requests your checklist, their access to your completed reference reports shows up here.
             </div>
           )}
         </div>

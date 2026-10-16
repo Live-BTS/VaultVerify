@@ -14,6 +14,13 @@ const CLAIM_FAMILIES: [string, RegExp][] = [
   ["verified-against phrasing", /verified against/i],
   ["verified-results phrasing", /verified results/i],
   ["retired taglines", /References, verified\.|Skills, proven\./i],
+  // SEC-08 (OD-07 option a): reports must never imply platform verification.
+  // The checklist badge overclaimed ("Verified & delivered") — the honest
+  // wording is "Completed & delivered".
+  ["verified-delivered badge", /verified & delivered/i],
+  // The reference PDF title overclaimed ("Verified Reference Packet") — the
+  // honest title is "Reference Report — referee-attested".
+  ["verified-packet title", /verified reference packet/i],
 ];
 
 const ALLOWLIST: Record<string, string[]> = {

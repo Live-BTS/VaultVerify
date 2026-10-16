@@ -246,7 +246,7 @@ export function ControlledSharingPanel({ onGoShare }: { onGoShare: (tab: "mine" 
           </section>
 
           <section className="space-y-3">
-            <GroupHeader icon={UserCheck} title="Collected references" sub="shared referee verifications" count={refRows.length} />
+            <GroupHeader icon={UserCheck} title="Reference reports" sub="referee-attested reports you shared" count={refRows.length} />
             {refRows.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-vault-border bg-white/60 p-6 text-center">
                 <p className="text-sm text-jade-muted">No reference links yet — share one from <button type="button" className="font-semibold text-verify-ink underline" onClick={() => onGoShare("refs")}>References</button>.</p>

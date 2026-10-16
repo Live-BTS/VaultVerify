@@ -59,7 +59,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
         data: { viewedAt: new Date(), viewCount: { increment: 1 } },
       });
       if (claimed.count === 1) {
-        await logAudit({ actorType: "RECRUITER", actorId: "ref-share-link", action: "REFERENCE_SHARE_VIEWED", entity: "referenceShareLink", entityId: link.id, detail: JSON.stringify({ oneTime: true, via: "pdf" }) });
+        await logAudit({ actorType: "RECRUITER", actorId: "ref-share-link", action: "REFERENCE_SHARE_VIEWED", entity: "referenceShareLink", entityId: link.id, detail: { oneTime: true, via: "pdf" } });
       }
     }
     actor = `share:${link.id}`;

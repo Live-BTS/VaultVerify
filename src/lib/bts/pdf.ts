@@ -56,7 +56,9 @@ const CONTENT_W = PAGE_W - M * 2;
 
 const IDENTITY_LABEL: Record<string, string> = {
   EMAIL_DOMAIN: "Employer email domain (self-attested)",
-  CALLBACK_CODE: "Phone callback code with the candidate",
+  // SEC-08 honesty: the callback code is arranged between referee and candidate
+  // (derivable from the invite token) — it is NOT an independent platform check.
+  CALLBACK_CODE: "Phone callback code (self-arranged, not independently checked)",
   ACCOUNT: "VaultVerify account with verified email",
   SKIPPED: "Not verified — skipped",
 };
@@ -172,13 +174,13 @@ export async function buildReferencePacket(data: PacketData): Promise<Uint8Array
     page.drawText(sanitize(data.agency.logoText).slice(0, 14), { x: M, y: PAGE_H - 46, size: 24, font: bold, color: rgb(1, 1, 1) });
     page.drawText(sanitize(data.agency.name), { x: M, y: PAGE_H - 64, size: 11, font, color: rgb(0.9, 0.98, 0.97) });
   }
-  const rt = "Verified Reference Packet";
+  const rt = "Reference Report — referee-attested";
   page.drawText(rt, { x: PAGE_W - M - bold.widthOfTextAtSize(rt, 12), y: PAGE_H - 44, size: 12, font: bold, color: rgb(1, 1, 1) });
   const rs = "Generated " + new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
   page.drawText(rs, { x: PAGE_W - M - font.widthOfTextAtSize(rs, 9), y: PAGE_H - 60, size: 9, font, color: rgb(0.9, 0.98, 0.97) });
 
   y = PAGE_H - bannerH - 36;
-  text(`${data.candidate.fullName}, ${data.candidate.role} — Reference Verification`, 15, { f: bold });
+  text(`${data.candidate.fullName}, ${data.candidate.role} — Reference Report`, 15, { f: bold });
   y -= 3;
   text(`Specialty: ${data.candidate.specialty}  |  Prepared for ${data.agency.name} recruitment`, 9.5, { color: muted });
   y -= 8;
@@ -313,7 +315,7 @@ export async function buildReferencePacket(data: PacketData): Promise<Uint8Array
   const pages = pdf.getPages();
   pages.forEach((p, i) => {
     p.drawLine({ start: { x: M, y: 40 }, end: { x: PAGE_W - M, y: 40 }, thickness: 0.7, color: line });
-    p.drawText(sanitize(`${data.agency.name} - Confidential reference verification`), { x: M, y: 28, size: 8, font, color: muted });
+    p.drawText(sanitize(`${data.agency.name} - Confidential reference report`), { x: M, y: 28, size: 8, font, color: muted });
     const pn = `Page ${i + 1} of ${pages.length}`;
     p.drawText(pn, { x: PAGE_W - M - font.widthOfTextAtSize(pn, 8), y: 28, size: 8, font, color: muted });
   });

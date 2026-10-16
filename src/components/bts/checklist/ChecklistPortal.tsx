@@ -377,7 +377,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
               <VaultMark size={44} />
               <h1 className="mt-4 text-xl font-semibold text-jade-ink">Nurse portal</h1>
               <p className="mt-1 text-sm text-jade-muted">
-                {mode === "login" ? "Verified references and skills checklists — one secure vault." : "Create your account — verified references and skill checklists in one vault."}
+                {mode === "login" ? "Referee-attested references and self-assessed skill checklists — one secure vault." : "Create your account — reference reports and skill checklists in one vault."}
               </p>
             </div>
             {inviteCtx && (
@@ -473,7 +473,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-verify-ink/80">{greeting}</p>
               <h2 className="mt-1 text-2xl font-bold text-jade-ink">Welcome back, {acc.name.split(" ")[0]}</h2>
-              <p className="mt-1 text-sm text-jade-muted">Verified references and self-assessed skill checklists — one secure vault.</p>
+              <p className="mt-1 text-sm text-jade-muted">Referee-attested references and self-assessed skill checklists — one secure vault.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -540,7 +540,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
           </div>
         )}
 
-        {/* ── References — the verified-reference half of the vault ── */}
+        {/* ── References — the reference-report half of the vault (referee-attested, SEC-08) ── */}
         {section === "references" && acc.email && (
           <ReferencesPanel email={acc.email} fallbackName={acc.name} onStats={handleRefStats}
             onShared={() => { loadRefShares(acc.email); }}
