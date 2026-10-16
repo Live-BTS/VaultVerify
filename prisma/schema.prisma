@@ -177,6 +177,13 @@ model ReferenceShareLink {
   viewedAt     DateTime?        // set on first view for ONE_TIME
   viewCount    Int              @default(0)
   revoked      Boolean          @default(false)
+  // ── CH-06: per-recipient binding (both null = OPEN link: legacy rows
+  //    grandfathered, or the candidate explicitly chose "anyone with the link") ──
+  recipientRecruiterId String?
+  recipientRecruiter   RecruiterAccount? @relation("ReferenceShareRecipients", fields: [recipientRecruiterId], references: [id])
+  recipientEmail       String?  // address the candidate named (kept even if no account exists)
+
+  @@index([recipientRecruiterId])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -253,6 +260,12 @@ model ChecklistInvite {
   completionId  String?
   createdAt     DateTime @default(now())
   completedAt   DateTime?
+  // ── CH-07: the sending recruiter owns this invite. null = legacy invite
+  //    (created before binding existed) — visible only to the superadmin console.
+  recruiterAccountId String?
+  recruiterAccount   RecruiterAccount? @relation("ChecklistInviteSender", fields: [recruiterAccountId], references: [id])
+
+  @@index([recruiterAccountId])
 }
 
 // Candidate → superadmin: "I want this checklist on my profile"
@@ -310,6 +323,12 @@ model ChecklistShareLink {
   viewedAt     DateTime? // set on first view for ONE_TIME
   viewCount    Int      @default(0)
   revoked      Boolean  @default(false)
+  // ── CH-06: per-recipient binding (same semantics as ReferenceShareLink) ──
+  recipientRecruiterId String?
+  recipientRecruiter   RecruiterAccount? @relation("ChecklistShareRecipients", fields: [recipientRecruiterId], references: [id])
+  recipientEmail       String?
+
+  @@index([recipientRecruiterId])
 }
 
 // Superadmin-managed "Additional questions" rendered on every checklist fill + report
@@ -414,7 +433,10 @@ model RecruiterAccount {
   lastFailedLogin    DateTime?
   createdAt          DateTime @default(now())
 
-  sessions RecruiterSession[]
+  sessions         RecruiterSession[]
+  checklistInvites ChecklistInvite[]    @relation("ChecklistInviteSender")
+  referenceShares  ReferenceShareLink[] @relation("ReferenceShareRecipients")
+  checklistShares  ChecklistShareLink[] @relation("ChecklistShareRecipients")
 }
 
 // Security center: superadmin-triggered password resets. The console emails
