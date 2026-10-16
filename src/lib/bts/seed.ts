@@ -6,6 +6,14 @@ import { LINK_EXPIRY_DAYS } from "./constants";
 // Creates a demo dataset that exercises every recruiter state:
 // completed, sent, in-progress, flagged, plus self-reported skills.
 
+// ── Production safety (SEC-07 / CH-02) ─────────────────────────
+// DEMO data (demo candidates, references, demo checklist accounts) must never
+// be seeded into production. Agency branding and the built-in skill-template
+// catalog are product data, not demo data, and are seeded in every environment.
+export function demoSeedingAllowed(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
 function daysAgo(n: number): Date {
   return new Date(Date.now() - n * 24 * 60 * 60 * 1000);
 }
@@ -24,7 +32,8 @@ export function deriveCallbackCode(token: string): string {
   return callbackCode(token);
 }
 
-export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string }> {
+/** Find-or-create the VaultVerify agency (branding) — safe in every environment. */
+export async function ensureAgency(): Promise<{ seeded: boolean; agencyId: string }> {
   const existing = await db.agency.findUnique({ where: { slug: "vaultverify" } });
   if (existing) return { seeded: false, agencyId: existing.id };
 
@@ -38,11 +47,20 @@ export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string 
       accentColor: "#7cc118",
     },
   });
+  return { seeded: true, agencyId: agency.id };
+}
+
+export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string }> {
+  const { agencyId } = await ensureAgency();
+
+  // Demo dataset seeds once, keyed on its first candidate (idempotent).
+  const hasDemoData = await db.candidate.findFirst({ where: { email: "maya.rodriguez@example.com" } });
+  if (hasDemoData) return { seeded: false, agencyId };
 
   // ── Candidate 1: Maya Rodriguez (ICU) — one completed, one pending ──
   const maya = await db.candidate.create({
     data: {
-      agencyId: agency.id,
+      agencyId,
       fullName: "Maya Rodriguez",
       email: "maya.rodriguez@example.com",
       phone: "(312) 555-0148",
@@ -153,7 +171,7 @@ export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string 
   // ── Candidate 2: James Chen (Med-Surg) — flagged + in progress ──
   const james = await db.candidate.create({
     data: {
-      agencyId: agency.id,
+      agencyId,
       fullName: "James Chen",
       email: "james.chen@example.com",
       phone: "(206) 555-0119",
@@ -268,5 +286,5 @@ export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string 
     ],
   });
 
-  return { seeded: true, agencyId: agency.id };
+  return { seeded: true, agencyId };
 }
