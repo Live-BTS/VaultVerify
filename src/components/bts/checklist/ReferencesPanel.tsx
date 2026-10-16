@@ -162,7 +162,7 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
         <Users className="mx-auto h-8 w-8 text-verify-ink/60" />
         <p className="mt-3 text-sm font-semibold text-jade-ink">No reference profile yet</p>
         <p className="mx-auto mt-1 max-w-md text-sm text-jade-muted">
-          VaultVerify verifies your experience and capabilities through professional references. Request them one at a time — there&apos;s no limit — and each
+          Professional references speak to your experience and capabilities — collected through identity-checked, single-use referee links. Request them one at a time — there&apos;s no limit — and each
           referee receives a secure SMS + email link. They sign off within 14 days and their signed results land right here in your vault.
         </p>
         <div className="mx-auto mt-5 grid max-w-lg gap-2 text-left text-xs text-jade-muted sm:grid-cols-3">

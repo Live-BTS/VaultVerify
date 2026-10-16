@@ -4,11 +4,14 @@ import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, reminderBody } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { REMINDER_DAYS, LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
-import { getRecruiterSessionAccount, recruiterAuthed } from "@/lib/bts/auth";
+import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 
-// Access code lives ONLY in environment variables — never in source.
-// Fail-closed: if RECRUITER_CODE is unset, no code can match.
-export const RECRUITER_CODE = process.env.RECRUITER_CODE ?? "";
+// ── GET/POST /api/recruiter — recruiter dashboard (SESSION REQUIRED) ──
+// Authorization model (PO decision Q3): recruiters see ONLY reference reports
+// that candidates explicitly shared with them — i.e. requests with at least one
+// ACTIVE ReferenceShareLink (not revoked, not consumed, not expired). The legacy
+// agency-wide static access code no longer grants pipeline access. Fraud-flag
+// resolution is an admin function owned by the superadmin console.
 
 function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
@@ -20,22 +23,34 @@ function baseUrl(req: NextRequest): string {
   return `${proto}://${host}`;
 }
 
-// ── GET /api/recruiter?code=... — full pipeline dashboard ──
+function linkIsActive(l: { revoked: boolean; accessType: string; viewedAt: Date | null; expiresAt: Date | null }): boolean {
+  if (l.revoked) return false;
+  if (l.expiresAt && l.expiresAt < new Date()) return false;
+  if (l.accessType === "ONE_TIME" && l.viewedAt) return false;
+  return true;
+}
+
 export async function GET(req: NextRequest) {
-  const code = (req.nextUrl.searchParams.get("code") ?? "").trim();
-  if (!(await recruiterAuthed(code))) {
-    return NextResponse.json({ error: "Invalid access code" }, { status: 401 });
+  const recruiter = await getRecruiterSessionAccount();
+  if (!recruiter) {
+    return NextResponse.json(
+      { error: "Recruiter access now requires a VaultVerify account. Sign in, or ask the candidate for a secure share link." },
+      { status: 401 },
+    );
   }
 
-  const agency = await db.agency.findFirst({ where: { slug: "vaultverify" } });
-  const requests = await db.referenceRequest.findMany({
+  // Explicitly shared requests only: any request that currently has an active
+  // share link granted by a candidate. Revoked/expired/consumed links cut access.
+  const all = await db.referenceRequest.findMany({
     orderBy: { sentAt: "desc" },
     include: {
       candidate: { include: { agency: true } },
       response: { include: { skillChecks: true } },
       flags: true,
+      shares: true,
     },
   });
+  const requests = all.filter((r) => r.shares.some(linkIsActive));
 
   const completed = requests.filter((r) => r.status === "COMPLETED" || r.status === "FLAGGED");
   const active = requests.filter((r) => r.status !== "COMPLETED" && r.status !== "FLAGGED" && r.status !== "EXPIRED");
@@ -43,15 +58,12 @@ export async function GET(req: NextRequest) {
   const durations = completed.map((r) => r.response?.durationSeconds ?? 0).filter((d) => d > 0).sort((a, b) => a - b);
   const median = durations.length > 0 ? durations[Math.floor(durations.length / 2)] : null;
   const ratings = completed.map((r) => r.response?.overallRating).filter((v): v is number => v != null);
-  const avgRating = ratings.length > 0 ? ratings.reduce((s, v) => s + v, 0) / ratings.length : null;
+  const avgRating = ratings.length > 0 ? ratings.reduce((s, v) => s + v) / ratings.length : null;
 
-  const notifications = await db.notificationLog.findMany({ orderBy: { createdAt: "desc" }, take: 25 });
-  const audit = await db.auditEvent.findMany({ orderBy: { createdAt: "desc" }, take: 25 });
-
-  await logAudit({ actorType: "RECRUITER", action: "DASHBOARD_VIEWED", entity: "recruiter", ip: clientIp(req) });
+  await logAudit({ actorType: "RECRUITER", actorId: recruiter.id, action: "DASHBOARD_VIEWED", entity: "recruiter", ip: clientIp(req) });
 
   return NextResponse.json({
-    agency,
+    agency: requests[0]?.candidate.agency ?? null,
     stats: {
       totalRequests: requests.length,
       completedCount: completed.length,
@@ -63,11 +75,13 @@ export async function GET(req: NextRequest) {
     },
     requests: requests.map((r) => ({
       ...r,
-      refLink: `${baseUrl(req)}/?r=${r.token}`,
+      shares: r.shares.map((l) => ({ token: l.token, accessType: l.accessType, expiresAt: l.expiresAt, viewedAt: l.viewedAt, revoked: l.revoked })),
+      refLink: null, // invitation links are the candidate's capability — never exposed to recruiters
       daysOpen: Math.floor((Date.now() - new Date(r.sentAt).getTime()) / 86400000),
     })),
-    notifications,
-    audit,
+    // Platform notification/audit tails are internal ops data — not recruiter-visible.
+    notifications: [],
+    audit: [],
   });
 }
 
@@ -77,7 +91,7 @@ interface RecruiterAction {
   flagId?: string;
 }
 
-// ── POST /api/recruiter — reminder sweep + flag resolution ──
+// ── POST /api/recruiter — scoped reminder sweep (SESSION REQUIRED) ──
 export async function POST(req: NextRequest) {
   let body: RecruiterAction;
   try {
@@ -86,11 +100,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const recruiter = await getRecruiterSessionAccount();
+  if (!recruiter) {
+    return NextResponse.json(
+      { error: "Recruiter access now requires a VaultVerify account. Sign in first." },
+      { status: 401 },
+    );
+  }
+
+  // Fraud-flag resolution belongs to the superadmin console (least privilege).
+  if (body.action === "resolve_flag" || body.action === "unflag_request") {
+    await logAudit({ actorType: "RECRUITER", actorId: recruiter.id, action: "FLAG_ACTION_DENIED", entity: "recruiter", entityId: body.flagId ?? body.requestId ?? "", ip: clientIp(req) });
+    return NextResponse.json({ error: "Flag review is handled by the VaultVerify trust & safety team." }, { status: 403 });
+  }
+
   if (body.action === "run_reminders") {
-    const active = await db.referenceRequest.findMany({
+    // Scoped sweep: only requests explicitly shared with recruiters via an
+    // active share link — never the whole agency pipeline.
+    const all = await db.referenceRequest.findMany({
       where: { status: { in: ["SENT", "OPENED", "IN_PROGRESS"] } },
-      include: { candidate: { include: { agency: true } } },
+      include: { candidate: { include: { agency: true } }, shares: true },
     });
+    const active = all.filter((r) => r.shares.some(linkIsActive));
     let sent = 0;
     let expiredCount = 0;
     for (const r of active) {
@@ -124,19 +155,6 @@ export async function POST(req: NextRequest) {
       }
     }
     return NextResponse.json({ ok: true, remindersSent: sent, expiredCount, message: `Sweep complete: ${sent} reminder(s) sent, ${expiredCount} expired.` });
-  }
-
-  if (body.action === "resolve_flag" && body.flagId) {
-    const flag = await db.fraudFlag.update({ where: { id: body.flagId }, data: { resolved: true } });
-    await logAudit({ actorType: "RECRUITER", action: "FLAG_RESOLVED", entity: "fraud_flag", entityId: flag.id, ip: clientIp(req) });
-    return NextResponse.json({ ok: true, message: "Flag marked as reviewed." });
-  }
-
-  if (body.action === "unflag_request" && body.requestId) {
-    await db.fraudFlag.updateMany({ where: { requestId: body.requestId }, data: { resolved: true } });
-    const request = await db.referenceRequest.update({ where: { id: body.requestId }, data: { status: "COMPLETED" } });
-    await logAudit({ actorType: "RECRUITER", action: "REQUEST_UNFLAGGED", entity: "reference_request", entityId: request.id, ip: clientIp(req) });
-    return NextResponse.json({ ok: true, message: "Request reviewed and cleared." });
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });

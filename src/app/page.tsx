@@ -231,7 +231,7 @@ export default function Page() {
     );
   }
 
-  const fallbackAgency: AgencyInfo = agency ?? { id: "demo", name: "VaultVerify", logoText: "VV", tagline: "References, verified. Skills, proven.", primaryColor: "#03363d", accentColor: "#7cc118" };
+  const fallbackAgency: AgencyInfo = agency ?? { id: "demo", name: "VaultVerify", logoText: "VV", tagline: "Honest references. Clearly labeled skills.", primaryColor: "#03363d", accentColor: "#7cc118" };
 
   switch (view) {
     case "wizard":

@@ -7,6 +7,7 @@ import { sendNotification } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend, primaryAgencyId } from "@/lib/bts/credits";
+import { newToken } from "@/lib/bts/tokens";
 
 // ── POST /api/checklist/invite — recruiter sends a checklist to a candidate ──
 // send    : { code, candidateName, candidateEmail, candidatePhone, profession, jobTitle, specialty, recruiterName, facilityName?, message? }
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest) {
 
     const invite = await db.checklistInvite.create({
       data: {
+        token: newToken(),
         candidateName,
         candidateEmail,
         candidatePhone,

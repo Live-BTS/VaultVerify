@@ -33,7 +33,7 @@ export async function ensureSeed(): Promise<{ seeded: boolean; agencyId: string 
       name: "VaultVerify",
       slug: "vaultverify",
       logoText: "VV",
-      tagline: "References, verified. Skills, proven.",
+      tagline: "Honest references. Clearly labeled skills.",
       primaryColor: "#03363d",
       accentColor: "#7cc118",
     },

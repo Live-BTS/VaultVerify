@@ -141,7 +141,7 @@ export function ReferenceShareView({ token, onExit }: { token: string; onExit: (
             <Fact icon={CalendarDays} label="Dates worked together" value={report.referrer.dates || "—"} />
             <Fact icon={ShieldCheck} label="Identity anchor"
               value={report.response.identityMethod === "ACCOUNT" ? "VaultVerify account created with the candidate-provided email"
-                : report.response.identityMethod === "EMAIL_DOMAIN" ? `Employer email domain (${report.response.verifiedDomain ?? ""})`
+                : report.response.identityMethod === "EMAIL_DOMAIN" ? `Employer email domain — self-attested (${report.response.verifiedDomain ?? ""})`
                 : report.response.identityMethod === "CALLBACK_CODE" ? "Phone callback code" : "Signed single-use link"} />
             <Fact icon={Clock} label="Signed on" value={`${fmt(report.response.signedAt)} · ${Math.round(report.response.durationSeconds / 60)} min to complete`} />
           </div>

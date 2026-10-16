@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAccount } from "@/lib/bts/checklistAuth";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend } from "@/lib/bts/credits";
 import { logAudit } from "@/lib/bts/audit";
@@ -8,6 +9,7 @@ import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { deriveCallbackCode } from "@/lib/bts/seed";
 import { LINK_EXPIRY_DAYS, specialtyLabel } from "@/lib/bts/constants";
 import { CHECKLISTS } from "@/lib/bts/questions";
+import { newToken } from "@/lib/bts/tokens";
 
 function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
@@ -19,10 +21,20 @@ function baseUrl(req: NextRequest): string {
   return `${proto}://${host}`;
 }
 
-// ── GET /api/candidate?email=... — candidate login / dashboard data ──
+// ── GET /api/candidate?email=... — candidate dashboard data (SESSION REQUIRED) ──
+// Authorization: the signed-in checklist account may read ONLY its own legacy
+// candidate profile (matched by email). Any unauthenticated or mismatched
+// request is rejected — this endpoint exposes reference responses, fraud flags
+// and live invitation links, so email alone must never grant access.
 export async function GET(req: NextRequest) {
   const email = req.nextUrl.searchParams.get("email")?.toLowerCase().trim();
   if (!email) return NextResponse.json({ error: "email required" }, { status: 400 });
+
+  const account = await getAccount();
+  if (!account) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
+  if (email !== account.email.toLowerCase()) {
+    return NextResponse.json({ error: "You can only view your own profile" }, { status: 403 });
+  }
 
   const candidate = await db.candidate.findFirst({
     where: { email },
@@ -128,6 +140,7 @@ export async function POST(req: NextRequest) {
       },
       requests: {
         create: body.references.map((r) => ({
+          token: newToken(),
           refName: r.refName.trim(),
           refTitle: r.refTitle.trim(),
           refEmail: r.refEmail.toLowerCase().trim(),

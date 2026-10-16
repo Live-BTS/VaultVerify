@@ -63,6 +63,22 @@ interface RecruiterData {
   audit: { id: string; actorType: string; action: string; entity: string; entityId: string; ip: string; createdAt: string }[];
 }
 
+const IDENTITY_LABEL: Record<string, string> = {
+  EMAIL_DOMAIN: "Employer email domain (self-attested)",
+  CALLBACK_CODE: "Phone callback code with the candidate",
+  ACCOUNT: "VaultVerify account with verified email",
+  SKIPPED: "Not verified — skipped",
+};
+const identityLabel = (m: string) => IDENTITY_LABEL[m] ?? m;
+// Candidate share links are the ONLY authorized PDF path for recruiters.
+const activeShareToken = (shares: { token: string; accessType: string; expiresAt: string | Date | null; viewedAt: string | Date | null; revoked: boolean }[] | undefined): string | null => {
+  const now = Date.now();
+  const hit = (shares ?? []).find((l) => !l.revoked
+    && !(l.accessType === "ONE_TIME" && l.viewedAt)
+    && !(l.expiresAt && new Date(l.expiresAt).getTime() < now));
+  return hit?.token ?? null;
+};
+
 export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   const { toast } = useToast();
   const [code, setCode] = useState("");
@@ -451,7 +467,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                         <div className="mt-1"><RatingPips value={detail.response.overallRating} /></div>
                       </div>
                       <div className="text-xs text-slate-500">
-                        Signed by <strong className="text-slate-700">{detail.response.signatureName}</strong> · {new Date(detail.response.signedAt).toLocaleString("en-US")} · identity: {detail.response.identityMethod} · took {Math.max(1, Math.round(detail.response.durationSeconds / 60))} min
+                        Signed by <strong className="text-slate-700">{detail.response.signatureName}</strong> · {new Date(detail.response.signedAt).toLocaleString("en-US")} · identity: {identityLabel(detail.response.identityMethod)} · took {Math.max(1, Math.round(detail.response.durationSeconds / 60))} min
                       </div>
                     </div>
 
@@ -498,11 +514,15 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                     )}
 
                     {detail.status === "COMPLETED" || detail.status === "FLAGGED" ? (
+                      activeShareToken((detail as { shares?: { token: string; accessType: string; expiresAt: string | Date | null; viewedAt: string | Date | null; revoked: boolean }[] }).shares) ? (
                       <Button asChild className="w-full bg-teal-700 hover:bg-teal-800">
-                        <a href={`/api/pdf/${detail.id}`} target="_blank" rel="noreferrer">
+                        <a href={`/api/pdf/${detail.id}?share=${activeShareToken((detail as { shares?: { token: string; accessType: string; expiresAt: string | Date | null; viewedAt: string | Date | null; revoked: boolean }[] }).shares)}`} target="_blank" rel="noreferrer">
                           <Download className="mr-1.5 h-4 w-4" /> Download branded PDF packet
                         </a>
                       </Button>
+                      ) : (
+                      <p className="text-center text-xs text-slate-400">The candidate's share link is no longer active — ask them to re-share to download the packet.</p>
+                      )
                     ) : (
                       <p className="text-center text-xs text-slate-400">Branded PDF packet generates automatically once this reference is signed.</p>
                     )}

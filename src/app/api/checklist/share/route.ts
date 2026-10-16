@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
+import { evaluateChecklistShare } from "@/lib/bts/sharePolicy";
+import { newToken } from "@/lib/bts/tokens";
 
 // ── POST /api/checklist/share — candidate shares a completed checklist ──
 // create : { completionId, accessType: "ONE_TIME" | "DURATION", durationDays?, label? }
@@ -14,10 +16,11 @@ export async function POST(req: NextRequest) {
     if (body.action === "resolve") {
       const token = String(body.token ?? "");
       const link = await db.checklistShareLink.findUnique({ where: { token }, include: { completion: true } });
-      if (!link || link.revoked) return NextResponse.json({ ok: false, reason: "invalid" }, { status: 404 });
-      if (link.accessType === "ONE_TIME" && link.viewedAt) return NextResponse.json({ ok: false, reason: "used" }, { status: 403 });
-      if (link.expiresAt && link.expiresAt < new Date()) return NextResponse.json({ ok: false, reason: "expired" }, { status: 403 });
-      if (link.completion.expiresAt < new Date()) return NextResponse.json({ ok: false, reason: "checklist_expired" }, { status: 403 });
+      const decision = evaluateChecklistShare(link, link?.completion);
+      if (!decision.ok) {
+        return NextResponse.json({ ok: false, reason: decision.reason }, { status: decision.status });
+      }
+      if (!link || !link.completion) return NextResponse.json({ ok: false, reason: "invalid" }, { status: 404 });
 
       const account = await db.checklistAccount.findUnique({ where: { id: link.completion.accountId } });
       const firstView = link.accessType === "ONE_TIME" && !link.viewedAt;
@@ -97,6 +100,7 @@ export async function POST(req: NextRequest) {
     }
     const link = await db.checklistShareLink.create({
       data: {
+        token: newToken(),
         completionId: completion.id,
         accessType,
         durationDays,

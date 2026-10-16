@@ -53,5 +53,13 @@ export async function getAccount() {
   if (!id) return null;
   const session = await db.checklistSession.findUnique({ where: { id } });
   if (!session || session.expiresAt < new Date()) return null;
-  return db.checklistAccount.findUnique({ where: { id: session.accountId } });
+  const account = await db.checklistAccount.findUnique({ where: { id: session.accountId } });
+  // Defense-in-depth: a suspended account is dead everywhere, even if a live
+  // session row survived (the console kills sessions, but never trust that).
+  if (!account || account.status === "SUSPENDED") {
+    await db.checklistSession.deleteMany({ where: { id } }).catch(() => undefined);
+    try { jar.delete(COOKIE); } catch { /* read-only context */ }
+    return null;
+  }
+  return account;
 }

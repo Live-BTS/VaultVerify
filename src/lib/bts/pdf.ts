@@ -54,6 +54,13 @@ const PAGE_H = 792;
 const M = 56;
 const CONTENT_W = PAGE_W - M * 2;
 
+const IDENTITY_LABEL: Record<string, string> = {
+  EMAIL_DOMAIN: "Employer email domain (self-attested)",
+  CALLBACK_CODE: "Phone callback code with the candidate",
+  ACCOUNT: "VaultVerify account with verified email",
+  SKIPPED: "Not verified — skipped",
+};
+
 export async function buildReferencePacket(data: PacketData): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -201,7 +208,7 @@ export async function buildReferencePacket(data: PacketData): Promise<Uint8Array
     ["Stated relationship", data.request.relationship || "—"],
     ["Confirmed relationship", data.response.confirmedRelationship || "—"],
     ["Dates worked", data.response.confirmedDates || `${data.request.workStartDate} - ${data.request.workEndDate || "present"}`],
-    ["Identity check", data.response.identityMethod],
+    ["Identity check", IDENTITY_LABEL[data.response.identityMethod] ?? data.response.identityMethod],
   ]);
   if (data.response.mismatchNotes) {
     y -= 4;

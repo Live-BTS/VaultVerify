@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
 import { buildReferencePacket, type PacketData } from "@/lib/bts/pdf";
 import { specialtyLabel, PROFICIENCY_META } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
 
-// ── GET /api/pdf/[requestId] — branded reference packet ──
+// ── GET /api/pdf/[requestId] — branded reference packet (AUTHORIZED ACCESS ONLY) ──
+// Two legitimate paths:
+//   ?share=<ReferenceShareLink token>  — public download through a candidate-
+//       controlled share link (revoked / expired / consumed links are rejected).
+//   owner session                      — the candidate downloads their own packet.
+// Anything else returns 401: requestIds alone must never grant access.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ requestId: string }> }) {
   const { requestId } = await params;
+  const shareToken = req.nextUrl.searchParams.get("share") ?? "";
 
   const request = await db.referenceRequest.findUnique({
     where: { id: requestId },
@@ -15,10 +22,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
       candidate: { include: { agency: true, skills: true } },
       response: { include: { skillChecks: true } },
       flags: true,
+      shares: true,
     },
   });
   if (!request || !request.response) {
     return NextResponse.json({ error: "No completed response for this request" }, { status: 404 });
+  }
+
+  // ── authorization ──
+  let actor = "unauthorized";
+  if (shareToken) {
+    const link = request.shares.find((l) => l.token === shareToken);
+    if (!link || link.revoked) return NextResponse.json({ error: "Link not found" }, { status: 404 });
+    if (link.accessType === "ONE_TIME" && link.viewedAt) return NextResponse.json({ error: "This link was already used" }, { status: 403 });
+    if (link.expiresAt && link.expiresAt < new Date()) return NextResponse.json({ error: "This link has expired" }, { status: 403 });
+    actor = `share:${link.id}`;
+  } else {
+    const account = await getAccount();
+    if (!account || request.candidate.email.toLowerCase() !== account.email.toLowerCase()) {
+      return NextResponse.json({ error: "Sign in first" }, { status: 401 });
+    }
+    actor = `candidate:${account.id}`;
   }
 
   const storedAnswers = JSON.parse(request.response.answers || "[]") as { key: string; type: string; value: string | number | boolean | null; unableToObserve?: boolean }[];
@@ -96,7 +120,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
   };
 
   const bytes = await buildReferencePacket(data);
-  await logAudit({ actorType: "RECRUITER", action: "PDF_DOWNLOADED", entity: "reference_request", entityId: request.id });
+  await logAudit({ actorType: "RECRUITER", actorId: actor, action: "PDF_DOWNLOADED", entity: "reference_request", entityId: request.id });
 
   return new NextResponse(Buffer.from(bytes), {
     headers: {

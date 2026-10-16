@@ -232,7 +232,7 @@ export function RecruiterChecklists({ code, recruiterName }: { code: string; rec
         {!rows && <div className="flex justify-center rounded-2xl border border-slate-200 bg-white p-10"><Spinner /></div>}
         {rows?.length === 0 && (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
-            No checklists sent yet. Pick a checklist on the left — the candidate completes it once and it's reusable for a year.
+            No checklists sent yet. Pick a checklist on the left — the candidate completes it once and it stays valid for 30 days.
           </div>
         )}
         {rows?.map((r) => (

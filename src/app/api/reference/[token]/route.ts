@@ -5,6 +5,7 @@ import { runFraudChecks } from "@/lib/bts/fraud";
 import { deriveCallbackCode } from "@/lib/bts/seed";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { hashPassword } from "@/lib/bts/checklistAuth";
+import { newToken } from "@/lib/bts/tokens";
 import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
 import { specialtyLabel, type AnswerRecord } from "@/lib/bts/constants";
 
@@ -48,6 +49,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // does the referrer already hold a VaultVerify account with this email?
   // (drives the onboarding section of the form — existing accounts skip it)
   const existingAccount = await db.checklistAccount.findUnique({ where: { email: request.refEmail.toLowerCase().trim() } });
+  // Data minimization: the referee sees their own in-progress submission only.
+  // Fraud flags, signer IP/UA and other screening data NEVER leave the platform
+  // through the referee-facing surface.
+  const responseForReferee = request.response
+    ? { ...request.response, signerIp: "", signerUserAgent: "" }
+    : null;
   return NextResponse.json({
     agency: candidate.agency,
     candidate: {
@@ -76,8 +83,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       startedAt: request.startedAt,
     },
     nurseSkills: candidate.skills.map((s) => ({ skillName: s.skillName, highRisk: s.highRisk, proficiency: s.proficiency, recencyMonths: s.recencyMonths })),
-    response: request.response,
-    flags: request.flags,
+    response: responseForReferee,
     accountExists: !!existingAccount,
   });
 }
@@ -118,6 +124,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  try {
   const request = await loadContext(token);
   if (!request) return NextResponse.json({ error: "Invalid or unknown link" }, { status: 404 });
   if (new Date() > request.expiresAt && request.status !== "COMPLETED" && request.status !== "FLAGGED") {
@@ -325,6 +332,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   });
 
   return NextResponse.json({ ok: true, status: finalStatus, responseId: response.id, flags, accountCreated });
+  } catch (e) {
+    // Concurrent double-submit hits the requestId @unique guard (P2002) — return
+    // a clean 409 instead of an unstyled 500. Data integrity is preserved.
+    const code = (e as { code?: string } | null)?.code;
+    if (code === "P2002") {
+      return NextResponse.json({ error: "This reference has already been submitted." }, { status: 409 });
+    }
+    console.error("[reference/post]", e);
+    return NextResponse.json({ error: "Something went wrong — try again." }, { status: 500 });
+  }
 }
 
 

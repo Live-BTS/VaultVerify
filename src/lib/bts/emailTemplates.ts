@@ -48,7 +48,7 @@ function layout(inner: string, opts: { footnote?: string } = {}): string {
     <tr><td style="padding:0 4px 14px 4px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="font-size:20px;font-weight:bold;color:${INK};letter-spacing:0.5px;">Vault<span style="color:${JADE};">Verify</span></td>
-        <td align="right" style="font-size:12px;color:${MUTED};">References, verified.<br/>Skills, proven.</td>
+        <td align="right" style="font-size:12px;color:${MUTED};">Honest references.<br/>Clearly labeled skills.</td>
       </tr></table>
     </td></tr>
     <tr><td>

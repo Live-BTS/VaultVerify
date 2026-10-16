@@ -70,13 +70,13 @@ export function SkillBadge({ name, verified, proficiency }: { name: string; veri
         "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs",
         verified ? "border-teal-200 bg-teal-50 text-teal-800" : "border-slate-200 bg-slate-50 text-slate-600"
       )}
-      title={verified ? "Manager-verified by reference" : "Self-reported by nurse"}
+      title={verified ? "Confirmed by the referee in their own reference" : "Self-reported by the candidate"}
     >
       {verified ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3 opacity-60" />}
       <span className="font-medium">{name}</span>
       <span className="opacity-60">· {PROFICIENCY_META[proficiency]?.short ?? proficiency}</span>
       <span className={cn("rounded px-1 text-[10px] font-semibold uppercase tracking-wide", verified ? "bg-teal-700 text-white" : "bg-slate-200 text-slate-600")}>
-        {verified ? "Verified" : "Self"}
+        {verified ? "Confirmed" : "Self"}
       </span>
     </span>
   );

@@ -25,7 +25,7 @@ interface FlowContext {
   };
   nurseSkills: { skillName: string; highRisk: boolean; proficiency: string; recencyMonths: number }[];
   response: { id: string } | null;
-  flags: { type: string; severity: string; detail: string }[];
+  flags?: { type: string; severity: string; detail: string }[];
   accountExists?: boolean;
 }
 

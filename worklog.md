@@ -529,3 +529,20 @@ Work Log:
 
 Stage Summary:
 - Batch 1 DELIVERED to origin; deployment triggered. Batch 2 queue unchanged: F2 brand.tsx SkillBadge rename; F3 ReferencesPanel.tsx:165 verb fix; RecruiterChecklists.tsx "reusable for a year"; then Q3 access-path audit (read-only) before recruiter least-privilege.
+
+---
+Task ID: TECH-AUDIT-1
+Agent: Super Z (main agent)
+Task: Full technical audit (Phases A-F) + plan status addendum + queued Batch 2 security fixes, per PO "Do it all". Isolated branch audit/tech-fixes; NO push/deploy/production contact.
+
+Work Log:
+- Phase A: inventoried 20 API routes, 24 lib modules, Prisma schema (21 models), auth stack (scrypt + session tables + OTP console); confirmed ZERO pre-existing tests; baselines: tsc 46 pre-existing errors; no migrations dir.
+- Phase B: audited every route handler (auth/authz/validation/side effects), workflows (B5 independence verified clean), sharing/token entropy, PDF routes, email/notification stack, dependency posture. Six CRITICAL IDOR/auth findings verified in code: C1 /api/candidate email-only data disclosure (incl. live invite tokens); C2 /api/candidate/actions fully unauthenticated outbound messaging + flag mutation; C3 /api/pdf/[requestId] unauthenticated packet download; C4 /api/reference/share email-keyed ledger leaking active tokens; C5 /api/recruiter POST unauthenticated (reminders + flag resolution); C6 /api/recruiter GET agency-wide pipeline via static code. Plus H1 (answers endpoint missing checklist_expired), H2 (collected-reference route queries dropped model = guaranteed 500, 12 tsc errors), H3 (invite lookup/list PII scope), H4 (demo credentials seeded in prod via bootstrap), M1-M9, L1-L14.
+- Phase C: VAULTVERIFY_TECHNICAL_AUDIT.md written BEFORE fixes (gate respected).
+- Phase D implemented (audit-branch): session gates + ownership on candidate/candidate-actions/reference-share/pdf/recruiter routes; recruiter least-privilege per Q3 (explicitly-shared scope, code path disabled, flags admin-only, refLink never exposed); unified sharePolicy.ts enforcing checklist_expired everywhere (H1); referee payload minimization + honest identity labels (M1/M2); P2002 race handling (M6); suspension checks in session resolution (M7); prod query-log gate (M5); crypto-random tokens via tokens.ts (M8); 12h nudge cooldown (M3 partial); copy-truth fixes (SkillBadge Confirmed, ReferencesPanel verb, RecruiterChecklists 30-days, taglines x3) + stale schema comments (L1); client updates (recruiter share-token PDF links, legacy dashboard 401 guidance). Deferred per spec: H2 (Q4), H3 (schema decision), H4 (config), M3 lockout/M4 redaction/M9 origin allowlist, L9 terms.ts.
+- Phase E: vitest added (dev dep, PO-approved). 40 tests, ALL PASSING: sharePolicy boundary tests (expired AT expiresAt), handler-level authz integration on disposable SQLite (fresh db push, no data loss, dev DB untouched, email provider forced simulated), K9 copy gate. tsc 46=46 (zero new). lint: 11 pre-existing scripts/ problems, zero in src/. Production build PASSED.
+- Phase F: VAULTVERIFY_FIX_REPORT.md + Appendix C status addendum in the UX plan + remaining-work list. Everything committed LOCALLY on audit/tech-fixes. Nothing pushed (audit rule 8 + standing rule).
+
+Stage Summary:
+- Audit + fixes complete on audit/tech-fixes; 40/40 tests; zero new tsc errors; build green. Awaiting PO review and explicit delivery approval (merge to main + push decision belongs to the PO).
+- Top deferred decisions: H2 route disposition, H3 recruiter scoping (schema), H4 demo-seed gate, SUPERADMIN_CODE/RECRUITER_CODE rotation, terms.ts wording.

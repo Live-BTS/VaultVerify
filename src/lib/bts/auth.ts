@@ -2,6 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash } from "crypto";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
+import { newToken } from "@/lib/bts/tokens";
 
 // ── Portal auth shared helpers (candidates + recruiters) ──────────
 // Flow per product spec: signup → email verification → onboarding
@@ -56,6 +57,7 @@ export async function createVerification(role: "CANDIDATE" | "RECRUITER", email:
   });
   const row = await db.emailVerification.create({
     data: {
+      token: newToken(),
       role,
       email,
       expiresAt: new Date(Date.now() + VERIFY_TTL_MINUTES * 60 * 1000),
@@ -94,7 +96,7 @@ export async function createPasswordReset(kind: "CANDIDATE" | "RECRUITER", accou
   // Invalidate prior unconsumed resets, then issue a fresh one-hour token.
   await db.passwordResetToken.updateMany({ where: { accountId, kind, consumedAt: null }, data: { consumedAt: new Date() } });
   const row = await db.passwordResetToken.create({
-    data: { kind, accountId, expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000) },
+    data: { token: newToken(), kind, accountId, expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000) },
   });
   return row.token;
 }
@@ -129,7 +131,14 @@ export async function getRecruiterSessionAccount() {
   if (!id) return null;
   const session = await db.recruiterSession.findUnique({ where: { id } });
   if (!session || session.expiresAt < new Date()) return null;
-  return db.recruiterAccount.findUnique({ where: { id: session.accountId } });
+  const account = await db.recruiterAccount.findUnique({ where: { id: session.accountId } });
+  // Defense-in-depth: suspended recruiters are dead even if a session row survived.
+  if (!account || account.status === "SUSPENDED") {
+    await db.recruiterSession.deleteMany({ where: { id } }).catch(() => undefined);
+    try { jar.delete(RECRUITER_COOKIE); } catch { /* read-only context */ }
+    return null;
+  }
+  return account;
 }
 
 export async function destroyRecruiterSession(): Promise<void> {

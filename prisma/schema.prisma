@@ -182,7 +182,7 @@ model ReferenceShareLink {
 // ─────────────────────────────────────────────────────────────
 // SKILLS CHECKLIST feature — a self-assessment, separate from references.
 // Candidate owns an account; a checklist is completed ONCE and stays
-// valid for 1 year; any recruiter gets access via expiring share links.
+// valid for 30 days; access is granted only via candidate-controlled share links.
 // Statuses:
 //   Invite.status:   SENT | COMPLETED
 //   Request.status:  PENDING | APPROVED | REJECTED   (superadmin decides)
@@ -270,7 +270,7 @@ model ChecklistRequest {
   completion ChecklistCompletion?
 }
 
-// The completed self-assessment, saved in the candidate's account for 1 year
+// The completed self-assessment, saved in the candidate's account for 30 days
 model ChecklistCompletion {
   id           String           @id @default(cuid())
   accountId    String
@@ -291,7 +291,7 @@ model ChecklistCompletion {
   request      ChecklistRequest? @relation(fields: [requestId], references: [id])
   inviteId     String?  @unique
   completedAt  DateTime @default(now())
-  expiresAt    DateTime // completedAt + 365 days
+  expiresAt    DateTime // completedAt + 30 days (CHECKLIST_VALIDITY_DAYS)
 
   shareLinks ChecklistShareLink[]
 }

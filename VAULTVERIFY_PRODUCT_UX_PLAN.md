@@ -667,3 +667,18 @@ Every load-bearing claim was re-checked on 2026-10-16 before this revision was w
 - **Relocation note:** Revision 1 §18 ("Completion summary") content — top-five ordering, the file list, and the stop condition — was folded into Section 20 and this appendix; no finding, recommendation, or open question from Revision 1 was removed or altered in meaning. All seven Section 17 product-owner questions remain open.
 
 **Stop condition (restated):** this document is the deliverable of the planning phase. No implementation work has begun; Phases 0-4 above await product-owner approval, and the Section 17 questions await answers.
+
+## Appendix C — Implementation status addendum (2026-10-16, technical-audit phase)
+
+Records what has been **implemented** from this plan since approval, so the plan can be read against current code. Evidence: branch `audit/tech-fixes`, see `VAULTVERIFY_TECHNICAL_AUDIT.md` and `VAULTVERIFY_FIX_REPORT.md`.
+
+**Done and delivered (origin `main`):**
+- Phase 1 item 2 — verification-language sweep: Batch 1 (commit `e62049a`) applied 12.1 items across 11 files + revoke-consent copy (11.3) + PDF self-assessed stamp (10). Remaining 12.1 surfaces fixed during the audit: `brand.tsx` SkillBadge ("Verified"→"Confirmed", honest tooltip), `ReferencesPanel.tsx:165` verb overclaim, `RecruiterChecklists.tsx` "reusable for a year", fallback/email/seed taglines.
+- Phase 1 items 1/3/4/5 — 30-day validity was verified as already server-enforced (P-a in the audit); share-consent copy (11.3) verified accurate against server truth; collected-references trace (Q4) completed (finding H2: the route queries a dropped model — options documented, awaiting PO).
+
+**Done on the audit branch (not yet delivered):**
+- Phase 2 groundwork (Q3, P0-1/P0-3): `/api/candidate`, `/api/candidate/actions`, `/api/reference/share`, `/api/pdf/[requestId]` and `/api/recruiter` are now session-gated with ownership checks; the recruiter pipeline is scoped to explicitly shared reports; the legacy static code path is disabled. P1 "Sharing & Consent" server-truth states are now enforced uniformly via `src/lib/bts/sharePolicy.ts` (including `checklist_expired` on the answers endpoint).
+- Security hardening beyond the plan: crypto-random capability tokens (M8), suspension enforcement in session resolution (M7), production query-log gate (M5), referee payload minimization (M1), honest identity-method labels (M2), nudge cooldown (M3 partial).
+- Regression suite added: 40 tests (vitest) incl. the exact 30-day boundary, authorization gates for every corrected endpoint, and an automated K9 claim-family gate.
+
+**Still open (owner decisions / later phases):** H2 route disposition (Q4), recruiter invite scoping (needs schema change), demo-seed gate for production (H4), terms.ts wording (L9), dead-code deletion (A1), portal unification (Phase 2), autosave + drafts (P2), a11y pass (P2), remaining P3 polish. Section 18 KPI baselines still need capture before the Sharing & Consent redesign.

@@ -61,6 +61,9 @@ export function CandidateDashboard({ initialEmail, onSignOut, onOpenReference }:
     try {
       const res = await fetch(`/api/candidate?email=${encodeURIComponent(em)}`);
       const data = await res.json();
+      if (res.status === 401) {
+        throw new Error("Email-only sign-in was removed for security. Sign in with your VaultVerify account (email + password) to view your references.");
+      }
       if (!res.ok) throw new Error(data.error ?? "Sign-in failed");
       setCandidate(data.candidate);
       localStorage.setItem("bts_candidate_email", em);

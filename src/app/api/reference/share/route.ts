@@ -4,9 +4,10 @@ import { getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { specialtyLabel } from "@/lib/bts/constants";
+import { newToken } from "@/lib/bts/tokens";
 
 // ── /api/reference/share — candidate shares a COMPLETED reference report ──
-// GET  ?email=            → ledger of every reference share link (Controlled Sharing)
+// GET  (session)          → ledger of every reference share link (Controlled Sharing)
 // POST create             → { requestId, accessType, durationDays?, label? }
 // POST resolve            → { token } public payload for /?rs=<token> view
 // POST revoke / extend    → candidate-controlled access (same rules as checklists)
@@ -32,12 +33,13 @@ function formatAnswers(raw: string) {
   });
 }
 
-// GET — the candidate's reference-share ledger, keyed by account email
-export async function GET(req: NextRequest) {
-  const email = req.nextUrl.searchParams.get("email")?.toLowerCase().trim();
-  if (!email) return NextResponse.json({ ok: false, error: "email required" }, { status: 400 });
+// GET — the candidate's reference-share ledger. SESSION REQUIRED: the ledger
+// exposes live share tokens, so it is only ever returned to the owning account.
+export async function GET(_req: NextRequest) {
+  const account = await getAccount();
+  if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
 
-  const candidate = await db.candidate.findFirst({ where: { email }, select: { id: true } });
+  const candidate = await db.candidate.findFirst({ where: { email: account.email.toLowerCase() }, select: { id: true } });
   if (!candidate) return NextResponse.json({ ok: true, links: [] });
 
   const requests = await db.referenceRequest.findMany({
@@ -198,6 +200,7 @@ export async function POST(req: NextRequest) {
     }
     const link = await db.referenceShareLink.create({
       data: {
+        token: newToken(),
         requestId: request.id,
         accessType,
         durationDays,
