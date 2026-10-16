@@ -82,7 +82,7 @@ const saToken = o.data.token;
 o = await api("/api/superadmin", { action: "auth", token: saToken });
 check("token authenticates console", o.data.ok === true && !!o.data.stats);
 
-o = await api("/api/superadmin", { action: "auth", code: "zipvault2026" });
+o = await api("/api/superadmin", { action: "auth", code: process.env.SUPERADMIN_CODE ?? "" });
 check("backup code still works", o.data.ok === true);
 
 o = await api("/api/superadmin", { action: "auth", code: "wrong-code" });

@@ -6,7 +6,11 @@ import { PrismaClient } from "@prisma/client";
 
 const db = new PrismaClient();
 const BASE = "http://localhost:3000";
-const CODE = process.env.SUPERADMIN_CODE ?? "zipvault2026";
+const CODE = process.env.SUPERADMIN_CODE;
+if (!CODE) {
+  console.error("Set SUPERADMIN_CODE in the environment to run this smoke script (never hard-coded).");
+  process.exit(1);
+}
 const STAMP = Date.now();
 const ADMIN_EMAIL = `_p3smoke_admin_${STAMP}@example.com`;
 const SUPPORT_EMAIL = `_p3smoke_support_${STAMP}@example.com`;

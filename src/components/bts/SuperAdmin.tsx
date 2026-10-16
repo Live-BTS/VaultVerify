@@ -734,10 +734,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
               />
               {process.env.NODE_ENV === "development" && (
                 <p className="mt-2 text-xs text-jade-muted">
-                  Sandbox demo code:{" "}
-                  <button type="button" className="font-mono font-semibold text-verify-ink underline" onClick={() => { setCode("zipvault2026"); }}>
-                    zipvault2026
-                  </button>
+                  Sandbox backup code: set via SUPERADMIN_CODE in your sandbox .env — the value is never hard-coded here.
                 </p>
               )}
               <Button onClick={backupAuth} disabled={loading} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">

@@ -9,7 +9,11 @@ import { hashPassword } from "../src/lib/bts/checklistAuth";
 
 const db = new PrismaClient();
 const BASE = "http://localhost:3000";
-const CODE = process.env.SUPERADMIN_CODE ?? "zipvault2026";
+const CODE = process.env.SUPERADMIN_CODE;
+if (!CODE) {
+  console.error("Set SUPERADMIN_CODE in the environment to run this smoke script (never hard-coded).");
+  process.exit(1);
+}
 
 async function api(payload: Record<string, unknown>) {
   const res = await fetch(`${BASE}/api/superadmin`, {

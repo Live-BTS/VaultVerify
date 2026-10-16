@@ -1,5 +1,9 @@
 #!/bin/bash
 # Golden-path API test for the Skills Checklist feature
+# Access codes are read from the environment — never hard-coded (SEC-03 / CH-01).
+: "${SUPERADMIN_CODE:?Set SUPERADMIN_CODE in the environment}"
+: "${RECRUITER_CODE:?Set RECRUITER_CODE in the environment}"
+: "${DEMO_PASSWORD:?Set DEMO_PASSWORD in the environment}"
 B=http://localhost:3000
 J() { python3 -c "import sys,json;d=json.load(sys.stdin);print(json.dumps(d)[:400])"; }
 
@@ -8,7 +12,7 @@ curl -s $B/api/bootstrap | head -c 120; echo
 
 echo "── 1. login demo account ──"
 curl -s -c /tmp/ck.txt -X POST $B/api/checklist/account -H 'Content-Type: application/json' \
-  -d '{"action":"login","email":"emma.chen@example.com","password":"demo1234"}' | head -c 200; echo
+  -d "{\"action\":\"login\",\"email\":\"emma.chen@example.com\",\"password\":\"$DEMO_PASSWORD\"}" | head -c 200; echo
 
 echo "── 2. me (dashboard payload) ──"
 ME=$(curl -s -b /tmp/ck.txt -X POST $B/api/checklist/account -H 'Content-Type: application/json' -d '{"action":"me"}')
@@ -28,9 +32,9 @@ echo "pending request: $REQID · completion: $COMPID"
 
 echo "── 3. superadmin auth + pending requests ──"
 curl -s -X POST $B/api/superadmin -H 'Content-Type: application/json' \
-  -d '{"action":"auth","code":"zipvault2026"}' | python3 -c "import sys,json;d=json.load(sys.stdin);print('stats:',d['stats'])"
+  -d "{\"action\":\"auth\",\"code\":\"$SUPERADMIN_CODE\"}" | python3 -c "import sys,json;d=json.load(sys.stdin);print('stats:',d['stats'])"
 curl -s -X POST $B/api/superadmin -H 'Content-Type: application/json' \
-  -d '{"action":"requests","code":"zipvault2026"}' | python3 -c "
+  -d "{\"action\":\"requests\",\"code\":\"$SUPERADMIN_CODE\"}" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 print('queue:', [(r['id'][:12], r['specialty'], r['status']) for r in d['requests']])
@@ -40,7 +44,7 @@ REQID2=$(cat /tmp/reqid2)
 
 echo "── 4. superadmin approves ──"
 curl -s -X POST $B/api/superadmin -H 'Content-Type: application/json' \
-  -d "{\"action\":\"decide\",\"code\":\"zipvault2026\",\"id\":\"$REQID2\",\"approve\":true}" | head -c 200; echo
+  -d "{\"action\":\"decide\",\"code\":\"$SUPERADMIN_CODE\",\"id\":\"$REQID2\",\"approve\":true}" | head -c 200; echo
 
 echo "── 5. catalog + complete the GENERAL checklist ──"
 curl -s $B/api/checklists | python3 -c "
@@ -78,9 +82,9 @@ curl -s -X POST $B/api/checklist/share -H 'Content-Type: application/json' -d "{
 
 echo "── 9. recruiter invite flow ──"
 curl -s -X POST $B/api/checklist/invite -H 'Content-Type: application/json' \
-  -d "{\"code\":\"meds2026\",\"action\":\"send\",\"candidateName\":\"Emma Chen\",\"candidateEmail\":\"emma.chen@example.com\",\"recruiterName\":\"Recruiter · VaultVerify\",\"facilityName\":\"St. Mary Medical Center\",\"message\":\"Needed before the 14th\"}" | head -c 160; echo
+  -d "{\"code\":\"$RECRUITER_CODE\",\"action\":\"send\",\"candidateName\":\"Emma Chen\",\"candidateEmail\":\"emma.chen@example.com\",\"recruiterName\":\"Recruiter · VaultVerify\",\"facilityName\":\"St. Mary Medical Center\",\"message\":\"Needed before the 14th\"}" | head -c 160; echo
 curl -s -X POST $B/api/checklist/invite -H 'Content-Type: application/json' \
-  -d "{\"code\":\"meds2026\",\"action\":\"list\"}" | python3 -c "
+  -d "{\"code\":\"$RECRUITER_CODE\",\"action\":\"list\"}" | python3 -c "
 import sys,json;d=json.load(sys.stdin)
 print('invites:', [(i['candidateName'], i['status'], bool(i['completion'])) for i in d['invites']][:5])"
 

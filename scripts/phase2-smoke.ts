@@ -8,7 +8,11 @@ import { hashPassword } from "../src/lib/bts/checklistAuth";
 
 const db = new PrismaClient();
 const BASE = "http://localhost:3000";
-const CODE = process.env.SUPERADMIN_CODE ?? "zipvault2026";
+const CODE = process.env.SUPERADMIN_CODE;
+if (!CODE) {
+  console.error("Set SUPERADMIN_CODE in the environment to run this smoke script (never hard-coded).");
+  process.exit(1);
+}
 const EMAIL = `_p2smoke_${Date.now()}@example.com`;
 const PASSWORD = "p2-smoke-pass-123";
 
