@@ -354,7 +354,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
 
       {/* ── Checklists (self-assessments — separate from references) ── */}
       {section === "checklists" && (
-        <RecruiterChecklists code={code} recruiterName={me ? me.name : `Recruiter · ${data.agency.name}`} />
+        <RecruiterChecklists recruiterName={me ? me.name : `Recruiter · ${data.agency.name}`} />
       )}
 
       {/* ── Notifications ── */}

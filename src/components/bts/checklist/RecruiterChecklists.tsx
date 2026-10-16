@@ -33,7 +33,7 @@ const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-US", { mont
 
 const selectCls = "mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600/30";
 
-export function RecruiterChecklists({ code, recruiterName }: { code: string; recruiterName: string }) {
+export function RecruiterChecklists({ recruiterName }: { recruiterName: string }) {
   const [rows, setRows] = useState<InviteRow[] | null>(null);
   const [catalog, setCatalog] = useState<CatalogSet[]>([]);
   // step 1: cascade
@@ -50,11 +50,12 @@ export function RecruiterChecklists({ code, recruiterName }: { code: string; rec
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/checklist/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, action: "list" }) });
+      // CH-07: session-cookie auth; the legacy access-code param is retired.
+      const res = await fetch("/api/checklist/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list" }) });
       const d = await res.json();
       if (d.ok) setRows(d.invites);
     } catch { /* keep old rows */ }
-  }, [code]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -84,7 +85,7 @@ export function RecruiterChecklists({ code, recruiterName }: { code: string; rec
   const lookupAccount = async (email: string) => {
     if (!email.includes("@")) return;
     try {
-      const res = await fetch("/api/checklist/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, action: "lookup", email }) });
+      const res = await fetch("/api/checklist/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "lookup", email }) });
       const d = await res.json();
       if (d.ok && d.exists) {
         setForm((f) => ({
@@ -106,7 +107,7 @@ export function RecruiterChecklists({ code, recruiterName }: { code: string; rec
     try {
       const res = await fetch("/api/checklist/invite", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, action: "send", ...form, profession, jobTitle, specialty, recruiterName }),
+        body: JSON.stringify({ action: "send", ...form, profession, jobTitle, specialty }),
       });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Send failed");
@@ -252,7 +253,7 @@ export function RecruiterChecklists({ code, recruiterName }: { code: string; rec
               {r.status === "COMPLETED" && r.completion ? (
                 <div className="flex gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-semibold text-teal-800"><Check className="h-3 w-3" /> Completed</span>
-                  <a href={`/api/checklist/pdf?invite=${r.id}&code=${encodeURIComponent(code)}`} download>
+                  <a href={`/api/checklist/pdf?invite=${r.id}`} download>
                     <Button size="sm" variant="outline" className="border-teal-200 text-teal-800 hover:bg-teal-50"><Download className="mr-1.5 h-3.5 w-3.5" /> PDF</Button>
                   </a>
                 </div>

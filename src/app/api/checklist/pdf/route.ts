@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
-import { recruiterAuthed } from "@/lib/bts/auth";
+import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { specialtyLabel, CONSENT_STATEMENT } from "@/lib/bts/checklistShared";
 import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
 import { renderSkillsChecklistPdf, type ChecklistData, type LastPerformed, type Rating } from "@/lib/pdf/skills-checklist-pdf";
@@ -10,7 +10,9 @@ import type { ChecklistCompletion, ChecklistAccount } from "@prisma/client";
 // ── GET /api/checklist/pdf — approved Skills-Checklist PDF (pdfkit renderer) ──
 // ?share=<token>                    public via share link (validates without consuming one-time)
 // ?completion=<id>                  signed-in candidate (own checklist)
-// ?invite=<id>&code=<recruiter>     recruiter download for an invite they sent
+// ?invite=<id>                      the recruiter who SENT the invite (session) —
+//                                   CH-07: ownership-checked; an invitation alone
+//                                   never authorizes the PDF for anyone else
 
 const fmtDate = (d: Date | string | null | undefined): string => {
   if (!d) return "—";
@@ -134,14 +136,22 @@ export async function GET(req: NextRequest) {
       account = acc;
       accessClause = "Accessed by the candidate from their VaultVerify portal.";
     } else if (inviteId) {
-      // Agency access code OR verified recruiter account session.
-      if (!(await recruiterAuthed(sp.get("code") ?? ""))) return new NextResponse("Invalid code", { status: 401 });
+      // CH-07: only the recruiter who sent this invitation may download its
+      // completion PDF, via their verified account session. The legacy access
+      // code path is retired. An invitation alone never authorizes this PDF.
+      const recruiter = await getRecruiterSessionAccount();
+      if (!recruiter || !recruiter.emailVerified || !recruiter.onboardingComplete) {
+        return new NextResponse("Recruiter sign-in required", { status: 401 });
+      }
       const invite = await db.checklistInvite.findUnique({ where: { id: inviteId } });
       if (!invite?.completionId) return new NextResponse("Not completed yet", { status: 404 });
+      if (invite.recruiterAccountId !== recruiter.id) {
+        return new NextResponse("This invitation was sent by another recruiter", { status: 403 });
+      }
       completion = await db.checklistCompletion.findUnique({ where: { id: invite.completionId } });
       if (!completion) return new NextResponse("Not found", { status: 404 });
       account = await db.checklistAccount.findUnique({ where: { id: completion.accountId } });
-      accessClause = "Access was granted to the authorized recruiter through VaultVerify.";
+      accessClause = "Access was granted to the recruiter who requested this checklist, through VaultVerify.";
     } else {
       return new NextResponse("Missing parameters", { status: 400 });
     }

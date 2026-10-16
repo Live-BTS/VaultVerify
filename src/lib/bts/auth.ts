@@ -150,11 +150,7 @@ export async function destroyRecruiterSession(): Promise<void> {
   }
 }
 
-// Auth resolution for recruiter-facing actions: a verified, onboarded
-// recruiter ACCOUNT (cookie session) OR the legacy agency access code.
-export async function recruiterAuthed(codeFromClient: string): Promise<boolean> {
-  const RECRUITER_CODE = process.env.RECRUITER_CODE ?? "";
-  if (RECRUITER_CODE && codeFromClient.trim() === RECRUITER_CODE.trim()) return true;
-  const recruiter = await getRecruiterSessionAccount();
-  return !!(recruiter?.emailVerified && recruiter.onboardingComplete);
-}
+// CH-07: the legacy agency access code path (`recruiterAuthed`) is retired.
+// Recruiter-facing routes now authenticate exclusively via
+// `getRecruiterSessionAccount()` and require emailVerified + onboardingComplete.
+// The RECRUITER_CODE env value remains owner-side rotation cleanup only.
