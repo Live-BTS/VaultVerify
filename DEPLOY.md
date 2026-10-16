@@ -3,6 +3,8 @@
 Deploy target: **Vercel (app) + Supabase (Postgres) + Brevo (email)**.
 Local development keeps SQLite + simulated notifications; production swaps both via environment variables — no code changes required except one Prisma line.
 
+> ⚠️ **DATABASE SAFETY (SEC-24 / CH-04).** `bun run db:push` is **guarded**: it refuses to run against any non-local database (anything that is not `file:` or `localhost`) and it no longer passes `--accept-data-loss`. Never bypass the guard to "fix" a deployment — schema changes on the hosted database follow the reviewed migration path in §1 below, run deliberately by an operator against an explicitly exported `DATABASE_URL`, with a backup taken first. `db:reset` is destructive and is for local development only.
+
 ---
 
 ## 1 · Database — SQLite → Supabase Postgres
