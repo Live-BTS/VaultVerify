@@ -26,6 +26,8 @@ interface ShareRow {
   accessType: string; // ONE_TIME | DURATION
   durationDays: number | null;
   label: string;
+  recipientEmail?: string | null;
+  audience?: "SPECIFIC" | "ANYONE";
   createdAt: string;
   expiresAt: string | null;
   viewedAt: string | null;
@@ -126,7 +128,9 @@ export function ControlledSharingPanel({ onGoShare }: { onGoShare: (tab: "mine" 
             </p>
             <p className="truncate text-xs text-jade-muted">
               {l.assetSub}
-              {l.label && <> · shared with <span className="italic text-jade-ink">“{l.label}”</span></>}
+              {l.audience === "SPECIFIC" && l.recipientEmail && <> · for <span className="font-medium text-jade-ink">{l.recipientEmail}</span> only</>}
+              {l.audience === "ANYONE" && <> · anyone with the link</>}
+              {l.label && <> · “{l.label}”</>}
             </p>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-jade-muted/90">
               <span className="inline-flex items-center gap-1"><Link2 className="h-3 w-3" /> created {fmt(l.createdAt)}</span>

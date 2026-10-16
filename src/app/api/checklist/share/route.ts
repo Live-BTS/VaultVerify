@@ -1,17 +1,80 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
+import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
-import { evaluateChecklistShare } from "@/lib/bts/sharePolicy";
+import { evaluateChecklistShare, viewerAllowedByRecipient, resolveNewShareBinding } from "@/lib/bts/sharePolicy";
+import { specialtyLabel } from "@/lib/bts/checklistShared";
 import { newToken } from "@/lib/bts/tokens";
 
 // ── POST /api/checklist/share — candidate shares a completed checklist ──
-// create : { completionId, accessType: "ONE_TIME" | "DURATION", durationDays?, label? }
+// create : { completionId, accessType: "ONE_TIME" | "DURATION", durationDays?, label?, audience?, recipientEmail? }
 // resolve: { token } → public payload for the share view (marks ONE_TIME as viewed)
+// listMine: {} → every link the signed-in candidate controls (both types)
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   try {
+    // ── candidate's own share ledger (Controlled Sharing panel) ──
+    if (body.action === "listMine") {
+      const account = await getAccount();
+      if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
+
+      const checklistLinks = await db.checklistShareLink.findMany({
+        where: { completion: { accountId: account.id } },
+        include: { completion: true },
+        orderBy: { createdAt: "desc" },
+      });
+      const candidate = await db.candidate.findFirst({ where: { email: account.email.toLowerCase() }, select: { id: true } });
+      const refLinks = candidate
+        ? await db.referenceShareLink.findMany({
+            where: { request: { candidateId: candidate.id } },
+            include: { request: true },
+            orderBy: { createdAt: "desc" },
+          })
+        : [];
+
+      return NextResponse.json({
+        ok: true,
+        checklistLinks: checklistLinks.map((l) => ({
+          id: l.id,
+          token: l.token,
+          type: "CHECKLIST" as const,
+          assetLabel: l.completion.specialtyLabel || specialtyLabel(l.completion.specialty),
+          assetSub: `${l.completion.jobTitle} · completed ${new Date(l.completion.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`,
+          assetValidUntil: l.completion.expiresAt.toISOString(),
+          accessType: l.accessType,
+          durationDays: l.durationDays,
+          label: l.label,
+          recipientEmail: l.recipientEmail,
+          audience: l.recipientRecruiterId || l.recipientEmail ? "SPECIFIC" : "ANYONE",
+          createdAt: l.createdAt.toISOString(),
+          expiresAt: l.expiresAt?.toISOString() ?? null,
+          viewedAt: l.viewedAt?.toISOString() ?? null,
+          viewCount: l.viewCount,
+          revoked: l.revoked,
+        })),
+        refLinks: refLinks.map((l) => ({
+          id: l.id,
+          token: l.token,
+          type: "REFERENCE" as const,
+          assetLabel: `${l.request.refName} — ${l.request.facilityName}`,
+          assetSub: l.request.refTitle,
+          assetValidUntil: null,
+          accessType: l.accessType,
+          durationDays: l.durationDays,
+          label: l.label,
+          recipientEmail: l.recipientEmail,
+          audience: l.recipientRecruiterId || l.recipientEmail ? "SPECIFIC" : "ANYONE",
+          createdAt: l.createdAt.toISOString(),
+          expiresAt: l.expiresAt?.toISOString() ?? null,
+          viewedAt: l.viewedAt?.toISOString() ?? null,
+          viewCount: l.viewCount,
+          revoked: l.revoked,
+        })),
+      });
+    }
+
     // ── public resolve ──
     if (body.action === "resolve") {
       const token = String(body.token ?? "");
@@ -21,6 +84,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, reason: decision.reason }, { status: decision.status });
       }
       if (!link || !link.completion) return NextResponse.json({ ok: false, reason: "invalid" }, { status: 404 });
+
+      // CH-06: a bound link opens only for the recruiter the candidate named.
+      const viewer = await getRecruiterSessionAccount();
+      if (!viewerAllowedByRecipient(link, viewer ? { recruiterId: viewer.id, recruiterEmail: viewer.email } : null)) {
+        return NextResponse.json({ ok: false, reason: "reserved" }, { status: 403 });
+      }
 
       const account = await db.checklistAccount.findUnique({ where: { id: link.completion.accountId } });
       const firstView = link.accessType === "ONE_TIME" && !link.viewedAt;
@@ -98,6 +167,15 @@ export async function POST(req: NextRequest) {
       durationDays = Math.max(1, Math.min(365, Number(body.durationDays) || 0));
       if (!durationDays) return NextResponse.json({ ok: false, error: "Set how long the link stays open" }, { status: 400 });
     }
+
+    // CH-06: SPECIFIC (default) binds the link to the named recruiter; ANYONE is
+    // the candidate's explicit open-link choice. Legacy rows are never re-bound.
+    const binding = resolveNewShareBinding(body.audience, body.recipientEmail);
+    if (!binding.ok) return NextResponse.json({ ok: false, error: binding.error }, { status: 400 });
+    const recipientAccount = binding.recipientEmail
+      ? await db.recruiterAccount.findUnique({ where: { email: binding.recipientEmail } })
+      : null;
+
     const link = await db.checklistShareLink.create({
       data: {
         token: newToken(),
@@ -106,13 +184,15 @@ export async function POST(req: NextRequest) {
         durationDays,
         label: String(body.label ?? "").slice(0, 120),
         expiresAt: accessType === "DURATION" ? new Date(Date.now() + durationDays! * 24 * 60 * 60 * 1000) : null,
+        recipientRecruiterId: recipientAccount?.id ?? null,
+        recipientEmail: binding.recipientEmail,
       },
     });
-    await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_CREATED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ accessType, durationDays }) });
+    await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_CREATED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ accessType, durationDays, audience: binding.audience }) });
 
     return NextResponse.json({
       ok: true,
-      link: { token: link.token, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt },
+      link: { token: link.token, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt, audience: binding.audience, recipientEmail: binding.recipientEmail },
     });
   } catch (e) {
     console.error("[checklist/share]", e);

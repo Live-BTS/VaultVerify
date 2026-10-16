@@ -44,3 +44,47 @@ export function evaluateChecklistShare(
 }
 
 export const REPORT_VALIDITY_DAYS = CHECKLIST_VALIDITY_DAYS;
+
+// ── CH-06: per-recipient binding (PO decision: specific-recruiter sharing by
+// default; "anyone with this link" only on the candidate's explicit choice) ──
+// A share link is bound when EITHER recipient field is set. Bound links open
+// only for that recruiter (matched by account id or, if they signed up later,
+// by account email). Both fields null = OPEN link — legacy rows grandfathered
+// exactly as issued, and the explicit candidate "anyone" choice. No record
+// migration ever auto-binds an existing link.
+
+export type ShareAudience = "SPECIFIC" | "ANYONE";
+
+export interface RecipientBindingLike {
+  recipientRecruiterId: string | null;
+  recipientEmail: string | null;
+}
+
+export interface ShareViewer {
+  recruiterId?: string | null;
+  recruiterEmail?: string | null;
+}
+
+/** True when the viewer may open this link through its recipient binding. */
+export function viewerAllowedByRecipient(link: RecipientBindingLike, viewer: ShareViewer | null): boolean {
+  if (!link.recipientRecruiterId && !link.recipientEmail) return true; // OPEN link
+  if (!viewer) return false;
+  if (link.recipientRecruiterId && link.recipientRecruiterId === viewer.recruiterId) return true;
+  const email = (viewer.recruiterEmail ?? "").toLowerCase();
+  if (link.recipientEmail && email && link.recipientEmail.toLowerCase() === email) return true;
+  return false;
+}
+
+/** Normalize client input into the stored binding for a NEW share link. */
+export function resolveNewShareBinding(
+  audience: unknown,
+  recipientEmail: unknown,
+): { ok: true; audience: ShareAudience; recipientEmail: string | null } | { ok: false; error: string } {
+  if (audience === "ANYONE") return { ok: true, audience: "ANYONE", recipientEmail: null };
+  // SPECIFIC is the default — the candidate must name the recipient.
+  const email = String(recipientEmail ?? "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, error: "Enter the recipient recruiter's email, or explicitly choose “anyone with the link”." };
+  }
+  return { ok: true, audience: "SPECIFIC", recipientEmail: email };
+}

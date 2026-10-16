@@ -41,23 +41,29 @@ function ShareDialog({ completion, onClose, onCreated }: { completion: Completio
   const [preset, setPreset] = useState<string>("ONE_TIME");
   const [customDays, setCustomDays] = useState("30");
   const [label, setLabel] = useState("");
+  // CH-06: specific-recruiter sharing is the default; "anyone with the link"
+  // requires the candidate's explicit choice.
+  const [audience, setAudience] = useState<"SPECIFIC" | "ANYONE">("SPECIFIC");
+  const [recipientEmail, setRecipientEmail] = useState("");
   const [created, setCreated] = useState<{ token: string; accessType: string; durationDays: number | null; expiresAt: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const create = async () => {
     setBusy(true);
+    setError(null);
     try {
       const chosen = SHARE_PRESETS.find((p) => p.key === preset)!;
       const accessType = chosen.key === "ONE_TIME" ? "ONE_TIME" : "DURATION";
       const durationDays = chosen.key === "ONE_TIME" ? null : chosen.key === "custom" ? Number(customDays) : chosen.days;
       const res = await fetch("/api/checklist/share", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ completionId: completion.id, accessType, durationDays, label }),
+        body: JSON.stringify({ completionId: completion.id, accessType, durationDays, label, audience, recipientEmail }),
       });
       const d = await res.json();
       if (d.ok) { setCreated(d.link); onCreated(); } else throw new Error(d.error);
-    } catch { /* inline: button re-enables */ } finally { setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not create the link"); } finally { setBusy(false); }
   };
 
   const link = created ? `${window.location.origin}/?s=${created.token}` : "";
@@ -77,7 +83,29 @@ function ShareDialog({ completion, onClose, onCreated }: { completion: Completio
 
         {!created ? (
           <>
-            <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-jade-muted">Who can open it & for how long</p>
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-jade-muted">Who can open it</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setAudience("SPECIFIC")}
+                className={cn("rounded-xl border px-3 py-2.5 text-left text-sm transition",
+                  audience === "SPECIFIC" ? "border-verify-green bg-verify-green/15 text-verify-ink" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                <span className="block font-semibold">A recruiter I name</span>
+                <span className="mt-0.5 block text-[10px] opacity-75">Only their email opens it</span>
+              </button>
+              <button type="button" onClick={() => setAudience("ANYONE")}
+                className={cn("rounded-xl border px-3 py-2.5 text-left text-sm transition",
+                  audience === "ANYONE" ? "border-amber-500 bg-amber-50 text-amber-700" : "border-vault-border text-jade-muted hover:text-jade-ink")}>
+                <span className="block font-semibold">Anyone with the link</span>
+                <span className="mt-0.5 block text-[10px] opacity-75">Forward with care</span>
+              </button>
+            </div>
+            {audience === "SPECIFIC" && (
+              <div className="mt-2">
+                <Label className="text-jade-ink/80">Recruiter's email</Label>
+                <Input type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} placeholder="recruiter@agency.com"
+                  className="mt-1 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]" />
+              </div>
+            )}
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-jade-muted">And for how long</p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               {SHARE_PRESETS.map((p) => (
                 <button key={p.key} type="button" onClick={() => setPreset(p.key)}
@@ -102,6 +130,7 @@ function ShareDialog({ completion, onClose, onCreated }: { completion: Completio
               <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. For the SNF recruiter"
                 className="mt-1 border-vault-border bg-white text-jade-ink placeholder:text-[#8aa29c]" />
             </div>
+            {error && <p className="mt-2 text-xs font-medium text-rose-600">{error}</p>}
             <Button onClick={create} disabled={busy} className="mt-5 w-full bg-verify-green text-vault-dark hover:bg-verify-green/90">
               {busy ? "Creating…" : "Create share link"}
             </Button>
@@ -124,7 +153,9 @@ function ShareDialog({ completion, onClose, onCreated }: { completion: Completio
               <Button variant="ghost" onClick={onClose} className="border border-vault-border text-jade-muted hover:text-jade-ink">Done</Button>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-[#8aa29c]">
-              Send this to any recruiter. They’ll see the access type and deadline on the page, and can download the PDF.
+              {audience === "SPECIFIC" || (created as { audience?: string } | null)?.audience === "SPECIFIC"
+                ? "Only the recruiter you named can open this."
+                : "Send this to any recruiter. They'll see the access type and deadline on the page, and can download the PDF."}
             </p>
           </>
         )}

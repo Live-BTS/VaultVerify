@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
+import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { specialtyLabel } from "@/lib/bts/constants";
 import { newToken } from "@/lib/bts/tokens";
+import { viewerAllowedByRecipient, resolveNewShareBinding } from "@/lib/bts/sharePolicy";
 
 // ── /api/reference/share — candidate shares a COMPLETED reference report ──
 // GET  (session)          → ledger of every reference share link (Controlled Sharing)
@@ -85,6 +87,12 @@ export async function POST(req: NextRequest) {
       if (!link || link.revoked) return NextResponse.json({ ok: false, reason: "invalid" }, { status: 404 });
       if (link.accessType === "ONE_TIME" && link.viewedAt) return NextResponse.json({ ok: false, reason: "used" }, { status: 403 });
       if (link.expiresAt && link.expiresAt < new Date()) return NextResponse.json({ ok: false, reason: "expired" }, { status: 403 });
+      // CH-06: a bound link opens only for the recruiter the candidate named.
+      // OPEN links (both recipient fields null) behave exactly as issued.
+      const viewer = await getRecruiterSessionAccount();
+      if (!viewerAllowedByRecipient(link, viewer ? { recruiterId: viewer.id, recruiterEmail: viewer.email } : null)) {
+        return NextResponse.json({ ok: false, reason: "reserved" }, { status: 403 });
+      }
       const response = link.request.response;
       if (!response) return NextResponse.json({ ok: false, reason: "invalid" }, { status: 404 });
 
@@ -180,7 +188,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, expiresAt });
     }
 
-    // create — { requestId, accessType, durationDays?, label? }
+    // create — { requestId, accessType, durationDays?, label?, audience?, recipientEmail? }
     const request = await db.referenceRequest.findUnique({
       where: { id: String(body.requestId ?? "") },
       include: { candidate: true, response: true },
@@ -198,6 +206,15 @@ export async function POST(req: NextRequest) {
       durationDays = Math.max(1, Math.min(365, Number(body.durationDays) || 0));
       if (!durationDays) return NextResponse.json({ ok: false, error: "Set how long the link stays open" }, { status: 400 });
     }
+
+    // CH-06: SPECIFIC (default) binds the link to the named recruiter; ANYONE is
+    // the candidate's explicit open-link choice. Legacy rows are never re-bound.
+    const binding = resolveNewShareBinding(body.audience, body.recipientEmail);
+    if (!binding.ok) return NextResponse.json({ ok: false, error: binding.error }, { status: 400 });
+    const recipientAccount = binding.recipientEmail
+      ? await db.recruiterAccount.findUnique({ where: { email: binding.recipientEmail } })
+      : null;
+
     const link = await db.referenceShareLink.create({
       data: {
         token: newToken(),
@@ -206,13 +223,18 @@ export async function POST(req: NextRequest) {
         durationDays,
         label: String(body.label ?? "").slice(0, 120),
         expiresAt: accessType === "DURATION" ? new Date(Date.now() + durationDays! * 24 * 60 * 60 * 1000) : null,
+        recipientRecruiterId: recipientAccount?.id ?? null,
+        recipientEmail: binding.recipientEmail,
       },
     });
-    await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "REFERENCE_SHARE_CREATED", entity: "referenceShareLink", entityId: link.id, detail: JSON.stringify({ requestId: request.id, accessType, durationDays }) });
+    await logAudit({
+      actorType: "CANDIDATE", actorId: account.id, action: "REFERENCE_SHARE_CREATED", entity: "referenceShareLink", entityId: link.id,
+      detail: JSON.stringify({ requestId: request.id, accessType, durationDays, audience: binding.audience }),
+    });
 
     return NextResponse.json({
       ok: true,
-      link: { token: link.token, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt },
+      link: { token: link.token, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt, audience: binding.audience, recipientEmail: binding.recipientEmail },
     });
   } catch (e) {
     console.error("[reference/share]", e);

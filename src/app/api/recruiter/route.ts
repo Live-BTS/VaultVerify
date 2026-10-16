@@ -5,13 +5,18 @@ import { sendNotification, reminderBody } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { REMINDER_DAYS, LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
 import { getRecruiterSessionAccount } from "@/lib/bts/auth";
+import { viewerAllowedByRecipient } from "@/lib/bts/sharePolicy";
 
 // ── GET/POST /api/recruiter — recruiter dashboard (SESSION REQUIRED) ──
-// Authorization model (PO decision Q3): recruiters see ONLY reference reports
-// that candidates explicitly shared with them — i.e. requests with at least one
-// ACTIVE ReferenceShareLink (not revoked, not consumed, not expired). The legacy
-// agency-wide static access code no longer grants pipeline access. Fraud-flag
-// resolution is an admin function owned by the superadmin console.
+// Authorization model (PO decision Q3 + CH-06): recruiters see ONLY reference
+// reports shared with THEM — a request is visible when it has an ACTIVE share
+// link (not revoked, not consumed, not expired) whose recipient binding admits
+// this recruiter: bound to their account/email, or an OPEN link (both recipient
+// fields null — legacy rows grandfathered, or the candidate's explicit
+// "anyone with this link" choice). Links bound to a different recruiter are
+// invisible here. The legacy agency-wide static access code no longer grants
+// pipeline access. Fraud-flag resolution is an admin function owned by the
+// superadmin console.
 
 function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
@@ -39,12 +44,16 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Explicitly shared requests only: any request that currently has an active
-  // share link granted by a candidate. Revoked/expired/consumed links cut access.
+  // Explicitly shared requests only, and only bindings that admit THIS
+  // recruiter (CH-06). Revoked/expired/consumed links cut access; links bound
+  // to another recruiter never appear.
   // SEC-01(a)/SEC-15/CH-05: explicit field projection — the recruiter payload
   // carries report CONTENT only. Screening metadata (signerIp/signerUserAgent),
   // fraud-flag rows (admin console keeps those), and raw bearer share tokens
   // are never sent to recruiters.
+  const viewer = { recruiterId: recruiter.id, recruiterEmail: recruiter.email };
+  type ShareRowLike = { revoked: boolean; accessType: string; viewedAt: Date | null; expiresAt: Date | null } & Parameters<typeof viewerAllowedByRecipient>[0];
+  const admitted = (l: ShareRowLike) => linkIsActive(l) && viewerAllowedByRecipient(l, viewer);
   const all = await db.referenceRequest.findMany({
     orderBy: { sentAt: "desc" },
     include: {
@@ -54,7 +63,7 @@ export async function GET(req: NextRequest) {
       shares: true,
     },
   });
-  const requests = all.filter((r) => r.shares.some(linkIsActive)).map((r) => ({
+  const requests = all.filter((r) => r.shares.some(admitted)).map((r) => ({
     id: r.id,
     status: r.status,
     sentAt: r.sentAt,
@@ -98,7 +107,7 @@ export async function GET(req: NextRequest) {
   const active = requests.filter((r) => r.status !== "COMPLETED" && r.status !== "FLAGGED" && r.status !== "EXPIRED");
   // Flag-derived stats are computed server-side from the pre-projection rows;
   // flag details themselves stay in the admin console (SEC-15).
-  const flagged = all.filter((r) => r.shares.some(linkIsActive) && (r.status === "FLAGGED" || r.flags.length > 0));
+  const flagged = all.filter((r) => r.shares.some(admitted) && (r.status === "FLAGGED" || r.flags.length > 0));
   const durations = completed.map((r) => r.response?.durationSeconds ?? 0).filter((d) => d > 0).sort((a, b) => a - b);
   const median = durations.length > 0 ? durations[Math.floor(durations.length / 2)] : null;
   const ratings = completed.map((r) => r.response?.overallRating).filter((v): v is number => v != null);
@@ -107,7 +116,7 @@ export async function GET(req: NextRequest) {
   await logAudit({ actorType: "RECRUITER", actorId: recruiter.id, action: "DASHBOARD_VIEWED", entity: "recruiter", ip: clientIp(req) });
 
   return NextResponse.json({
-    agency: all.find((r) => r.shares.some(linkIsActive))?.candidate.agency ?? null,
+    agency: all.find((r) => r.shares.some(admitted))?.candidate.agency ?? null,
     stats: {
       totalRequests: requests.length,
       completedCount: completed.length,
@@ -154,13 +163,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.action === "run_reminders") {
-    // Scoped sweep: only requests explicitly shared with recruiters via an
-    // active share link — never the whole agency pipeline.
+    // Scoped sweep: only requests admitted to THIS recruiter via an active,
+    // binding-compatible share link (CH-06) — never the whole agency pipeline.
+    const viewer = { recruiterId: recruiter.id, recruiterEmail: recruiter.email };
     const all = await db.referenceRequest.findMany({
       where: { status: { in: ["SENT", "OPENED", "IN_PROGRESS"] } },
       include: { candidate: { include: { agency: true } }, shares: true },
     });
-    const active = all.filter((r) => r.shares.some(linkIsActive));
+    const active = all.filter((r) => r.shares.some((l) => linkIsActive(l) && viewerAllowedByRecipient(l, viewer)));
     let sent = 0;
     let expiredCount = 0;
     for (const r of active) {

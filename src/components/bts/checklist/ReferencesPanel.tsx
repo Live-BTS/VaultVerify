@@ -344,7 +344,7 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
   );
 }
 
-// ── Share a completed reference: one-time or duration link, candidate-controlled ──
+// ── Share a completed reference: recipient-bound by default, candidate-controlled ──
 function RefShareDialog({ request, onCreated }: { request: { id: string; refName: string }; onCreated: () => void }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -352,6 +352,10 @@ function RefShareDialog({ request, onCreated }: { request: { id: string; refName
   const [accessType, setAccessType] = useState<"ONE_TIME" | "DURATION">("DURATION");
   const [days, setDays] = useState(14);
   const [label, setLabel] = useState("");
+  // CH-06: specific-recruiter sharing is the default; "anyone with the link"
+  // requires the candidate's explicit choice.
+  const [audience, setAudience] = useState<"SPECIFIC" | "ANYONE">("SPECIFIC");
+  const [recipientEmail, setRecipientEmail] = useState("");
   const [created, setCreated] = useState<{ token: string; expiresAt: string | null } | null>(null);
 
   const create = async () => {
@@ -359,12 +363,12 @@ function RefShareDialog({ request, onCreated }: { request: { id: string; refName
     try {
       const res = await fetch("/api/reference/share", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create", requestId: request.id, accessType, durationDays: accessType === "DURATION" ? days : undefined, label }),
+        body: JSON.stringify({ action: "create", requestId: request.id, accessType, durationDays: accessType === "DURATION" ? days : undefined, label, audience, recipientEmail }),
       });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Could not create the link");
       setCreated({ token: d.link.token, expiresAt: d.link.expiresAt });
-      toast({ title: `Share link ready for ${request.refName}'s report` });
+      toast({ title: d.link.audience === "SPECIFIC" ? `Link ready — only ${d.link.recipientEmail} can open it` : `Share link ready for ${request.refName}'s report` });
       onCreated();
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Could not create the link", variant: "destructive" });
@@ -388,8 +392,27 @@ function RefShareDialog({ request, onCreated }: { request: { id: string; refName
         </DialogHeader>
         {!created ? (
           <>
-            <p className="text-sm text-jade-muted">Anyone with the link sees the signed report — you keep control and can revoke it anytime from Controlled sharing.</p>
+            <p className="text-sm text-jade-muted">You control who sees the signed report and can revoke it anytime from Controlled sharing.</p>
             <div className="mt-1 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-jade-muted">Who can open it</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setAudience("SPECIFIC")}
+                  className={cn("rounded-xl border p-3 text-left text-xs transition", audience === "SPECIFIC" ? "border-verify-green bg-verify-green/10 text-verify-ink" : "border-vault-border text-jade-muted hover:border-verify-green/40")}>
+                  <p className="text-sm font-semibold">A recruiter I name</p>
+                  <p className="mt-0.5">Only their email opens it</p>
+                </button>
+                <button type="button" onClick={() => setAudience("ANYONE")}
+                  className={cn("rounded-xl border p-3 text-left text-xs transition", audience === "ANYONE" ? "border-amber-400 bg-amber-50 text-amber-700" : "border-vault-border text-jade-muted hover:border-verify-green/40")}>
+                  <p className="text-sm font-semibold">Anyone with the link</p>
+                  <p className="mt-0.5">Forward with care</p>
+                </button>
+              </div>
+              {audience === "SPECIFIC" && (
+                <div>
+                  <Label htmlFor="ref-share-recipient" className="text-xs">Recruiter's email</Label>
+                  <Input id="ref-share-recipient" type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} placeholder="recruiter@agency.com" className="mt-1" />
+                </div>
+              )}
               <p className="text-xs font-semibold uppercase tracking-wider text-jade-muted">Access rule</p>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => setAccessType("DURATION")}
