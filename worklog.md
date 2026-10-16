@@ -563,3 +563,20 @@ Work Log:
 
 Stage Summary:
 - Audit complete; report at HEAD-adjacent (untracked). 4 P0 items await owner decisions: rotate static codes; gate prod seeding; invite/PDF ownership binding; recruiter per-recipient share model. Nothing pushed; 2 local commits remain unpushed from TECH-AUDIT-1 (awaiting approval).
+
+---
+Task ID: DELIVERY-AUDIT-1
+Agent: Super Z (main agent)
+Task: PO-ordered "continue and push the code; do the testing if everything is working fine" — regression-test the unpushed TECH-AUDIT-1 + SEC-AUDIT-1 work and deliver to origin.
+
+Work Log:
+- Baseline verified: main @ 0d7dc27, clean tree, 3 commits unpushed (db8a55f platform mode-bit-only; a4fcf33 technical-audit fixes + vitest suite + docs; 0d7dc27 SEC-AUDIT-1 report + worklog). Nothing reset/rewritten; local commits preserved.
+- Secret-exposure pre-push sweep of shipping docs: only already-public burned values (zipvault2026, demo1234 — documented as findings SEC-03/H4); zero PAT/Brevo-key patterns in any file to be pushed.
+- Test-safety verification before running: tests/setup.ts overrides DATABASE_URL to disposable tests/test-audit.db (dev db/custom.db untouched), BREVO_API_KEY forced empty (no real email possible), test-only codes.
+- Testing results: bunx vitest run = 40/40 passed (sharePolicy 14, authz 25, copyClaims 1); bunx tsc --noEmit = 46 errors = 46 baseline (zero new); live smoke: GET / = 200, GET /api/checklists = valid catalog JSON (5 sets/55 skills), wrong-method probe on /api/checklist/share = 405 (method guard intact). Disposable test DB deleted post-run; tree clean.
+- PUSH BLOCKED: sandbox recycled — ~/.git-credentials and credential.helper gone; no GH token in env. Awaiting fresh PAT (fine-grained, Contents: R/W on Live-BTS/VaultVerify) to configure credential store (chmod 600, outside repo) and push db8a55f..0d7dc27 + this entry.
+
+Stage Summary:
+- Testing green; delivery content verified secret-safe; push pending credentials only.
+- After push: verify origin tip reaches 0d7dc27 (+ this worklog commit); watch for platform UUID auto-commit carrying db/custom.db drift (A2 untrack still recommended); Vercel auto-deploy will trigger.
+- Pending owner decisions unchanged (SEC-AUDIT-1 section 14): rotate SUPERADMIN_CODE/RECRUITER_CODE; H4 demo-seed gate; invite/PDF ownership binding; recruiter per-recipient share model; suggested one-liner: gitignore tests/test-audit.db.
