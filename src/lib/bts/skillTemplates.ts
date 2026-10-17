@@ -125,17 +125,20 @@ export const BUILTIN_CHECKLISTS = [
 
 export async function seedBuiltinTemplates() {
   for (const set of BUILTIN_CHECKLISTS) {
-    const rows = set.skills.map(([category, skillName], i) => ({
-      profession: "Nursing",
-      jobTitle: "RN",
-      specialty: set.specialty,
-      specialtyKey: set.specialty,
-      category,
-      skillName,
-      questionType: "rating_1_4",
-      hasNA: true,
-      sortOrder: i,
-    }));
+    const rows = set.skills.map((entry, i) => {
+      const [category, skillName] = entry as readonly [string, string];
+      return {
+        profession: "Nursing",
+        jobTitle: "RN",
+        specialty: set.specialty,
+        specialtyKey: set.specialty,
+        category,
+        skillName,
+        questionType: "rating_1_4",
+        hasNA: true,
+        sortOrder: i,
+      };
+    });
     const { errors } = validateRows(rows as ImportRow[]);
     if (errors.length) throw new Error(`Builtin seed invalid: ${errors.join("; ")}`);
     await upsertTemplates(rows as ValidatedRow[], "BUILTIN");

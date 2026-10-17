@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
 
       const [invites, requests, completions] = await Promise.all([
         db.checklistInvite.findMany({ where: { accountId: account.id }, orderBy: { createdAt: "desc" } }),
-        db.checklistRequest.findMany({ where: { accountId: account.id }, orderBy: { requestedAt: "desc" } }),
+        db.checklistRequest.findMany({ where: { accountId: account.id }, orderBy: { requestedAt: "desc" }, include: { completion: { select: { id: true } } } }),
         db.checklistCompletion.findMany({ where: { accountId: account.id }, orderBy: { completedAt: "desc" }, include: { shareLinks: { orderBy: { createdAt: "desc" } } } }),
       ]);
 

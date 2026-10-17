@@ -40,7 +40,9 @@ interface RecruiterRow {
   joinedAt: string;
 }
 interface ImpersonationView {
-  kind: string; id: string; name: string; email: string; status: string; emailVerified: boolean;
+  // The impersonate_view API only ever returns these two kinds — narrowed here
+  // so security actions can pass it straight through.
+  kind: "CANDIDATE" | "RECRUITER"; id: string; name: string; email: string; status: string; emailVerified: boolean;
   onboardingComplete: boolean; liveSessions: number; createdAt: string;
   profile: Record<string, string | number>;
   invites: { id: string; candidate: string; specialty: string; status: string; createdAt: string }[];
@@ -469,7 +471,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
     try {
       const d = await call({ action: "template_get", key });
       setTplEdit({ key: d.key, name: d.name, subject: d.subject, html: d.html, description: d.description, customized: d.customized });
-      setTplTestTo(data.identity?.email ?? "");
+      setTplTestTo(data?.identity?.email ?? "");
     } catch (e) {
       toast({ title: "Could not load template", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     }
@@ -1032,7 +1034,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                                 Reactivate
                               </button>
                             ) : (
-                              <button type="button" onClick={() => changeUserStatus({ ...u, completions: 0, requests: 0, invites: 0 } as UserRow, "SUSPENDED")}
+                              <button type="button" onClick={() => changeUserStatus({ ...u, completions: 0, requests: 0, invites: 0 } as unknown as UserRow, "SUSPENDED")}
                                 className="rounded-full border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50">
                                 Suspend
                               </button>
@@ -1728,7 +1730,9 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                 </div>
                 {ping && (
                   <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                    {[ping.db && ["Database", ping.db], ping.brevo && ["Brevo email", ping.brevo]].filter(Boolean).map(([label, v]) => {
+                    {([["Database", ping.db], ["Brevo email", ping.brevo]] as [string, { ok: boolean; detail: string } | null][])
+                      .filter((entry): entry is [string, { ok: boolean; detail: string }] => entry[1] !== null)
+                      .map(([label, v]) => {
                       const item = v as { ok: boolean; detail: string };
                       return (
                         <div key={label as string} className={cn("rounded-xl border px-4 py-3 text-sm", item.ok ? "border-verify-green/30 bg-verify-green/5" : "border-rose-200 bg-rose-50")}>

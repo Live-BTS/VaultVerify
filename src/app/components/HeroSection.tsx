@@ -7,7 +7,7 @@ import {
   useScroll,
   useTransform,
   type Variants,
-} from "motion/react";
+} from "framer-motion";
 import {
   ArrowRight,
   Ban,

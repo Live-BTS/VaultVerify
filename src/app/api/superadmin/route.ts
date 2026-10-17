@@ -590,10 +590,11 @@ export async function POST(req: NextRequest) {
           : await db.checklistAccount.findUnique({ where: { id } });
         if (!account) return NextResponse.json({ ok: false, error: "Account not found" }, { status: 404 });
         const temp = tempPassword();
-        await (kind === "RECRUITER" ? db.recruiterAccount : db.checklistAccount).update({
-          where: { id: account.id },
-          data: { passwordHash: hashPassword(temp), failedLogins: 0 },
-        });
+        if (kind === "RECRUITER") {
+          await db.recruiterAccount.update({ where: { id: account.id }, data: { passwordHash: hashPassword(temp), failedLogins: 0 } });
+        } else {
+          await db.checklistAccount.update({ where: { id: account.id }, data: { passwordHash: hashPassword(temp), failedLogins: 0 } });
+        }
         const token = await createPasswordReset(kind, account.id);
         if (kind === "RECRUITER") await killRecruiterSessions(account.id);
         else await killCandidateSessions(account.id);
@@ -686,9 +687,9 @@ export async function POST(req: NextRequest) {
             failedLogins: a.failedLogins, joinedAt: a.createdAt.toISOString(),
           }));
         } else if (what === "companies") {
-          for (const a of await db.agency.findMany({ orderBy: { createdAt: "asc" } })) {
+          for (const a of await db.agency.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { candidates: true } } } })) {
             rows.push({
-              name: a.name, slug: a.slug, candidates: a._count?.candidates ?? (await db.candidate.count({ where: { agencyId: a.id } })),
+              name: a.name, slug: a.slug, candidates: a._count.candidates,
               status: a.status, allowOverage: a.allowOverage, creditsGranted: a.creditsGranted,
               creditsRemaining: await creditBalance(a.id), createdAt: a.createdAt.toISOString(),
             });
@@ -716,7 +717,7 @@ export async function POST(req: NextRequest) {
           actorId: auditActor,
           action: "SKILL_TEMPLATES_IMPORTED",
           entity: "skillTemplate",
-          detail: JSON.stringify({ submitted: rows.length, created: result.created, updated: result.updated, rejected: errors.length }),
+          detail: { submitted: rows.length, created: result.created, updated: result.updated, rejected: errors.length },
         });
         return NextResponse.json({ ok: true, ...result, errors });
       }
@@ -761,7 +762,7 @@ export async function POST(req: NextRequest) {
           action: body.approve ? "CHECKLIST_REQUEST_APPROVED" : "CHECKLIST_REQUEST_REJECTED",
           entity: "checklistRequest",
           entityId: request.id,
-          detail: JSON.stringify({ specialty: request.specialty, email: request.account.email }),
+          detail: { specialty: request.specialty, email: request.account.email },
         });
         return NextResponse.json({ ok: true, request: updated });
       }
@@ -775,7 +776,7 @@ export async function POST(req: NextRequest) {
           actorId: auditActor,
           action: "SKILL_TEMPLATE_SET_DELETED",
           entity: "skillTemplate",
-          detail: JSON.stringify({ specialty: body.specialty, deleted: del.count }),
+          detail: { specialty: body.specialty, deleted: del.count },
         });
         return NextResponse.json({ ok: true, deleted: del.count });
       }
@@ -794,7 +795,7 @@ export async function POST(req: NextRequest) {
             sortOrder: Number(body.sortOrder) || (kind === "YES_NO" ? 10 : 50),
           },
         });
-        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_CREATED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ kind }) });
+        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_CREATED", entity: "checklistExtraQuestion", entityId: q.id, detail: { kind } });
         return NextResponse.json({ ok: true, question: q });
       }
 
@@ -815,7 +816,7 @@ export async function POST(req: NextRequest) {
 
       case "extra.toggle": {
         const q = await db.checklistExtraQuestion.update({ where: { id: String(body.id ?? "") }, data: { active: !!body.active } });
-        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_TOGGLED", entity: "checklistExtraQuestion", entityId: q.id, detail: JSON.stringify({ active: q.active }) });
+        await logAudit({ actorType: "RECRUITER", actorId: auditActor, action: "EXTRA_QUESTION_TOGGLED", entity: "checklistExtraQuestion", entityId: q.id, detail: { active: q.active } });
         return NextResponse.json({ ok: true, question: q });
       }
 

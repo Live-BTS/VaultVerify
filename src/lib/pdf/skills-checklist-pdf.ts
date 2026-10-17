@@ -606,7 +606,7 @@ function draw(data: ChecklistData, assetsDir: string, total: number): Promise<{ 
     // Drawn / uploaded signature: embed the image above the line (additive extension).
     try {
       const b64 = String(att.signatureImage).replace(/^data:image\/\w+;base64,/, "");
-      doc.image(Buffer.from(b64, "base64"), sx + 6, sy - 10, { fit: [200, 30], align: "left" });
+      doc.image(Buffer.from(b64, "base64"), sx + 6, sy - 10, { fit: [200, 30] });
     } catch { /* ignore malformed image data; the line stays blank */ }
   } else if (att.signatureName) {
     text(sx + 6, sy + 16, att.signatureName, "Sig", 24, INK);

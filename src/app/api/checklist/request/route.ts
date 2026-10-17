@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     const request = await db.checklistRequest.create({
       data: { accountId: account.id, profession, jobTitle, specialty },
     });
-    await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "CHECKLIST_REQUESTED", entity: "checklistRequest", entityId: request.id, detail: JSON.stringify({ specialty, jobTitle }) });
+    await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "CHECKLIST_REQUESTED", entity: "checklistRequest", entityId: request.id, detail: { specialty, jobTitle } });
 
     return NextResponse.json({ ok: true, requestId: request.id });
   } catch (e) {

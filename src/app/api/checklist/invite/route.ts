@@ -204,7 +204,7 @@ export async function POST(req: NextRequest) {
     await logAudit({
       actorType: "RECRUITER", actorId: recruiter.id, action: "CHECKLIST_INVITE_SENT",
       entity: "checklistInvite", entityId: invite.id,
-      detail: JSON.stringify({ candidateEmail, specialty: invite.specialty }),
+      detail: { candidateEmail, specialty: invite.specialty },
     });
 
     return NextResponse.json({

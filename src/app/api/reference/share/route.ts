@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
         });
       }
       if (firstView) {
-        await logAudit({ actorType: "RECRUITER", actorId: "ref-share-link", action: "REFERENCE_SHARE_VIEWED", entity: "referenceShareLink", entityId: link.id, detail: JSON.stringify({ oneTime: true }) });
+        await logAudit({ actorType: "RECRUITER", actorId: "ref-share-link", action: "REFERENCE_SHARE_VIEWED", entity: "referenceShareLink", entityId: link.id, detail: { oneTime: true } });
       }
 
       const r = link.request;
@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
         where: { id: link.id },
         data: { expiresAt, durationDays: (link.durationDays ?? 0) + days },
       });
-      await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "REFERENCE_SHARE_EXTENDED", entity: "referenceShareLink", entityId: link.id, detail: JSON.stringify({ days }) });
+      await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "REFERENCE_SHARE_EXTENDED", entity: "referenceShareLink", entityId: link.id, detail: { days } });
       return NextResponse.json({ ok: true, expiresAt });
     }
 
@@ -262,7 +262,7 @@ export async function POST(req: NextRequest) {
     });
     await logAudit({
       actorType: "CANDIDATE", actorId: account.id, action: "REFERENCE_SHARE_CREATED", entity: "referenceShareLink", entityId: link.id,
-      detail: JSON.stringify({ requestId: request.id, accessType, durationDays, audience: binding.audience }),
+      detail: { requestId: request.id, accessType, durationDays, audience: binding.audience },
     });
 
     return NextResponse.json({

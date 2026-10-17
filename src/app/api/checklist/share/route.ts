@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
         });
       }
       if (firstView) {
-        await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ oneTime: true }) });
+        await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: { oneTime: true } });
       }
 
       return NextResponse.json({
@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
         where: { id: link.id },
         data: { expiresAt, durationDays: (link.durationDays ?? 0) + days },
       });
-      await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_EXTENDED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ days }) });
+      await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_EXTENDED", entity: "checklistShareLink", entityId: link.id, detail: { days } });
       return NextResponse.json({ ok: true, expiresAt });
     }
 
@@ -222,7 +222,7 @@ export async function POST(req: NextRequest) {
         recipientEmail: binding.recipientEmail,
       },
     });
-    await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_CREATED", entity: "checklistShareLink", entityId: link.id, detail: JSON.stringify({ accessType, durationDays, audience: binding.audience }) });
+    await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_CREATED", entity: "checklistShareLink", entityId: link.id, detail: { accessType, durationDays, audience: binding.audience } });
 
     return NextResponse.json({
       ok: true,

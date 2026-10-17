@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       let lastPerformed: string | null = null;
       if (t.questionType === "rating_1_4") {
         const lp = typeof a.lastPerformed === "string" ? a.lastPerformed : "";
-        if (!RECENCY_KEYS.includes(lp)) {
+        if (!(RECENCY_KEYS as readonly string[]).includes(lp)) {
           problems.push(`Pick when you last performed it: ${t.skillName}`);
         } else {
           lastPerformed = lp;
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
     await logAudit({
       actorType: "CANDIDATE", actorId: account.id, action: "CHECKLIST_COMPLETED",
       entity: "checklistCompletion", entityId: completion.id,
-      detail: JSON.stringify({ specialty: spec.specialty, skills: answers.length, source: inviteId ? "RECRUITER" : "SELF", attested: true }),
+      detail: { specialty: spec.specialty, skills: answers.length, source: inviteId ? "RECRUITER" : "SELF", attested: true },
     });
 
     return NextResponse.json({ ok: true, completionId: completion.id, expiresAt });

@@ -122,7 +122,7 @@ export async function buildReferencePacket(data: PacketData): Promise<Uint8Array
   const sectionTitle = (t: string, color: RGB = primary) => {
     ensure(28);
     y -= 12;
-    page.drawText(sanitize(t.toUpperCase()), { x: M, y: y - 10, size: 10, font: bold, color, letterSpacing: 0.5 });
+    page.drawText(sanitize(t.toUpperCase()), { x: M, y: y - 10, size: 10, font: bold, color });
     y -= 18;
   };
 

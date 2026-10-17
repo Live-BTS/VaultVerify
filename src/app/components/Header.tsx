@@ -8,7 +8,7 @@ import {
   useScroll,
   useMotionValueEvent,
   type Variants,
-} from 'motion/react';
+} from 'framer-motion';
 import { Menu, X, ArrowRight } from 'lucide-react';
 import { VaultMark } from '@/components/bts/brand';
 import ThemeToggle, { type LandingTheme } from '@/app/components/ThemeToggle';
