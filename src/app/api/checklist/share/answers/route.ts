@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { evaluateCompanionRead, type ShareRejectReason } from "@/lib/bts/sharePolicy";
+import { tokenLookups } from "@/lib/bts/tokens";
 
 const reject = (r: ShareRejectReason) => NextResponse.json({ ok: false, reason: r }, { status: r === "invalid" ? 404 : 403 });
 
@@ -13,7 +14,8 @@ const reject = (r: ShareRejectReason) => NextResponse.json({ ok: false, reason: 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token") ?? "";
   try {
-    const link = await db.checklistShareLink.findUnique({ where: { token }, include: { completion: true } });
+    // D4: digest-first lookup (post-cutover rows), raw fallback (legacy rows).
+    const link = await db.checklistShareLink.findFirst({ where: { token: { in: tokenLookups(token) } }, include: { completion: true } });
     const decision = evaluateCompanionRead(link, link?.completion);
     if (!decision.ok) return reject(decision.reason!);
     if (!link || !link.completion) return reject("invalid");

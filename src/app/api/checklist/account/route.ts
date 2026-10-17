@@ -4,6 +4,7 @@ import { createSession, destroySession, getAccount, hashPassword, verifyPassword
 import { createVerification, sendVerificationEmail, maskEmail, dbConfigured, emailLive } from "@/lib/bts/auth";
 import { assertPlatformWritable } from "@/lib/bts/platform";
 import { logAudit } from "@/lib/bts/audit";
+import { isTokenHashed } from "@/lib/bts/tokens";
 
 // ── /api/checklist/account — candidate account for the skills checklist ──
 // actions: signup | login | logout | me | profile | resend
@@ -239,7 +240,9 @@ export async function POST(req: NextRequest) {
             additional: safeParse(c.additional, []) as unknown[], // extra-question snapshot
             attestation: c.attestation ? safeParse(c.attestation, null) : null,
             shareLinks: c.shareLinks.map((s) => ({
-              id: s.id, token: s.token, accessType: s.accessType, durationDays: s.durationDays,
+              // D4: hashed rows can't re-display their URL (shown once at
+              // creation); legacy rows keep a working linkUrl until first resolve.
+              id: s.id, linkUrl: isTokenHashed(s.token) ? null : `/?s=${s.token}`, accessType: s.accessType, durationDays: s.durationDays,
               label: s.label, createdAt: s.createdAt, expiresAt: s.expiresAt,
               viewedAt: s.viewedAt, viewCount: s.viewCount, revoked: s.revoked,
             })),

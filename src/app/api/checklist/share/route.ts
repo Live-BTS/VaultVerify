@@ -5,7 +5,7 @@ import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 import { evaluateChecklistShare, viewerAllowedByRecipient, resolveNewShareBinding } from "@/lib/bts/sharePolicy";
 import { specialtyLabel } from "@/lib/bts/checklistShared";
-import { newToken } from "@/lib/bts/tokens";
+import { newToken, sha256Hex, tokenLookups, isTokenHashed } from "@/lib/bts/tokens";
 
 // ── POST /api/checklist/share — candidate shares a completed checklist ──
 // create : { completionId, accessType: "ONE_TIME" | "DURATION", durationDays?, label?, audience?, recipientEmail? }
@@ -36,9 +36,13 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         ok: true,
+        // D4: hashed rows can never re-display their URL — the full link was
+        // shown exactly once in the creation response. Legacy (pre-cutover)
+        // rows keep their raw token until first resolve, so they still get a
+        // working linkUrl here.
         checklistLinks: checklistLinks.map((l) => ({
           id: l.id,
-          token: l.token,
+          linkUrl: isTokenHashed(l.token) ? null : `/?s=${l.token}`,
           type: "CHECKLIST" as const,
           assetLabel: l.completion.specialtyLabel || specialtyLabel(l.completion.specialty),
           assetSub: `${l.completion.jobTitle} · completed ${new Date(l.completion.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`,
@@ -56,7 +60,7 @@ export async function POST(req: NextRequest) {
         })),
         refLinks: refLinks.map((l) => ({
           id: l.id,
-          token: l.token,
+          linkUrl: isTokenHashed(l.token) ? null : `/?rs=${l.token}`,
           type: "REFERENCE" as const,
           assetLabel: `${l.request.refName} — ${l.request.facilityName}`,
           assetSub: l.request.refTitle,
@@ -77,8 +81,10 @@ export async function POST(req: NextRequest) {
 
     // ── public resolve ──
     if (body.action === "resolve") {
+      // D4: try the SHA-256 digest first (post-cutover rows), then the raw
+      // value (legacy rows). At most one row can match — the column is unique.
       const token = String(body.token ?? "");
-      const link = await db.checklistShareLink.findUnique({ where: { token }, include: { completion: true } });
+      const link = await db.checklistShareLink.findFirst({ where: { token: { in: tokenLookups(token) } }, include: { completion: true } });
       const decision = evaluateChecklistShare(link, link?.completion);
       if (!decision.ok) {
         return NextResponse.json({ ok: false, reason: decision.reason }, { status: decision.status });
@@ -105,7 +111,9 @@ export async function POST(req: NextRequest) {
         // the answers fetch and the PDF save of the already-delivered view.)
         const claimed = await db.checklistShareLink.updateMany({
           where: { id: link.id, viewedAt: null },
-          data: { viewedAt: now, viewCount: { increment: 1 } },
+          // D4: the same statement lazily upgrades a legacy row (raw → digest);
+          // for post-cutover rows writing the digest back is a no-op.
+          data: { viewedAt: now, viewCount: { increment: 1 }, token: sha256Hex(token) },
         });
         if (claimed.count === 0) {
           return NextResponse.json({ ok: false, reason: "used" }, { status: 403 });
@@ -114,7 +122,7 @@ export async function POST(req: NextRequest) {
       } else {
         await db.checklistShareLink.update({
           where: { id: link.id },
-          data: { viewedAt: link.viewedAt ?? now, viewCount: { increment: 1 } },
+          data: { viewedAt: link.viewedAt ?? now, viewCount: { increment: 1 }, token: sha256Hex(token) },
         });
       }
       if (firstView) {
@@ -159,20 +167,26 @@ export async function POST(req: NextRequest) {
         { status: 403 },
       );
 
-    // ── revoke: { token } — candidate withdraws a share link ──
+    // ── revoke: { id } (or legacy { token }) — candidate withdraws a share link ──
+    // D4: id-based (the ledger carries row ids; hashed rows have no raw token
+    // to present). The token path remains for sessions opened before the cutover.
     if (body.action === "revoke") {
-      const link = await db.checklistShareLink.findUnique({ where: { token: String(body.token ?? "") }, include: { completion: true } });
+      const link = body.id
+        ? await db.checklistShareLink.findUnique({ where: { id: String(body.id) }, include: { completion: true } })
+        : await db.checklistShareLink.findFirst({ where: { token: { in: tokenLookups(String(body.token ?? "")) } }, include: { completion: true } });
       if (!link || link.completion.accountId !== account.id) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
       await db.checklistShareLink.update({ where: { id: link.id }, data: { revoked: true } });
       await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "SHARE_LINK_REVOKED", entity: "checklistShareLink", entityId: link.id });
       return NextResponse.json({ ok: true });
     }
 
-    // ── extend: { token, days } — push the expiry out (DURATION links) ──
+    // ── extend: { id, days } (or legacy { token, days }) — push the expiry out (DURATION links) ──
     if (body.action === "extend") {
       const gated = needsVerifiedEmail();
       if (gated) return gated;
-      const link = await db.checklistShareLink.findUnique({ where: { token: String(body.token ?? "") }, include: { completion: true } });
+      const link = body.id
+        ? await db.checklistShareLink.findUnique({ where: { id: String(body.id) }, include: { completion: true } })
+        : await db.checklistShareLink.findFirst({ where: { token: { in: tokenLookups(String(body.token ?? "")) } }, include: { completion: true } });
       if (!link || link.completion.accountId !== account.id) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
       if (link.revoked) return NextResponse.json({ ok: false, error: "This link was revoked — create a new one" }, { status: 400 });
       if (link.accessType !== "DURATION") return NextResponse.json({ ok: false, error: "One-time links can't be extended" }, { status: 400 });
@@ -210,9 +224,12 @@ export async function POST(req: NextRequest) {
       ? await db.recruiterAccount.findUnique({ where: { email: binding.recipientEmail } })
       : null;
 
+    // D4: the raw token is generated here, hashed into the row, and returned
+    // ONCE in this response — it is never stored and never re-displayed.
+    const rawToken = newToken();
     const link = await db.checklistShareLink.create({
       data: {
-        token: newToken(),
+        token: sha256Hex(rawToken),
         completionId: completion.id,
         accessType,
         durationDays,
@@ -226,7 +243,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      link: { token: link.token, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt, audience: binding.audience, recipientEmail: binding.recipientEmail },
+      link: { token: rawToken, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt, audience: binding.audience, recipientEmail: binding.recipientEmail },
     });
   } catch (e) {
     console.error("[checklist/share]", e);

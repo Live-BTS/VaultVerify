@@ -5,7 +5,7 @@ import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { specialtyLabel } from "@/lib/bts/constants";
-import { newToken } from "@/lib/bts/tokens";
+import { newToken, sha256Hex, tokenLookups, isTokenHashed } from "@/lib/bts/tokens";
 import { viewerAllowedByRecipient, resolveNewShareBinding } from "@/lib/bts/sharePolicy";
 
 // ── /api/reference/share — candidate shares a COMPLETED reference report ──
@@ -51,9 +51,12 @@ export async function GET(_req: NextRequest) {
   });
 
   const links = requests.flatMap((r) =>
+    // D4: hashed rows can never re-display their URL — the full link was shown
+    // exactly once in the creation response. Legacy (pre-cutover) rows keep
+    // their raw token until first resolve, so they still get a working linkUrl.
     r.shares.map((l) => ({
       id: l.id,
-      token: l.token,
+      linkUrl: isTokenHashed(l.token) ? null : `/?rs=${l.token}`,
       requestId: r.id,
       refName: r.refName,
       refTitle: r.refTitle,
@@ -79,9 +82,11 @@ export async function POST(req: NextRequest) {
   try {
     // ── public resolve ──
     if (body.action === "resolve") {
+      // D4: try the SHA-256 digest first (post-cutover rows), then the raw
+      // value (legacy rows). At most one row can match — the column is unique.
       const token = String(body.token ?? "");
-      const link = await db.referenceShareLink.findUnique({
-        where: { token },
+      const link = await db.referenceShareLink.findFirst({
+        where: { token: { in: tokenLookups(token) } },
         include: { request: { include: { candidate: { include: { agency: true } }, response: true } } },
       });
       if (!link || link.revoked) return NextResponse.json({ ok: false, reason: "invalid" }, { status: 404 });
@@ -109,7 +114,9 @@ export async function POST(req: NextRequest) {
         // the PDF save of the already-delivered view.)
         const claimed = await db.referenceShareLink.updateMany({
           where: { id: link.id, viewedAt: null },
-          data: { viewedAt: now, viewCount: { increment: 1 } },
+          // D4: the same statement lazily upgrades a legacy row (raw → digest);
+          // for post-cutover rows writing the digest back is a no-op.
+          data: { viewedAt: now, viewCount: { increment: 1 }, token: sha256Hex(token) },
         });
         if (claimed.count === 0) {
           return NextResponse.json({ ok: false, reason: "used" }, { status: 403 });
@@ -118,7 +125,7 @@ export async function POST(req: NextRequest) {
       } else {
         await db.referenceShareLink.update({
           where: { id: link.id },
-          data: { viewedAt: link.viewedAt ?? now, viewCount: { increment: 1 } },
+          data: { viewedAt: link.viewedAt ?? now, viewCount: { increment: 1 }, token: sha256Hex(token) },
         });
       }
       if (firstView) {
@@ -183,17 +190,24 @@ export async function POST(req: NextRequest) {
         { status: 403 },
       );
 
-    const loadOwned = async (token: string) => {
-      const link = await db.referenceShareLink.findUnique({
-        where: { token },
-        include: { request: { include: { candidate: true } } },
-      });
+    // D4: id-based (the ledger carries row ids; hashed rows have no raw token
+    // to present). The token path remains for sessions opened before the cutover.
+    const loadOwned = async (idOrToken: string, byId: boolean) => {
+      const link = byId
+        ? await db.referenceShareLink.findUnique({
+            where: { id: idOrToken },
+            include: { request: { include: { candidate: true } } },
+          })
+        : await db.referenceShareLink.findFirst({
+            where: { token: { in: tokenLookups(idOrToken) } },
+            include: { request: { include: { candidate: true } } },
+          });
       if (!link || link.request.candidate.email !== account.email) return null;
       return link;
     };
 
     if (body.action === "revoke") {
-      const link = await loadOwned(String(body.token ?? ""));
+      const link = await loadOwned(String(body.id ?? body.token ?? ""), !!body.id);
       if (!link) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
       await db.referenceShareLink.update({ where: { id: link.id }, data: { revoked: true } });
       await logAudit({ actorType: "CANDIDATE", actorId: account.id, action: "REFERENCE_SHARE_REVOKED", entity: "referenceShareLink", entityId: link.id });
@@ -203,7 +217,7 @@ export async function POST(req: NextRequest) {
     if (body.action === "extend") {
       const gated = needsVerifiedEmail();
       if (gated) return gated;
-      const link = await loadOwned(String(body.token ?? ""));
+      const link = await loadOwned(String(body.id ?? body.token ?? ""), !!body.id);
       if (!link) return NextResponse.json({ ok: false, error: "Share link not found" }, { status: 404 });
       if (link.revoked) return NextResponse.json({ ok: false, error: "This link was revoked — create a new one" }, { status: 400 });
       if (link.accessType !== "DURATION") return NextResponse.json({ ok: false, error: "One-time links can't be extended" }, { status: 400 });
@@ -248,9 +262,12 @@ export async function POST(req: NextRequest) {
       ? await db.recruiterAccount.findUnique({ where: { email: binding.recipientEmail } })
       : null;
 
+    // D4: the raw token is generated here, hashed into the row, and returned
+    // ONCE in this response — it is never stored and never re-displayed.
+    const rawToken = newToken();
     const link = await db.referenceShareLink.create({
       data: {
-        token: newToken(),
+        token: sha256Hex(rawToken),
         requestId: request.id,
         accessType,
         durationDays,
@@ -267,7 +284,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      link: { token: link.token, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt, audience: binding.audience, recipientEmail: binding.recipientEmail },
+      link: { token: rawToken, accessType: link.accessType, durationDays: link.durationDays, expiresAt: link.expiresAt, audience: binding.audience, recipientEmail: binding.recipientEmail },
     });
   } catch (e) {
     console.error("[reference/share]", e);

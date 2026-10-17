@@ -245,9 +245,13 @@ describe("POST /api/checklist/share — listMine (previously dead action)", () =
     expect(d.ok).toBe(true);
     expect(Array.isArray(d.checklistLinks)).toBe(true);
     expect(Array.isArray(d.refLinks)).toBe(true);
-    const mine = d.checklistLinks.find((l: { token: string }) => l.token === c.link.token);
+    // D4: freshly created links are hash-at-rest — the ledger can't carry
+    // their raw token (it was shown once in the create response only).
+    const mine = d.checklistLinks.find((l: { recipientEmail: string; audience: string }) => l.recipientEmail === A_EMAIL && l.audience === "SPECIFIC");
+    expect(mine).toBeTruthy();
     expect(mine.audience).toBe("SPECIFIC");
     expect(mine.recipientEmail).toBe(A_EMAIL);
+    expect(mine.linkUrl).toBeNull();
   });
 
   it("401 without a candidate session", async () => {

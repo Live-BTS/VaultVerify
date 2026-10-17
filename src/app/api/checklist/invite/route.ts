@@ -7,7 +7,7 @@ import { sendNotification } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend, primaryAgencyId } from "@/lib/bts/credits";
-import { newToken } from "@/lib/bts/tokens";
+import { newToken, sha256Hex, tokenLookups, isTokenHashed } from "@/lib/bts/tokens";
 
 // ── POST /api/checklist/invite — recruiter sends a checklist to a candidate ──
 // CH-07 (PO decision): invitations are bound to the sending recruiter — a
@@ -30,7 +30,8 @@ export async function POST(req: NextRequest) {
     try {
       const account = await getAccount();
       if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
-      const invite = await db.checklistInvite.findUnique({ where: { token: String(body.token ?? "") } });
+      // D4: digest-first lookup (post-cutover invites), raw fallback (legacy).
+      const invite = await db.checklistInvite.findFirst({ where: { token: { in: tokenLookups(String(body.token ?? "")) } } });
       if (!invite) return NextResponse.json({ ok: false, error: "Invite link not found" }, { status: 404 });
       if (invite.status === "COMPLETED") return NextResponse.json({ ok: true, alreadyDone: true });
       if (invite.accountId && invite.accountId !== account.id) return NextResponse.json({ ok: false, error: "This invite belongs to another account" }, { status: 403 });
@@ -46,7 +47,8 @@ export async function POST(req: NextRequest) {
 
   if (body.action === "preview") {
     try {
-      const invite = await db.checklistInvite.findUnique({ where: { token: String(body.token ?? "") } });
+      // D4: digest-first lookup (post-cutover invites), raw fallback (legacy).
+      const invite = await db.checklistInvite.findFirst({ where: { token: { in: tokenLookups(String(body.token ?? "")) } } });
       if (!invite) return NextResponse.json({ ok: false, error: "Invite link not found" }, { status: 404 });
       return NextResponse.json({
         ok: true,
@@ -140,7 +142,9 @@ export async function POST(req: NextRequest) {
             status: i.status,
             createdAt: i.createdAt,
             completedAt: i.completedAt,
-            claimUrl: i.accountId ? null : `/?view=checklist&invite=${i.token}`,
+            // D4: hashed invites can't re-build their claim URL (shown once in
+            // the send response and delivered by email). Legacy invites keep it.
+            claimUrl: i.accountId || isTokenHashed(i.token) ? null : `/?view=checklist&invite=${i.token}`,
             completion: c
               ? {
                   candidateName: c.account.name,
@@ -171,9 +175,12 @@ export async function POST(req: NextRequest) {
 
     // CH-07: the invitation is owned by the sending recruiter account. The
     // recruiter name is taken from the authenticated account, not the client.
+    // D4: the raw invite token is generated here, hashed into the row, and
+    // delivered exactly once — in this response's claimUrl and in the email.
+    const rawInviteToken = newToken();
     const invite = await db.checklistInvite.create({
       data: {
-        token: newToken(),
+        token: sha256Hex(rawInviteToken),
         candidateName,
         candidateEmail,
         candidatePhone,
@@ -193,7 +200,7 @@ export async function POST(req: NextRequest) {
     }
     // sandbox email delivery (simulated → NotificationLog): the candidate gets a
     // setup link — email is pre-filled, they only set a password + onboarding form
-    const setupLink = `/?view=checklist&invite=${invite.token}`;
+    const setupLink = `/?view=checklist&invite=${rawInviteToken}`;
     await sendTemplatedEmail("checklist_invite", candidateEmail, {
       recruiterName: invite.recruiterName,
       organization: invite.facilityName || invite.agencyName,
@@ -211,7 +218,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       invite: {
         id: invite.id,
-        claimUrl: existing ? null : `/?view=checklist&invite=${invite.token}`,
+        claimUrl: existing ? null : `/?view=checklist&invite=${rawInviteToken}`,
       },
       claimedByAccount: !!existing,
     });

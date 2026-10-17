@@ -20,7 +20,9 @@ export interface ShareCompletion {
   expired: boolean;
   shareLinks: {
     id: string;
-    token: string;
+    // D4: the full URL is only here for legacy links; links created after the
+    // token-hash cutover were shown exactly once at creation (linkUrl: null).
+    linkUrl: string | null;
     accessType: string;
     durationDays: number | null;
     label: string;
@@ -42,7 +44,9 @@ export interface RecruiterAccess {
 
 export interface RefShareRow {
   id: string;
-  token: string;
+  // D4: the full URL is only here for legacy links; links created after the
+  // token-hash cutover were shown exactly once at creation (linkUrl: null).
+  linkUrl: string | null;
   requestId: string;
   refName: string;
   refTitle: string;
@@ -100,12 +104,14 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
   const activeCount = rows.filter((r) => r.state === "active").length;
   const activeTotal = activeCount + refRows.filter((r) => r.state === "active").length;
 
-  const act = async (endpoint: "checklist" | "reference", token: string, action: "revoke" | "extend", days?: number) => {
-    setBusy(token + action);
+  const act = async (endpoint: "checklist" | "reference", id: string, action: "revoke" | "extend", days?: number) => {
+    setBusy(id + action);
     try {
       const res = await fetch(`/api/${endpoint}/share`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, token, days }),
+        // D4: owner actions address rows by id — the raw token is never stored,
+        // so the ledger can't send it back.
+        body: JSON.stringify({ action, id, days }),
       });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Action failed");
@@ -144,7 +150,9 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
                       Reference — {l.refName} <span className="font-normal text-jade-muted">· {l.refTitle}{l.facilityName ? `, ${l.facilityName}` : ""}</span>
                     </p>
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-jade-muted">
-                      <span className="font-mono text-verify-ink">/?rs={l.token.slice(0, 10)}…</span>
+                      {l.linkUrl
+                        ? <span className="font-mono text-verify-ink">{l.linkUrl.startsWith("http") ? l.linkUrl : `${typeof window !== "undefined" ? window.location.origin : ""}${l.linkUrl}`}</span>
+                        : <span className="italic">Link issued — full URL shown once when created</span>}
                       {l.label && <span className="italic">“{l.label}”</span>}
                       <span>created {fmt(l.createdAt)}</span>
                       {l.accessType === "ONE_TIME"
@@ -156,28 +164,37 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
                   <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold", meta.cls)}>{meta.label}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink"
-                    disabled={l.state === "revoked"}
-                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/?rs=${l.token}`).then(() => toast({ title: "Link copied" }))}>
-                    <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
-                  </Button>
-                  <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink"
-                    onClick={() => window.open(`/?rs=${l.token}`, "_blank")}>
-                    <Eye className="mr-1.5 h-3.5 w-3.5" /> Preview
-                  </Button>
+                  {l.linkUrl ? (
+                    <>
+                      <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink"
+                        disabled={l.state === "revoked"}
+                        onClick={() => navigator.clipboard.writeText(`${window.location.origin}${l.linkUrl}`).then(() => toast({ title: "Link copied" }))}>
+                        <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink"
+                        onClick={() => window.open(l.linkUrl!, "_blank")}>
+                        <Eye className="mr-1.5 h-3.5 w-3.5" /> Preview
+                      </Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="ghost" disabled title="The full link was shown once, when the share was created — it is not stored and can't be re-displayed"
+                      className="text-jade-muted/60">
+                      <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+                    </Button>
+                  )}
                   {l.accessType === "DURATION" && actionable && (
                     <>
-                      <Button size="sm" variant="outline" disabled={busy === l.token + "extend"} onClick={() => act("reference", l.token, "extend", 7)}
+                      <Button size="sm" variant="outline" disabled={busy === l.id + "extend"} onClick={() => act("reference", l.id, "extend", 7)}
                         className="border-vault-border text-jade-ink hover:bg-verify-green/10">+ 7 days</Button>
-                      <Button size="sm" variant="outline" disabled={busy === l.token + "extend"} onClick={() => act("reference", l.token, "extend", 30)}
+                      <Button size="sm" variant="outline" disabled={busy === l.id + "extend"} onClick={() => act("reference", l.id, "extend", 30)}
                         className="border-vault-border text-jade-ink hover:bg-verify-green/10">+ 30 days</Button>
                     </>
                   )}
                   {l.state !== "revoked" && (
-                    <Button size="sm" variant="outline" disabled={busy === l.token + "revoke"}
-                      onClick={() => act("reference", l.token, "revoke")}
+                    <Button size="sm" variant="outline" disabled={busy === l.id + "revoke"}
+                      onClick={() => act("reference", l.id, "revoke")}
                       className="ml-auto border-rose-200 text-rose-600 hover:bg-rose-50">
-                      {busy === l.token + "revoke" ? <span className="mr-1 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-[-2px]" /> : <ShieldOff className="mr-1.5 h-3.5 w-3.5" />} Revoke access
+                      {busy === l.id + "revoke" ? <span className="mr-1 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-[-2px]" /> : <ShieldOff className="mr-1.5 h-3.5 w-3.5" />} Revoke access
                     </Button>
                   )}
                   {l.state === "revoked" && <span className="ml-auto text-[11px] text-jade-muted">Revoked links can't be restored — create a new one from the reference.</span>}
@@ -218,7 +235,9 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
                       {l.completion.specialtyLabel} <span className="font-normal text-jade-muted">· {l.completion.jobTitle}</span>
                     </p>
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-jade-muted">
-                      <span className="font-mono text-verify-ink">/?s={l.token.slice(0, 10)}…</span>
+                      {l.linkUrl
+                        ? <span className="font-mono text-verify-ink">{l.linkUrl.startsWith("http") ? l.linkUrl : `${typeof window !== "undefined" ? window.location.origin : ""}${l.linkUrl}`}</span>
+                        : <span className="italic">Link issued — full URL shown once when created</span>}
                       {l.label && <span className="italic">“{l.label}”</span>}
                       <span>created {fmt(l.createdAt)}</span>
                       {l.accessType === "ONE_TIME"
@@ -230,24 +249,31 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
                   <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold", meta.cls)}>{meta.label}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink"
-                    disabled={l.state === "revoked"}
-                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/?s=${l.token}`).then(() => toast({ title: "Link copied" }))}>
-                    <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
-                  </Button>
+                  {l.linkUrl ? (
+                    <Button size="sm" variant="ghost" className="text-jade-muted hover:text-jade-ink"
+                      disabled={l.state === "revoked"}
+                      onClick={() => navigator.clipboard.writeText(`${window.location.origin}${l.linkUrl}`).then(() => toast({ title: "Link copied" }))}>
+                      <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" disabled title="The full link was shown once, when the share was created — it is not stored and can't be re-displayed"
+                      className="text-jade-muted/60">
+                      <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+                    </Button>
+                  )}
                   {l.accessType === "DURATION" && actionable && (
                     <>
-                      <Button size="sm" variant="outline" disabled={busy === l.token + "extend"} onClick={() => act("checklist", l.token, "extend", 7)}
+                      <Button size="sm" variant="outline" disabled={busy === l.id + "extend"} onClick={() => act("checklist", l.id, "extend", 7)}
                         className="border-vault-border text-jade-ink hover:bg-verify-green/10">+ 7 days</Button>
-                      <Button size="sm" variant="outline" disabled={busy === l.token + "extend"} onClick={() => act("checklist", l.token, "extend", 30)}
+                      <Button size="sm" variant="outline" disabled={busy === l.id + "extend"} onClick={() => act("checklist", l.id, "extend", 30)}
                         className="border-vault-border text-jade-ink hover:bg-verify-green/10">+ 30 days</Button>
                     </>
                   )}
                   {l.state !== "revoked" && (
-                    <Button size="sm" variant="outline" disabled={busy === l.token + "revoke"}
-                      onClick={() => act("checklist", l.token, "revoke")}
+                    <Button size="sm" variant="outline" disabled={busy === l.id + "revoke"}
+                      onClick={() => act("checklist", l.id, "revoke")}
                       className="ml-auto border-rose-200 text-rose-600 hover:bg-rose-50">
-                      {busy === l.token + "revoke" ? <span className="mr-1 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-[-2px]" /> : <ShieldOff className="mr-1.5 h-3.5 w-3.5" />} Revoke access
+                      {busy === l.id + "revoke" ? <span className="mr-1 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-[-2px]" /> : <ShieldOff className="mr-1.5 h-3.5 w-3.5" />} Revoke access
                     </Button>
                   )}
                   {l.state === "revoked" && <span className="ml-auto text-[11px] text-jade-muted">Revoked links can't be restored — create a new one from the checklist.</span>}

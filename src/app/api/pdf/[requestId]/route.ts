@@ -4,6 +4,7 @@ import { getAccount } from "@/lib/bts/checklistAuth";
 import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { logAudit } from "@/lib/bts/audit";
 import { viewerAllowedByRecipient, isWithinSaveWindow } from "@/lib/bts/sharePolicy";
+import { sha256Hex } from "@/lib/bts/tokens";
 import { buildReferencePacket, type PacketData } from "@/lib/bts/pdf";
 import { specialtyLabel, PROFICIENCY_META } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
@@ -37,7 +38,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
   // ── authorization ──
   let actor = "unauthorized";
   if (shareToken) {
-    const link = request.shares.find((l) => l.token === shareToken);
+    // D4: the presented raw token matches either a post-cutover row (stored as
+    // its SHA-256 digest) or a legacy row (stored raw).
+    const link = request.shares.find((l) => l.token === shareToken || l.token === sha256Hex(shareToken));
     if (!link || link.revoked) return NextResponse.json({ error: "Link not found" }, { status: 404 });
     // CH-08: same one-time rule as the resolve view — a consumed link is
     // readable only inside its bounded save window (the just-delivered view's
@@ -56,7 +59,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
     if (link.accessType === "ONE_TIME" && !link.viewedAt) {
       const claimed = await db.referenceShareLink.updateMany({
         where: { id: link.id, viewedAt: null },
-        data: { viewedAt: new Date(), viewCount: { increment: 1 } },
+        // D4: the same statement lazily upgrades a legacy row (raw → digest).
+        data: { viewedAt: new Date(), viewCount: { increment: 1 }, token: sha256Hex(shareToken) },
       });
       if (claimed.count === 1) {
         await logAudit({ actorType: "RECRUITER", actorId: "ref-share-link", action: "REFERENCE_SHARE_VIEWED", entity: "referenceShareLink", entityId: link.id, detail: { oneTime: true, via: "pdf" } });

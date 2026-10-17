@@ -51,7 +51,9 @@ interface ImpersonationView {
   shareLinks: { id: string; accessType: string; revoked: boolean; expiresAt: string | null; viewCount: number }[];
 }
 interface ShareLinkRow {
-  kind: "reference" | "checklist"; id: string; token: string; accessType: string;
+  // D4: no token field — share-link tokens are hashed at rest; the console
+  // identifies rows by id/owner/label and revokes by id.
+  kind: "reference" | "checklist"; id: string; accessType: string;
   label: string; revoked: boolean; viewCount: number; expiresAt: string | null; createdAt: string;
   owner: string; ownerEmail: string; what: string;
 }

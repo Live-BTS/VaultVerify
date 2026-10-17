@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/bts/audit";
 import { specialtyLabel, CONSENT_STATEMENT } from "@/lib/bts/checklistShared";
 import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
 import { evaluateCompanionRead, viewerAllowedByRecipient } from "@/lib/bts/sharePolicy";
+import { sha256Hex, tokenLookups } from "@/lib/bts/tokens";
 import { renderSkillsChecklistPdf, type ChecklistData, type LastPerformed, type Rating } from "@/lib/pdf/skills-checklist-pdf";
 import type { ChecklistCompletion, ChecklistAccount } from "@prisma/client";
 
@@ -130,7 +131,8 @@ export async function GET(req: NextRequest) {
     const inviteId = sp.get("invite");
 
     if (shareToken) {
-      const link = await db.checklistShareLink.findUnique({ where: { token: shareToken }, include: { completion: true } });
+      // D4: digest-first lookup (post-cutover rows), raw fallback (legacy rows).
+      const link = await db.checklistShareLink.findFirst({ where: { token: { in: tokenLookups(shareToken) } }, include: { completion: true } });
       // CH-08: identical decision to the resolve view — plus the bounded save
       // window so the just-delivered one-time view can still save its PDF.
       const decision = evaluateCompanionRead(link, link?.completion);
@@ -153,7 +155,8 @@ export async function GET(req: NextRequest) {
       if (link.accessType === "ONE_TIME" && !link.viewedAt) {
         const claimed = await db.checklistShareLink.updateMany({
           where: { id: link.id, viewedAt: null },
-          data: { viewedAt: new Date(), viewCount: { increment: 1 } },
+          // D4: the same statement lazily upgrades a legacy row (raw → digest).
+          data: { viewedAt: new Date(), viewCount: { increment: 1 }, token: sha256Hex(shareToken) },
         });
         if (claimed.count === 1) {
           await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: { oneTime: true, via: "pdf" } });

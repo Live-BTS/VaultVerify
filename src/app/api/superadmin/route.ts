@@ -638,13 +638,15 @@ export async function POST(req: NextRequest) {
           }),
         ]);
         const links = [
+          // D4: share-link tokens are hashed at rest — the console identifies
+          // rows by id/owner/label, never by re-displaying a bearer link.
           ...refLinks.map((l) => ({
-            kind: "reference" as const, id: l.id, token: l.token, accessType: l.accessType,
+            kind: "reference" as const, id: l.id, accessType: l.accessType,
             label: l.label, revoked: l.revoked, viewCount: l.viewCount, expiresAt: l.expiresAt, createdAt: l.createdAt,
             owner: l.request.candidate.fullName, ownerEmail: l.request.candidate.email, what: `Reference — ${l.request.candidate.fullName}`,
           })),
           ...checkLinks.map((l) => ({
-            kind: "checklist" as const, id: l.id, token: l.token, accessType: l.accessType,
+            kind: "checklist" as const, id: l.id, accessType: l.accessType,
             label: l.label, revoked: l.revoked, viewCount: l.viewCount, expiresAt: l.expiresAt, createdAt: l.createdAt,
             owner: l.completion.account.name, ownerEmail: l.completion.account.email, what: `Checklist — ${l.completion.specialtyLabel || l.completion.specialty}`,
           })),

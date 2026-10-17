@@ -109,8 +109,10 @@ beforeAll(async () => {
     include: { requests: true },
   });
 
-  // Reference share link for the OWNER's completed reference (active)
-  refShareToken = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+  // Reference share link for the OWNER's completed reference (active).
+  // "rsl" prefix keeps it a LEGACY-shaped raw token — two bare UUIDs would be
+  // 64 hex chars and D4 would classify the row as hash-at-rest (linkUrl null).
+  refShareToken = "rsl" + crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
   await db.referenceShareLink.create({ data: { token: refShareToken, requestId, accessType: "DURATION", durationDays: 7, expiresAt: new Date(Date.now() + 7 * 86400_000) } });
   // An inactive (revoked) link on the OTHER candidate's request — must not surface
   await db.referenceShareLink.create({ data: { token: crypto.randomUUID().replaceAll("-", ""), requestId: otherCandidate.requests[0].id, accessType: "DURATION", durationDays: 7, expiresAt: new Date(Date.now() + 7 * 86400_000), revoked: true } });
@@ -235,12 +237,13 @@ describe("GET /api/reference/share — session-gated ledger (C4)", () => {
     const res = await refShareGet(req("/api/reference/share"));
     expect(res.status).toBe(200);
     const d = await res.json();
-    const tokens: string[] = d.links.map((l: { token: string }) => l.token);
-    expect(tokens).toContain(refShareToken);
-    expect(tokens.every((t: string) => t === refShareToken || !t.startsWith("revoked") === false || true)).toBe(true);
+    // D4: the ledger carries linkUrl (legacy rows keep re-displaying it; the
+    // seeded rows here are pre-cutover legacy rows with raw tokens).
+    const linkUrls: string[] = d.links.map((l: { linkUrl: string | null }) => l.linkUrl);
+    expect(linkUrls).toContain(`/?rs=${refShareToken}`);
     // No link belonging to the other candidate appears:
     const other = await db.referenceRequest.findFirst({ where: { candidate: { email: OTHER_EMAIL } }, include: { shares: true } });
-    for (const s of other!.shares) expect(tokens).not.toContain(s.token);
+    for (const s of other!.shares) expect(linkUrls).not.toContain(`/?rs=${s.token}`);
   });
 });
 

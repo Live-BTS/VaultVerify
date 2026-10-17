@@ -169,6 +169,11 @@ model FraudFlag {
 // revocable and extendable from the candidate's Controlled Sharing panel.
 model ReferenceShareLink {
   id           String           @id @default(cuid())
+  // D4: holds the SHA-256 HEX DIGEST of the capability token — the raw value
+  // is shown once in the creation response, then lives only in the holder's
+  // URL. Legacy rows may still hold the raw token until first resolve lazily
+  // upgrades them (see lib/bts/tokens.ts). Edits to this model go in BOTH
+  // schema.prisma and schema.postgres.prisma.
   token        String           @unique @default(cuid())
   requestId    String
   request      ReferenceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
@@ -243,6 +248,10 @@ model ChecklistSession {
 // Recruiter → candidate: "please complete this skills checklist"
 model ChecklistInvite {
   id            String   @id @default(cuid())
+  // D4: holds the SHA-256 HEX DIGEST of the invite token — the raw value is
+  // delivered exactly once (send response + email). Legacy rows may still
+  // hold the raw token; every lookup tries digest first, then raw
+  // (see lib/bts/tokens.ts). Edits to this model go in BOTH schema files.
   token         String   @unique @default(cuid()) // claim link /?view=checklist&invite=<token>
   candidateName String
   candidateEmail String
@@ -315,6 +324,11 @@ model ChecklistCompletion {
 // Candidate shares a completed checklist with a recruiter, with access rules
 model ChecklistShareLink {
   id           String   @id @default(cuid())
+  // D4: holds the SHA-256 HEX DIGEST of the capability token — the raw value
+  // is shown once in the creation response, then lives only in the holder's
+  // URL. Legacy rows may still hold the raw token until first resolve lazily
+  // upgrades them (see lib/bts/tokens.ts). Edits to this model go in BOTH
+  // schema.prisma and schema.postgres.prisma.
   token        String   @unique @default(cuid())
   completionId String
   completion   ChecklistCompletion @relation(fields: [completionId], references: [id], onDelete: Cascade)

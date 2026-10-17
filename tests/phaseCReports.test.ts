@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { sha256 } from "@/lib/bts/auth";
+import { sha256Hex } from "@/lib/bts/tokens";
 import { isWithinSaveWindow, evaluateCompanionRead, SHARE_SAVE_WINDOW_MINUTES } from "@/lib/bts/sharePolicy";
 import { POST as checklistSharePost } from "@/app/api/checklist/share/route";
 import { POST as refSharePost } from "@/app/api/reference/share/route";
@@ -145,7 +146,11 @@ async function makeChecklistLink(accessType: "ONE_TIME" | "DURATION", opts?: { a
   }));
   const body = await res.json();
   expect(res.status).toBe(200);
-  return db.checklistShareLink.findUniqueOrThrow({ where: { token: body.link.token } });
+  // D4: the row stores the SHA-256 digest; the create response carried the raw
+  // token exactly once. Overlay the raw so call sites keep presenting it.
+  const raw: string = body.link.token;
+  const row = await db.checklistShareLink.findUniqueOrThrow({ where: { token: sha256Hex(raw) } });
+  return { ...row, token: raw };
 }
 
 describe("CH-08 policy — save window (pure)", () => {

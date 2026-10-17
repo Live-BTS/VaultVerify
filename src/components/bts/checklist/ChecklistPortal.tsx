@@ -26,7 +26,7 @@ import {
 
 // ── Skills Checklist candidate portal — accounts, onboarding, requests, invites, shares ──
 
-interface ShareLinkDto { id: string; token: string; accessType: string; durationDays: number | null; label: string; createdAt: string; expiresAt: string | null; viewedAt: string | null; viewCount: number; revoked: boolean }
+interface ShareLinkDto { id: string; linkUrl: string | null; accessType: string; durationDays: number | null; label: string; createdAt: string; expiresAt: string | null; viewedAt: string | null; viewCount: number; revoked: boolean }
 interface CompletionDto { id: string; profession: string; jobTitle: string; specialty: string; specialtyLabel: string; source: string; completedAt: string; expiresAt: string; yearsExperience: number; shareLinks: ShareLinkDto[]; answers: SkillAnswer[]; additional: AdditionalAnswer[]; attestation: AttestationData | null }
 interface RequestDto { id: string; profession: string; jobTitle: string; specialty: string; status: string; requestedAt: string; decidedAt: string | null; completionId: string | null }
 interface InviteDto { id: string; recruiterName: string; facilityName: string; agencyName: string; profession: string; jobTitle: string; specialty: string; status: string; createdAt: string; completedAt: string | null; completionId: string | null; message: string; specialtyLabel?: string }
@@ -153,9 +153,10 @@ function ShareDialog({ completion, onClose, onCreated }: { completion: Completio
               <Button variant="ghost" onClick={onClose} className="border border-vault-border text-jade-muted hover:text-jade-ink">Done</Button>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-[#8aa29c]">
+              This URL is shown only this once — VaultVerify stores no copy of it, so it can't be re-displayed or re-emailed later. Save it now.
               {audience === "SPECIFIC" || (created as { audience?: string } | null)?.audience === "SPECIFIC"
-                ? "Only the recruiter you named can open this."
-                : "Send this to any recruiter. They'll see the access type and deadline on the page, and can download the PDF."}
+                ? " Only the recruiter you named can open it."
+                : " Send this to any recruiter. They'll see the access type and deadline on the page, and can download the PDF."}
             </p>
           </>
         )}
@@ -685,7 +686,9 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
                           return (
                             <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#f0f6f2] px-3 py-2">
                               <p className="text-xs text-[#33565b]">
-                                <span className="font-mono text-verify-ink">/?s={s.token.slice(0, 10)}…</span>
+                                {s.linkUrl
+                                  ? <span className="font-mono text-verify-ink">{s.linkUrl}</span>
+                                  : <span className="italic text-jade-muted">Link issued — full URL shown once when created</span>}
                                 {s.label && <span className="ml-2 italic text-jade-muted">“{s.label}”</span>}
                               </p>
                               <p className="flex items-center gap-2 text-[11px]">
@@ -693,8 +696,10 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
                                   {shareAccessLabel(s)}
                                 </span>
                                 {s.accessType === "ONE_TIME" ? (s.viewedAt ? "viewed" : "unopened") : s.expiresAt ? `until ${fmt(s.expiresAt)}` : ""}
-                                <button type="button" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/?s=${s.token}`)}
-                                  className="rounded p-1 text-jade-muted hover:text-jade-ink" aria-label="Copy link"><Copy className="h-3 w-3" /></button>
+                                {s.linkUrl && (
+                                  <button type="button" onClick={() => navigator.clipboard.writeText(`${window.location.origin}${s.linkUrl}`)}
+                                    className="rounded p-1 text-jade-muted hover:text-jade-ink" aria-label="Copy link"><Copy className="h-3 w-3" /></button>
+                                )}
                               </p>
                             </div>
                           );
