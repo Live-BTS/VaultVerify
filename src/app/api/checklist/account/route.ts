@@ -86,6 +86,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: "An account with this email already exists — sign in instead" }, { status: 400 });
       }
       if (exists) {
+        // SEC-13: original-password proof before rotating an unverified row's
+        // credentials — no exception for this surface either.
+        if (!verifyPassword(password, exists.passwordHash)) {
+          return NextResponse.json({ ok: false, error: "An unverified account with this email already exists — sign in with your original password, or request a new verification email" }, { status: 409 });
+        }
         // Unverified duplicate — refresh credentials and resend the link.
         // SEC-09: gate BEFORE rotating credentials (throttled callers must not
         // be able to keep overwriting the row either).

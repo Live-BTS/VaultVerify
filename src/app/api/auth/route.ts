@@ -70,6 +70,13 @@ export async function POST(req: NextRequest) {
         const existing = await db.checklistAccount.findUnique({ where: { email } });
         if (existing) {
           if (existing.emailVerified) return bad("An account with this email already exists — sign in instead.", 409);
+          // SEC-13: re-signup may refresh an unverified row ONLY with the
+          // original password — otherwise anyone who knows the address could
+          // hijack the pending account before the real owner verifies. The
+          // honest "notification" for the real owner is the re-sent link.
+          if (!verifyPassword(password, existing.passwordHash)) {
+            return bad("An unverified account with this email already exists — sign in with your original password, or request a new verification email below.", 409);
+          }
           // SEC-09: re-issuing the link is a throttled email trigger — gate it
           // BEFORE rotating credentials so a throttled caller cannot keep
           // overwriting the row either.
@@ -84,6 +91,11 @@ export async function POST(req: NextRequest) {
         const existing = await db.recruiterAccount.findUnique({ where: { email } });
         if (existing) {
           if (existing.emailVerified) return bad("An account with this email already exists — sign in instead.", 409);
+          // SEC-13: same original-password proof before rotating recruiter
+          // credentials on an unverified row.
+          if (!verifyPassword(password, existing.passwordHash)) {
+            return bad("An unverified account with this email already exists — sign in with your original password, or request a new verification email below.", 409);
+          }
           // SEC-09: same throttle before credential rotation.
           const wait = await resendThrottleSecondsRemaining(role, email);
           if (wait > 0) return bad(`Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, 429, { retryAfterSeconds: wait });

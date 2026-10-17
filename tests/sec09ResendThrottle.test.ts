@@ -113,24 +113,32 @@ describe("SEC-09: explicit resend is throttled per address", () => {
 });
 
 describe("SEC-09: every unauthenticated email trigger shares the budget", () => {
-  it("signup re-issue is 429'd BEFORE rotating credentials", async () => {
+  it("signup re-issue: wrong password 409s first (SEC-13), correct password 429s on throttle (SEC-09)", async () => {
     // fill the window for CROSS_EMAIL
     for (let i = 0; i < RESEND_MAX_PER_WINDOW; i++) {
       expect((await resend(CROSS_EMAIL)).status).toBe(200);
     }
     const before = await db.checklistAccount.findUnique({ where: { email: CROSS_EMAIL } });
 
-    const res = await authPost(jsonReq("/api/auth", {
+    // SEC-13 gate runs FIRST: a wrong password 409s even with a full window
+    const wrongPw = await authPost(jsonReq("/api/auth", {
       action: "signup", role: "CANDIDATE",
       name: "Cross Surface", email: CROSS_EMAIL, password: "attacker-new-pass-9",
     }));
-    expect(res.status).toBe(429);
-    expect((await res.json()).retryAfterSeconds).toBeGreaterThan(0);
+    expect(wrongPw.status).toBe(409);
+
+    // SEC-09 gate: the ORIGINAL password passes the proof, then hits the throttle
+    const throttled = await authPost(jsonReq("/api/auth", {
+      action: "signup", role: "CANDIDATE",
+      name: "Cross Surface", email: CROSS_EMAIL, password: "cross-pass-1",
+    }));
+    expect(throttled.status).toBe(429);
+    expect((await throttled.json()).retryAfterSeconds).toBeGreaterThan(0);
 
     const after = await db.checklistAccount.findUnique({ where: { email: CROSS_EMAIL } });
-    // credential rotation blocked: the ORIGINAL password still verifies
-    expect(verifyPassword(UNVERIFIED_PASSWORD, after?.passwordHash ?? "")).toBe(false);
+    // credential rotation blocked either way: the ORIGINAL password still verifies
     expect(verifyPassword("cross-pass-1", after?.passwordHash ?? "")).toBe(true);
+    expect(verifyPassword("attacker-new-pass-9", after?.passwordHash ?? "")).toBe(false);
     expect(after?.passwordHash).toBe(before?.passwordHash);
     expect(await rowsInWindowFor(CROSS_EMAIL, "CANDIDATE")).toBe(RESEND_MAX_PER_WINDOW);
   });
