@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { runFraudChecks } from "@/lib/bts/fraud";
-import { deriveCallbackCode } from "@/lib/bts/seed";
+import { tokenLookups, isTokenHashed, sha256Hex, deriveCallbackCode, newToken } from "@/lib/bts/tokens";
+import { encryptRefToken, rawTokenFor } from "@/lib/bts/refTokenCrypto";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { hashPassword } from "@/lib/bts/checklistAuth";
-import { newToken } from "@/lib/bts/tokens";
 import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
 import { specialtyLabel, type AnswerRecord } from "@/lib/bts/constants";
 
@@ -15,24 +15,47 @@ function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
 }
 
-async function loadContext(token: string) {
-  return db.referenceRequest.findUnique({
-    where: { token },
+async function loadContext(presentedRaw: string) {
+  // D4b: digest FIRST (post-cutover rows), then the raw value (legacy rows
+  // awaiting migration). At most one row can match — the column is unique and
+  // the two shapes cannot collide (64-hex vs 32-char base64url).
+  const candidates = tokenLookups(presentedRaw);
+  if (candidates.length === 0) return null;
+  let request = await db.referenceRequest.findFirst({
+    where: { token: { in: candidates } },
     include: {
       candidate: { include: { agency: true, skills: true } },
       response: { include: { skillChecks: true } },
       flags: true,
     },
   });
+  if (!request) return null;
+  // D4b lazy upgrade: a legacy row matched by its stored raw value is
+  // upgraded (raw → digest + envelope) on first resolve — the presented raw
+  // IS the original token (equality match), so both writes are exact. If the
+  // encryption key is unavailable the upgrade is skipped and the row stays
+  // fully functional in legacy form (raw lookup + re-display keep working).
+  if (!isTokenHashed(request.token)) {
+    try {
+      const upgraded = await db.referenceRequest.update({
+        where: { id: request.id },
+        data: { token: sha256Hex(presentedRaw), tokenEncrypted: encryptRefToken(presentedRaw) },
+      });
+      request = { ...request, token: upgraded.token, tokenEncrypted: upgraded.tokenEncrypted };
+    } catch (e) {
+      console.error(`[D4b] Lazy upgrade skipped for request ${request.id}: ${e instanceof Error ? e.message : "unknown error"}`);
+    }
+  }
+  return request;
 }
 
 // ── GET /api/reference/[token] — form context for the reference ──
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const request = await loadContext(token);
+  const request = await loadContext(token.trim());
   if (!request) return NextResponse.json({ error: "Invalid or unknown link" }, { status: 404 });
 
-  const expired = new Date() > request.expiresAt && request.status !== "COMPLETED" && request.status !== "FLAGGED";
+  const expired = request.status === "EXPIRED" || (new Date() > request.expiresAt && request.status !== "COMPLETED" && request.status !== "FLAGGED");
   if (expired && request.status !== "EXPIRED") {
     await db.referenceRequest.update({ where: { id: request.id }, data: { status: "EXPIRED" } });
     await logAudit({ actorType: "SYSTEM", action: "LINK_EXPIRED", entity: "reference_request", entityId: request.id });
@@ -125,9 +148,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   }
 
   try {
-  const request = await loadContext(token);
+  const request = await loadContext(token.trim());
   if (!request) return NextResponse.json({ error: "Invalid or unknown link" }, { status: 404 });
-  if (new Date() > request.expiresAt && request.status !== "COMPLETED" && request.status !== "FLAGGED") {
+  // D4b revocation check (fixes a pre-existing gap the swap test exposed):
+  // a request WITHDRAWN by a candidate swap (status EXPIRED) is dead even if
+  // its expiresAt clock has not run out — status is authoritative.
+  if (request.status === "EXPIRED" || (new Date() > request.expiresAt && request.status !== "COMPLETED" && request.status !== "FLAGGED")) {
     return NextResponse.json({ error: "This link has expired. Please ask the nurse to send a new request." }, { status: 410 });
   }
   if (request.response && body.action !== "verify_identity") {
@@ -151,7 +177,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       return NextResponse.json({ ok: true, identityMethod: method, verifiedDomain: domain });
     }
     if (method === "CALLBACK_CODE") {
-      const expected = deriveCallbackCode(request.token);
+      // D4b: the code is derived from the RAW token — resolved here via the
+      // stored envelope (post-cutover) or the legacy raw value. Deriving from
+      // the stored digest would silently break verification after migration.
+      const raw = rawTokenFor(request);
+      const expected = deriveCallbackCode(raw ?? "");
       if ((body.callbackCode ?? "").trim() !== expected) {
         return NextResponse.json({ error: "That code doesn't match. Ask the nurse for the 6-digit callback code." }, { status: 400 });
       }

@@ -7,7 +7,8 @@ import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend } from "@/lib/bts/credits";
-import { newToken } from "@/lib/bts/tokens";
+import { newToken, sha256Hex } from "@/lib/bts/tokens";
+import { encryptRefToken, refLinkFor } from "@/lib/bts/refTokenCrypto";
 
 // Minimum hours between candidate-initiated reminders for the same request.
 const NUDGE_COOLDOWN_HOURS = 12;
@@ -71,9 +72,12 @@ export async function POST(req: NextRequest) {
     if (!outbound.ok) return NextResponse.json({ error: outbound.error }, { status: outbound.status });
     const dup = await db.referenceRequest.findFirst({ where: { candidateId: candidate.id, refEmail: rf.refEmail.toLowerCase().trim(), status: { notIn: ["EXPIRED"] } } });
     if (dup) return NextResponse.json({ error: `${dup.refName} already has an open request` }, { status: 409 });
+    // D4b: digest + envelope at rest; raw only in memory for the invite email.
+    const raw = newToken();
     const created = await db.referenceRequest.create({
       data: {
-        token: newToken(),
+        token: sha256Hex(raw),
+        tokenEncrypted: encryptRefToken(raw),
         candidateId: candidate.id,
         refName: rf.refName.trim(),
         refTitle: rf.refTitle.trim(),
@@ -89,7 +93,7 @@ export async function POST(req: NextRequest) {
         expiresAt: new Date(Date.now() + LINK_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
       },
     });
-    const link = `${baseUrl(req)}/?r=${created.token}`;
+    const link = `${baseUrl(req)}/?r=${raw}`;
     const bodyText = inviteBody(candidate.agency.name, candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
     await sendTemplatedEmail("reference_invite", created.refEmail, {
@@ -132,7 +136,14 @@ export async function POST(req: NextRequest) {
     if (last && Date.now() - last < NUDGE_COOLDOWN_HOURS * 3600 * 1000) {
       return NextResponse.json({ error: `A reminder was sent recently — try again in a few hours.` }, { status: 429 });
     }
-    const link = `${baseUrl(req)}/?r=${request.token}`;
+    // D4b: reminder re-sends the EXISTING link — rebuilt by decrypting the
+    // stored envelope (or the legacy raw value pre-migration). If the key is
+    // unavailable the link cannot be rebuilt and NO email goes out: a broken
+    // reminder would be worse than none.
+    const link = refLinkFor(request, baseUrl(req));
+    if (!link) {
+      return NextResponse.json({ error: "Reference link could not be rebuilt (server encryption key unavailable) — please contact support." }, { status: 503 });
+    }
     await sendNotification({
       channel: "SMS",
       kind: "REMINDER",
@@ -158,9 +169,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Replacement reference needs name, title, email and facility" }, { status: 400 });
     }
     const old = await db.referenceRequest.update({ where: { id: request.id }, data: { status: "EXPIRED" } });
+    // D4b: digest + envelope at rest; raw only in memory for the invite email.
+    const raw = newToken();
     const created = await db.referenceRequest.create({
       data: {
-        token: newToken(),
+        token: sha256Hex(raw),
+        tokenEncrypted: encryptRefToken(raw),
         candidateId: request.candidateId,
         refName: repl.refName.trim(),
         refTitle: repl.refTitle.trim(),
@@ -176,7 +190,7 @@ export async function POST(req: NextRequest) {
         expiresAt: new Date(Date.now() + LINK_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
       },
     });
-    const link = `${baseUrl(req)}/?r=${created.token}`;
+    const link = `${baseUrl(req)}/?r=${raw}`;
     const bodyText = inviteBody(agency.name, request.candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
     await sendTemplatedEmail("reference_invite", created.refEmail, {

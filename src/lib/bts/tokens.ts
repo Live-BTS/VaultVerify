@@ -46,3 +46,15 @@ export function tokenLookups(raw: string): string[] {
 export function isTokenHashed(stored: string): boolean {
   return /^[0-9a-f]{64}$/.test(stored);
 }
+
+// ── D4b: referee callback code (pure, moved from lib/bts/seed.ts) ──
+// Derived from the RAW ReferenceRequest token — never from the stored digest.
+// Callers must resolve the raw value first (via refTokenCrypto.rawTokenFor).
+// SEC-08 honesty note: the code is arranged between referee and candidate and
+// is derivable from the link the referee already holds; it is a shared-phrase
+// convenience, not an independent identity check.
+export function deriveCallbackCode(token: string): string {
+  let h = 0;
+  for (const c of token) h = (h * 31 + c.charCodeAt(0)) % 1000000;
+  return String(h).padStart(6, "0");
+}

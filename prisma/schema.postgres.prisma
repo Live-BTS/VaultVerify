@@ -78,7 +78,14 @@ model ReferenceRequest {
   workStartDate String    @default("")
   workEndDate   String    @default("") // empty = currently working
   // lifecycle
+  // D4b: `token` stores the SHA-256 HEX DIGEST of the raw referee link token
+  // (post-cutover rows); legacy rows may still hold the raw value until the
+  // backfill or their first resolve upgrades them. Same convention as D4.
   token        String    @unique @default(cuid())
+  // D4b: authenticated AES-256-GCM envelope of the raw token (server-side key
+  // only, see lib/bts/refTokenCrypto.ts). Nullable + additive — enables the
+  // reminder re-send / dashboard re-display workflow WITHOUT plaintext at rest.
+  tokenEncrypted String?
   status       String    @default("SENT")
   sentAt       DateTime  @default(now())
   openedAt     DateTime?

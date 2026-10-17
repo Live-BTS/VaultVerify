@@ -6,6 +6,7 @@ import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { REMINDER_DAYS, LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
 import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { viewerAllowedByRecipient } from "@/lib/bts/sharePolicy";
+import { refLinkFor } from "@/lib/bts/refTokenCrypto";
 
 // ── GET/POST /api/recruiter — recruiter dashboard (SESSION REQUIRED) ──
 // Authorization model (PO decision Q3 + CH-06): recruiters see ONLY reference
@@ -173,6 +174,7 @@ export async function POST(req: NextRequest) {
     const active = all.filter((r) => r.shares.some((l) => linkIsActive(l) && viewerAllowedByRecipient(l, viewer)));
     let sent = 0;
     let expiredCount = 0;
+    let skippedCount = 0;
     for (const r of active) {
       const daysOpen = Math.floor((Date.now() - new Date(r.sentAt).getTime()) / 86400000);
       if (daysOpen > LINK_EXPIRY_DAYS) {
@@ -181,9 +183,17 @@ export async function POST(req: NextRequest) {
         expiredCount++;
         continue;
       }
+      // D4b: the reminder re-sends the EXISTING referee link, rebuilt by
+      // decrypting the stored envelope (legacy rows: their raw value). If the
+      // server key is unavailable the link cannot be rebuilt — that request is
+      // SKIPPED, never emailed with a broken link. The sweep continues.
+      const link = refLinkFor(r, baseUrl(req));
+      if (!link) {
+        skippedCount++;
+        continue;
+      }
       const due = REMINDER_DAYS.filter((d) => daysOpen >= d).length;
       if (due > r.reminderCount) {
-        const link = `${baseUrl(req)}/?r=${r.token}`;
         await sendNotification({
           channel: "SMS",
           kind: "REMINDER",
@@ -203,7 +213,7 @@ export async function POST(req: NextRequest) {
         sent++;
       }
     }
-    return NextResponse.json({ ok: true, remindersSent: sent, expiredCount, message: `Sweep complete: ${sent} reminder(s) sent, ${expiredCount} expired.` });
+    return NextResponse.json({ ok: true, remindersSent: sent, expiredCount, skippedCount, message: `Sweep complete: ${sent} reminder(s) sent, ${expiredCount} expired${skippedCount ? `, ${skippedCount} skipped (link unavailable)` : ""}.` });
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });

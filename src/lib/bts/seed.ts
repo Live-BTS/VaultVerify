@@ -22,15 +22,9 @@ function daysFromNow(n: number): Date {
   return new Date(Date.now() + n * 24 * 60 * 60 * 1000);
 }
 
-function callbackCode(token: string): string {
-  let h = 0;
-  for (const c of token) h = (h * 31 + c.charCodeAt(0)) % 1000000;
-  return String(h).padStart(6, "0");
-}
-
-export function deriveCallbackCode(token: string): string {
-  return callbackCode(token);
-}
+// D4b: derivation moved to lib/bts/tokens.ts (pure — no db import) so the
+// encryption helpers can use it without pulling Prisma into unit tests.
+export { deriveCallbackCode } from "./tokens";
 
 /** Find-or-create the VaultVerify agency (branding) — safe in every environment. */
 export async function ensureAgency(): Promise<{ seeded: boolean; agencyId: string }> {

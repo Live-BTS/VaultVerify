@@ -13,6 +13,9 @@ process.env.DATABASE_URL = `file:${TEST_DB}`;
 process.env.BREVO_API_KEY = ""; // force the simulated provider — no real email can ever be sent
 process.env.RECRUITER_CODE = "test-recruiter-code";
 process.env.SUPERADMIN_CODE = "test-superadmin-code";
+// D4b: ephemeral per-run key — tests exercise real AES-256-GCM envelopes
+// without any persistent secret. Never written to disk.
+process.env.REFERENCE_TOKEN_ENCRYPTION_KEY = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64");
 
 if (existsSync(TEST_DB)) rmSync(TEST_DB);
 for (const suffix of ["-wal", "-shm"]) {

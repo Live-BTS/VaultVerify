@@ -6,10 +6,10 @@ import { creditSpend } from "@/lib/bts/credits";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
-import { deriveCallbackCode } from "@/lib/bts/seed";
 import { LINK_EXPIRY_DAYS, specialtyLabel } from "@/lib/bts/constants";
 import { CHECKLISTS } from "@/lib/bts/questions";
-import { newToken } from "@/lib/bts/tokens";
+import { newToken, sha256Hex } from "@/lib/bts/tokens";
+import { encryptRefToken, refLinkFor, callbackCodeFor } from "@/lib/bts/refTokenCrypto";
 
 function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
@@ -49,11 +49,18 @@ export async function GET(req: NextRequest) {
   });
   if (!candidate) return NextResponse.json({ error: "No profile found for this email" }, { status: 404 });
 
-  const requests = candidate.requests.map((r) => ({
-    ...r,
-    callbackCode: deriveCallbackCode(r.token),
-    refLink: `${baseUrl(req)}/?r=${r.token}`,
-  }));
+  // D4b: the raw token never leaves the server. The payload carries the
+  // rebuilt link + callback code (decrypted server-side) and strips the
+  // stored digest + envelope fields from the response.
+  const requests = candidate.requests.map((r) => {
+    const { token: _token, tokenEncrypted: _enc, ...safe } = r;
+    void _token; void _enc;
+    return {
+      ...safe,
+      callbackCode: callbackCodeFor(r) ?? "",
+      refLink: refLinkFor(r, baseUrl(req)) ?? "",
+    };
+  });
 
   await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "DASHBOARD_VIEWED", entity: "candidate", entityId: candidate.id, ip: clientIp(req) });
 
@@ -139,29 +146,37 @@ export async function POST(req: NextRequest) {
         })),
       },
       requests: {
-        create: body.references.map((r) => ({
-          token: newToken(),
-          refName: r.refName.trim(),
-          refTitle: r.refTitle.trim(),
-          refEmail: r.refEmail.toLowerCase().trim(),
-          refPhone: r.refPhone ?? "",
-          facilityName: r.facilityName.trim(),
-          facilityCity: r.facilityCity ?? "",
-          facilityState: r.facilityState ?? "",
-          relationship: r.relationship,
-          workStartDate: r.workStartDate ?? "",
-          workEndDate: r.workEndDate ?? "",
-          status: "SENT",
-          expiresAt: new Date(Date.now() + LINK_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
-        })),
+        // D4b: the raw token exists only in memory — the row stores its
+        // digest (lookup key) and its authenticated envelope (for resend).
+        create: body.references.map((r) => {
+          const raw = newToken();
+          return {
+            token: sha256Hex(raw),
+            tokenEncrypted: encryptRefToken(raw),
+            refName: r.refName.trim(),
+            refTitle: r.refTitle.trim(),
+            refEmail: r.refEmail.toLowerCase().trim(),
+            refPhone: r.refPhone ?? "",
+            facilityName: r.facilityName.trim(),
+            facilityCity: r.facilityCity ?? "",
+            facilityState: r.facilityState ?? "",
+            relationship: r.relationship,
+            workStartDate: r.workStartDate ?? "",
+            workEndDate: r.workEndDate ?? "",
+            status: "SENT",
+            expiresAt: new Date(Date.now() + LINK_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+          };
+        }),
       },
     },
     include: { requests: true },
   });
 
-  // invite notifications: SMS first, email fallback per reference
+  // invite notifications: SMS first, email fallback per reference.
+  // The raw token is rebuilt server-side from the stored envelope
+  // (refLinkFor → decryptRefToken). The email IS the delivery channel.
   for (const r of candidate.requests) {
-    const link = `${baseUrl(req)}/?r=${r.token}`;
+    const link = refLinkFor(r, baseUrl(req)) ?? "";
     const bodyText = inviteBody(agency.name, candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: r.refPhone || r.refEmail, body: bodyText, requestId: r.id });
     await sendTemplatedEmail("reference_invite", r.refEmail, {
@@ -177,11 +192,17 @@ export async function POST(req: NextRequest) {
   // Meter: 1 credit per outbound verification (one batch = one request here).
   await creditSpend(agency.id, `Reference request — ${candidate.fullName}`, 1, "CANDIDATE", candidate.id);
 
-  const requests = candidate.requests.map((r) => ({
-    ...r,
-    callbackCode: deriveCallbackCode(r.token),
-    refLink: `${baseUrl(req)}/?r=${r.token}`,
-  }));
+  // D4b: creation response — the rebuilt link + callback code (raw delivered
+  // here and in the invite email), stored digest/envelope stripped.
+  const requests = candidate.requests.map((r) => {
+    const { token: _token, tokenEncrypted: _enc, ...safe } = r;
+    void _token; void _enc;
+    return {
+      ...safe,
+      callbackCode: callbackCodeFor(r) ?? "",
+      refLink: refLinkFor(r, baseUrl(req)) ?? "",
+    };
+  });
 
   return NextResponse.json({ candidate: { ...candidate, requests } }, { status: 201 });
 }

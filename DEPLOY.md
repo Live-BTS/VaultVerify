@@ -60,10 +60,10 @@ Set these in **Vercel → Project → Settings → Environment Variables** (mirr
 | `SUPERADMIN_EMAIL` | **your inbox for admin login codes** | OTP is emailed here — required for the superadmin OTP flow |
 | `SUPERADMIN_CODE` | your superadmin BACKUP access code | recovery path when email is down |
 | `RECRUITER_CODE` | your legacy agency access code | optional — recruiters now sign up with accounts |
+| `REFERENCE_TOKEN_ENCRYPTION_KEY` | 32 random bytes, base64 | **D4b — required in production.** Generate locally with `openssl rand -base64 32`; paste the result into Vercel (all environments) and into your local `.env`. NEVER commit it, never log it, never send it to the client. See §7. |
+| `REFERENCE_TOKEN_ENCRYPTION_KEY_PREVIOUS` | previous key during a rotation window | **D4b — optional.** Set only while rotating (§7.3), remove afterwards. |
 
 Local only (never needed on Vercel): `DATABASE_URL=file:./db/custom.db`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — add the Supabase trio to Vercel too if/when client features use Supabase directly.
-
----
 
 ## 3 · Email — Brevo
 
@@ -134,3 +134,64 @@ Honest scope: browsers must receive JS to run it, so client-side deterrents rais
 - `.env` is git-ignored — real keys live only locally + in Vercel's encrypted env store.
 - `.env.example` documents every variable (safe to commit).
 - Sandbox artifacts (`/download`, `/upload`, `/tool-results`, local `db/*.db`, `worklog.md`) are git-ignored and stay out of the deploy.
+
+---
+
+## 7 · D4b — ReferenceRequest token encryption (runbook)
+
+Referee-form bearer tokens (`/?r=<token>`) are stored **twice, safely**: the
+`token` column holds their SHA-256 **digest** (lookup key — inbound links are
+hashed and matched, so validation never needs the key), and the nullable
+`tokenEncrypted` column holds an authenticated **AES-256-GCM envelope** of the
+raw token so reminders and the candidate dashboard can keep re-sending the
+EXISTING link. Key handling lives only in `src/lib/bts/refTokenCrypto.ts`
+(server-only; no client bundle ever sees it).
+
+**7.1 One-time setup (BEFORE deploying D4b code):**
+
+1. Generate the key on your own machine: `openssl rand -base64 32`
+2. Vercel → Settings → Environment Variables → add `REFERENCE_TOKEN_ENCRYPTION_KEY`
+   (Production + Preview + Development). The value never needs to be shared
+   with anyone — including this assistant.
+3. Add the same value to your local `.env` for dev parity.
+4. Add the column to the hosted DB (additive + nullable — zero impact on
+   existing rows):
+   ```bash
+   export DATABASE_URL='postgresql://postgres.<ref>:<pwd>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require'
+   bun run db:push:postgres && bunx prisma generate   # restore local SQLite client
+   ```
+5. Deploy the D4b code (normal push to main once approved).
+6. Migrate existing plaintext rows (idempotent, resumable, never prints token
+   values, refuses non-local DSNs unless `--i-understand-production` is passed):
+   ```bash
+   export DATABASE_URL='<same pooler DSN>'
+   export REFERENCE_TOKEN_ENCRYPTION_KEY='<the key>'
+   bun scripts/d4b-backfill.ts --i-understand-production
+   ```
+7. Verify with ONE existing referee link (from your own records): it must open
+   the form exactly as before. Dashboard links, nudge and reminder emails must
+   all show the same URL as pre-migration.
+
+**7.2 Key loss (recovery):** if the key is lost, link VALIDATION still works
+(digest lookups) — referees with the link in hand are unaffected. Re-display
+and reminders degrade (sweep skips those requests, dashboards show empty link
+fields). Recovery: set a NEW key, then revoke + re-issue the affected requests
+(candidate portal → swap/add reference) — new requests encrypt under the new
+key immediately.
+
+**7.3 Key rotation (zero downtime):**
+1. Generate a new key; set it as `REFERENCE_TOKEN_ENCRYPTION_KEY`; move the old
+   value into `REFERENCE_TOKEN_ENCRYPTION_KEY_PREVIOUS` (Vercel + `.env`).
+2. Redeploy; then re-encrypt every v1 envelope in place:
+   `bun scripts/d4b-backfill.ts --i-understand-production --reencrypt`
+3. Confirm all envelopes are current (`v2`), then REMOVE the `_PREVIOUS`
+   variable. Only one rotation generation may coexist at a time.
+
+**7.4 Behavior notes:** legacy rows keep working via digest-first/raw-fallback
+lookup and are lazily upgraded (raw → digest + envelope) on first resolve —
+the same cutover semantics as D4. If the key is unavailable at resolve time
+the upgrade is skipped and the row stays fully functional in legacy form. The
+reminder sweep and nudge NEVER send a link that could not be rebuilt — they
+skip and report `skippedCount` instead.
+
+---
