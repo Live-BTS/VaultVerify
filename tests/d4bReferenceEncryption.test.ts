@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/bts/checklistAuth";
+import { tokenDigestPrefix } from "@/lib/bts/logRedaction";
 import { sha256 } from "@/lib/bts/auth";
 import { sha256Hex, newToken, deriveCallbackCode } from "@/lib/bts/tokens";
 import {
@@ -356,7 +357,11 @@ describe("D4b — reminders keep re-sending the EXISTING link", () => {
     expect(res.status).toBe(200);
     const log = await db.notificationLog.findFirst({ where: { requestId, kind: "REMINDER" }, orderBy: { createdAt: "desc" } });
     expect(log).toBeTruthy();
-    expect(log!.body).toContain(`/?r=${raw}`); // SAME link as the original invite
+    // SEC-17: the stored body no longer carries the live link — it carries the
+    // redacted form whose digest prefix cryptographically ties it to the SAME
+    // raw token as the original invite.
+    expect(log!.body).not.toContain(raw);
+    expect(log!.body).toContain(`/?r=<redacted:${tokenDigestPrefix(raw)}>`);
   });
 
   it("recruiter run_reminders rebuilds links from envelopes; key outage SKIPS instead of sending broken mail", async () => {
@@ -382,7 +387,8 @@ describe("D4b — reminders keep re-sending the EXISTING link", () => {
     const sweep = await res.json();
     expect(sweep.remindersSent).toBeGreaterThanOrEqual(1);
     const log = await db.notificationLog.findFirst({ where: { requestId, kind: "REMINDER" }, orderBy: { createdAt: "desc" } });
-    expect(log!.body).toContain(`/?r=${raw}`);
+    expect(log!.body).not.toContain(raw); // SEC-17: no live token in the stored body
+    expect(log!.body).toContain(`/?r=<redacted:${tokenDigestPrefix(raw)}>`);
 
     // key outage → the SAME sweep skips (never a broken link), no crash
     const realKey = process.env.REFERENCE_TOKEN_ENCRYPTION_KEY;

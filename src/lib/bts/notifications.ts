@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { scrubLogText } from "@/lib/bts/logRedaction";
 
 // ── Notification service (standalone by design) ───────────────
 // Built as an isolated module so Zipvault can reuse it later.
@@ -95,15 +96,18 @@ const brevoEmailProvider: Provider = {
 const provider: Provider = process.env.BREVO_API_KEY ? brevoEmailProvider : sandboxProvider;
 
 export async function sendNotification(p: SendPayload) {
+  // The provider receives the ORIGINAL payload — recipients get working links.
   const result = await provider.send(p);
+  // SEC-17: only the persisted copy is scrubbed. NotificationLog must not
+  // retain live bearer-token URLs (see lib/bts/logRedaction.ts).
   const log = await db.notificationLog.create({
     data: {
       channel: p.channel,
       kind: p.kind,
       to: p.to,
-      subject: p.subject ?? "",
-      body: p.body,
-      html: p.html ?? null,
+      subject: scrubLogText(p.subject ?? ""),
+      body: scrubLogText(p.body),
+      html: p.html ? scrubLogText(p.html) : null,
       templateKey: p.templateKey ?? null,
       requestId: p.requestId ?? null,
       status: result.status,
