@@ -7,7 +7,7 @@ import {
   dbConfigured, emailLive,
   createPasswordReset, consumePasswordReset, sha256,
 } from "@/lib/bts/auth";
-import { loginLockedFor, maybePruneExpiredAuthRows } from "@/lib/bts/hygiene";
+import { loginLockedFor, maybePruneExpiredAuthRows, resendThrottleSecondsRemaining } from "@/lib/bts/hygiene";
 import { assertPlatformWritable } from "@/lib/bts/platform";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { createSession, destroySession, getAccount } from "@/lib/bts/checklistAuth";
@@ -70,6 +70,11 @@ export async function POST(req: NextRequest) {
         const existing = await db.checklistAccount.findUnique({ where: { email } });
         if (existing) {
           if (existing.emailVerified) return bad("An account with this email already exists — sign in instead.", 409);
+          // SEC-09: re-issuing the link is a throttled email trigger — gate it
+          // BEFORE rotating credentials so a throttled caller cannot keep
+          // overwriting the row either.
+          const wait = await resendThrottleSecondsRemaining(role, email);
+          if (wait > 0) return bad(`Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, 429, { retryAfterSeconds: wait });
           // unverified duplicate: refresh credentials + resend link
           await db.checklistAccount.update({ where: { id: existing.id }, data: { name, passwordHash } });
         } else {
@@ -79,6 +84,9 @@ export async function POST(req: NextRequest) {
         const existing = await db.recruiterAccount.findUnique({ where: { email } });
         if (existing) {
           if (existing.emailVerified) return bad("An account with this email already exists — sign in instead.", 409);
+          // SEC-09: same throttle before credential rotation.
+          const wait = await resendThrottleSecondsRemaining(role, email);
+          if (wait > 0) return bad(`Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, 429, { retryAfterSeconds: wait });
           await db.recruiterAccount.update({ where: { id: existing.id }, data: { name, passwordHash } });
         } else {
           await db.recruiterAccount.create({ data: { email, name, passwordHash } });
@@ -141,6 +149,10 @@ export async function POST(req: NextRequest) {
         return bad("This account is suspended. Contact VaultVerify support.", 403);
       }
       if (!account.emailVerified) {
+        // SEC-09: a correct password for an unverified account re-sends the
+        // link — that is an email trigger like any other.
+        const wait = await resendThrottleSecondsRemaining(role, email);
+        if (wait > 0) return bad(`Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, 429, { retryAfterSeconds: wait });
         const token = await createVerification(role, email);
         await sendVerificationEmail(role, email, token, originOf(req));
         return NextResponse.json({ ok: false, needsVerification: true, sentTo: maskEmail(email) });
@@ -165,6 +177,10 @@ export async function POST(req: NextRequest) {
         : await db.recruiterAccount.findUnique({ where: { email } });
       // Do not reveal whether the address exists.
       if (account && !account.emailVerified) {
+        // SEC-09: the explicit resend is the primary abuse vector — unthrottled
+        // it lets anyone flood a victim's inbox and burn the Brevo quota.
+        const wait = await resendThrottleSecondsRemaining(role, email);
+        if (wait > 0) return bad(`Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, 429, { retryAfterSeconds: wait });
         const token = await createVerification(role, email);
         await sendVerificationEmail(role, email, token, originOf(req));
       }

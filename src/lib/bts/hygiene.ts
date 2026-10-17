@@ -24,6 +24,8 @@ export const DEFAULT_LOG_RETENTION_DAYS = 90;
 export const LOG_RETENTION_KEY = "LOG_RETENTION_DAYS";
 export const LOGIN_LOCKOUT_THRESHOLD = 5;
 export const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+export const RESEND_MAX_PER_WINDOW = 3;
+export const RESEND_WINDOW_MS = 10 * 60 * 1000;
 
 export interface LoginFailureState {
   failedLogins: number;
@@ -41,6 +43,38 @@ export function loginLockedFor(state: LoginFailureState | null, now = new Date()
   const elapsed = now.getTime() - state.lastFailedLogin.getTime();
   if (elapsed >= LOGIN_LOCKOUT_WINDOW_MS) return 0;
   return Math.ceil((LOGIN_LOCKOUT_WINDOW_MS - elapsed) / 1000);
+}
+
+// ── SEC-09: verification-email resend throttle ────────────────────
+// Every verification email (signup re-issue, unverified sign-in, explicit
+// resend) creates exactly one EmailVerification row, so counting the rows
+// issued for an address+role inside a sliding window IS the send count —
+// durable across serverless instances with zero schema change.
+//
+// Documented trade-off (mirrors loginLockedFor): a 429 here is only reachable
+// for an address that exists AND is unverified, and only after that same
+// caller already triggered RESEND_MAX_PER_WINDOW emails — the existence
+// signal is marginal next to what the caller already knows. Ghost and
+// verified addresses always get the neutral ok response.
+//
+// The next slot frees up when the OLDEST send in the window leaves it.
+export async function resendThrottleSecondsRemaining(
+  role: "CANDIDATE" | "RECRUITER",
+  email: string,
+  now = new Date(),
+): Promise<number> {
+  const windowStart = new Date(now.getTime() - RESEND_WINDOW_MS);
+  const sent = await db.emailVerification.count({
+    where: { email, role, createdAt: { gte: windowStart } },
+  });
+  if (sent < RESEND_MAX_PER_WINDOW) return 0;
+  const oldest = await db.emailVerification.findFirst({
+    where: { email, role, createdAt: { gte: windowStart } },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
+  if (!oldest) return 0;
+  return Math.max(1, Math.ceil((oldest.createdAt.getTime() + RESEND_WINDOW_MS - now.getTime()) / 1000));
 }
 
 export async function pruneExpiredAuthRows(): Promise<number> {

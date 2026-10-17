@@ -5,6 +5,7 @@ import { createVerification, sendVerificationEmail, maskEmail, dbConfigured, ema
 import { assertPlatformWritable } from "@/lib/bts/platform";
 import { logAudit } from "@/lib/bts/audit";
 import { isTokenHashed } from "@/lib/bts/tokens";
+import { resendThrottleSecondsRemaining } from "@/lib/bts/hygiene";
 
 // ── /api/checklist/account — candidate account for the skills checklist ──
 // actions: signup | login | logout | me | profile | resend
@@ -86,6 +87,12 @@ export async function POST(req: NextRequest) {
       }
       if (exists) {
         // Unverified duplicate — refresh credentials and resend the link.
+        // SEC-09: gate BEFORE rotating credentials (throttled callers must not
+        // be able to keep overwriting the row either).
+        const wait = await resendThrottleSecondsRemaining("CANDIDATE", email);
+        if (wait > 0) {
+          return NextResponse.json({ ok: false, error: `Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, retryAfterSeconds: wait }, { status: 429 });
+        }
         await db.checklistAccount.update({ where: { id: exists.id }, data: { name, title, passwordHash: hashPassword(password) } });
       } else {
         await db.checklistAccount.create({ data: { name, email, title, passwordHash: hashPassword(password) } });
@@ -118,6 +125,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: "This account is suspended. Contact VaultVerify support." }, { status: 403 });
       }
       if (!account.emailVerified) {
+        // SEC-09: correct-password sign-ins for unverified accounts also
+        // trigger an email — same throttle applies.
+        const wait = await resendThrottleSecondsRemaining("CANDIDATE", email);
+        if (wait > 0) {
+          return NextResponse.json({ ok: false, error: `Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, retryAfterSeconds: wait }, { status: 429 });
+        }
         const token = await createVerification("CANDIDATE", email);
         await sendVerificationEmail("CANDIDATE", email, token, originOf(req));
         return NextResponse.json({ ok: false, needsVerification: true, sentTo: maskEmail(email) });
@@ -133,6 +146,12 @@ export async function POST(req: NextRequest) {
       const email = String(body.email ?? "").trim().toLowerCase();
       const account = await db.checklistAccount.findUnique({ where: { email } });
       if (account && !account.emailVerified) {
+        // SEC-09: shared durable counter with /api/auth — the two surfaces
+        // enforce one budget per address.
+        const wait = await resendThrottleSecondsRemaining("CANDIDATE", email);
+        if (wait > 0) {
+          return NextResponse.json({ ok: false, error: `Too many verification emails — try again in ${Math.ceil(wait / 60)} minute(s).`, retryAfterSeconds: wait }, { status: 429 });
+        }
         const token = await createVerification("CANDIDATE", email);
         await sendVerificationEmail("CANDIDATE", email, token, originOf(req));
       }
