@@ -1,0 +1,548 @@
+// Production schema — identical to schema.prisma except the datasource provider.
+// Local dev and tests use prisma/schema.prisma (SQLite). Vercel's build and any
+// hosted-DB migration use THIS file. Keep the two in sync when editing models.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// BTS Phase 1 — Digital Reference Collection Platform
+// Multi-tenant: each agency gets its own branding.
+// Statuses (SQLite has no enums — values documented inline):
+//   RequestStatus: SENT | OPENED | IN_PROGRESS | COMPLETED | FLAGGED | EXPIRED
+//   Proficiency:   NEVER | SUPERVISED | INDEPENDENT | CAN_TEACH
+//   Severity:      LOW | MEDIUM | HIGH
+//   Channel:       SMS | EMAIL
+//   IdentityMethod: EMAIL_DOMAIN | CALLBACK_CODE | SKIPPED | ACCOUNT
+//                   (ACCOUNT = the referrer created their VaultVerify account
+//                    with the exact email the candidate provided — the signed
+//                    single-use token plus account creation is the anchor)
+// ─────────────────────────────────────────────────────────────
+
+model Agency {
+  id           String   @id @default(cuid())
+  name         String   // e.g. "MEDS Talent"
+  slug         String   @unique
+  logoText     String   @default("MEDS") // monogram shown in the badge
+  tagline      String   @default("Verified references. Faster placements.")
+  primaryColor String   @default("#0F766E") // teal-700
+  accentColor  String   @default("#B45309") // amber-700
+  creditsGranted Int    @default(500) // Credit management: sandbox grant per company
+  // ── Superadmin command state (Phase 1) ──
+  status        String   @default("ACTIVE") // ACTIVE | SUSPENDED | READ_ONLY — enforced on every outbound action
+  allowOverage  Boolean  @default(false)    // post-paid overage: outbound continues below 0 credits
+  createdAt    DateTime @default(now())
+
+  candidates Candidate[]
+  ledger     CreditLedger[]
+}
+
+model Candidate {
+  id               String    @id @default(cuid())
+  agencyId         String
+  agency           Agency    @relation(fields: [agencyId], references: [id])
+  fullName         String
+  email            String
+  phone            String    @default("")
+  role             String    @default("RN") // RN | LPN | CNA | NP
+  specialty        String    @default("")   // MEDSURG | ICU | ER | ...
+  yearsExperience  Int       @default(0)
+  city             String    @default("")
+  state            String    @default("")
+  licenseNumber    String    @default("")
+  consentSignature String?   // typed signature on the release
+  consentSignedAt  DateTime?
+  createdAt        DateTime  @default(now())
+
+  requests ReferenceRequest[]
+  skills   CandidateSkill[]
+}
+
+model ReferenceRequest {
+  id            String    @id @default(cuid())
+  candidateId   String
+  candidate     Candidate @relation(fields: [candidateId], references: [id])
+  refName       String
+  refTitle      String
+  refEmail      String
+  refPhone      String    @default("")
+  facilityName  String
+  facilityCity  String    @default("")
+  facilityState String    @default("")
+  relationship  String    @default("") // Supervisor | Charge Nurse | Peer | Educator
+  workStartDate String    @default("")
+  workEndDate   String    @default("") // empty = currently working
+  // lifecycle
+  token        String    @unique @default(cuid())
+  status       String    @default("SENT")
+  sentAt       DateTime  @default(now())
+  openedAt     DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  expiresAt    DateTime
+  reminderCount Int      @default(0)
+  lastReminderAt DateTime?
+  createdAt    DateTime  @default(now())
+
+  response ReferenceResponse?
+  flags    FraudFlag[]
+  shares   ReferenceShareLink[]
+}
+
+model ReferenceResponse {
+  id             String          @id @default(cuid())
+  requestId      String          @unique
+  request        ReferenceRequest @relation(fields: [requestId], references: [id])
+  // identity + relationship verification
+  identityMethod String          @default("SKIPPED") // EMAIL_DOMAIN | CALLBACK_CODE | SKIPPED
+  verifiedDomain String?         // matched employer domain
+  confirmedRelationship String  @default("") // reference's own capacity
+  confirmedFacility     String  @default("")
+  confirmedDates        String  @default("")
+  mismatchNotes  String          @default("")
+  // answers: JSON [{ key, question, type, value, anchor? }]
+  answers        String          @default("[]")
+  overallRating  Float?          // computed avg of 1-5 answers
+  q8Discipline   Boolean         @default(false)
+  q8Explanation  String?
+  remarks        String          @default("")
+  // e-signature + audit
+  signatureName  String
+  signedAt       DateTime
+  signerIp       String          @default("")
+  signerUserAgent String         @default("")
+  durationSeconds Int            @default(0)
+  // skills verification (optional in v1)
+  skillsVerified Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+
+  skillChecks SkillVerification[]
+}
+
+model CandidateSkill {
+  id            String   @id @default(cuid())
+  candidateId   String
+  candidate     Candidate @relation(fields: [candidateId], references: [id])
+  skillName     String
+  specialty     String
+  highRisk      Boolean  @default(false)
+  proficiency   String   // NEVER | SUPERVISED | INDEPENDENT | CAN_TEACH
+  recencyMonths Int      @default(0)
+  selfReported  Boolean  @default(true)
+  createdAt     DateTime @default(now())
+}
+
+model SkillVerification {
+  id               String           @id @default(cuid())
+  responseId       String
+  response         ReferenceResponse @relation(fields: [responseId], references: [id])
+  skillName        String
+  nurseProficiency String           // what the nurse self-reported
+  confirmed        Boolean          // reference confirms nurse's level
+  refProficiency   String?          // adjusted level if not confirmed
+  comment          String           @default("")
+  createdAt        DateTime         @default(now())
+}
+
+model FraudFlag {
+  id        String           @id @default(cuid())
+  requestId String
+  request   ReferenceRequest @relation(fields: [requestId], references: [id])
+  type      String // FREE_EMAIL_SURNAME_MATCH | DUPLICATE_IP | RAPID_COMPLETION | DOMAIN_MISMATCH
+  detail    String
+  severity  String @default("LOW") // LOW | MEDIUM | HIGH
+  resolved  Boolean @default(false)
+  // ── Superadmin threat console (Phase 1) ──
+  status    String   @default("OPEN") // OPEN | RESOLVED | ESCALATED | DISMISSED
+  resolution String  @default("")     // owner's note recorded with the decision
+  resolvedAt DateTime?
+  createdAt DateTime @default(now())
+}
+
+// Candidate → anyone: share a COMPLETED reference report via an expiring link
+// (/?rs=<token>). Same access rules as ChecklistShareLink: ONE_TIME or DURATION,
+// revocable and extendable from the candidate's Controlled Sharing panel.
+model ReferenceShareLink {
+  id           String           @id @default(cuid())
+  token        String           @unique @default(cuid())
+  requestId    String
+  request      ReferenceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  accessType   String           @default("DURATION") // ONE_TIME | DURATION
+  durationDays Int?             // null for ONE_TIME
+  label        String           @default("") // optional recipient note
+  createdAt    DateTime         @default(now())
+  expiresAt    DateTime?        // set for DURATION
+  viewedAt     DateTime?        // set on first view for ONE_TIME
+  viewCount    Int              @default(0)
+  revoked      Boolean          @default(false)
+  // ── CH-06: per-recipient binding (both null = OPEN link: legacy rows
+  //    grandfathered, or the candidate explicitly chose "anyone with the link") ──
+  recipientRecruiterId String?
+  recipientRecruiter   RecruiterAccount? @relation("ReferenceShareRecipients", fields: [recipientRecruiterId], references: [id])
+  recipientEmail       String?  // address the candidate named (kept even if no account exists)
+
+  @@index([recipientRecruiterId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// SKILLS CHECKLIST feature — a self-assessment, separate from references.
+// Candidate owns an account; a checklist is completed ONCE and stays
+// valid for 30 days; access is granted only via candidate-controlled share links.
+// Statuses:
+//   Invite.status:   SENT | COMPLETED
+//   Request.status:  PENDING | APPROVED | REJECTED   (superadmin decides)
+//   ShareLink.accessType: ONE_TIME | DURATION
+// ─────────────────────────────────────────────────────────────
+
+model ChecklistAccount {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  title        String   @default("RN")
+  // ── onboarding / Data Center profile (superadmin → Candidate management) ──
+  phone        String   @default("")
+  city         String   @default("")
+  state        String   @default("")
+  zip          String   @default("")
+  profession   String   @default("")   // Nursing | Allied | Pharmacy | Locums
+  discipline   String   @default("")   // RN | LPN | PT | ... (the job title)
+  specialty    String   @default("")   // canonical key (MEDSURG, ICU, ...)
+  yrsOverall   Int      @default(0)    // manual entry — overall years of experience
+  yrsOverallStart  DateTime?           // calendar entry — platform derives years continuously
+  yrsSpecialty Int      @default(0)    // manual entry — experience in current specialty
+  yrsSpecialtyStart DateTime?          // calendar entry
+  onboardingComplete Boolean @default(false)
+  emailVerified      Boolean @default(false)
+  // ── Superadmin command state (Phase 1) ──
+  status     String   @default("ACTIVE") // ACTIVE | SUSPENDED — login + sessions killed on suspend
+  // ── Security center (Phase 2) ──
+  failedLogins     Int       @default(0)
+  lastFailedLogin  DateTime?
+  createdAt    DateTime @default(now())
+
+  sessions    ChecklistSession[]
+  invites     ChecklistInvite[]
+  requests    ChecklistRequest[]
+  completions ChecklistCompletion[]
+}
+
+model ChecklistSession {
+  id         String           @id @default(cuid())
+  accountId  String
+  account    ChecklistAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt  DateTime         @default(now())
+  expiresAt  DateTime
+}
+
+// Recruiter → candidate: "please complete this skills checklist"
+model ChecklistInvite {
+  id            String   @id @default(cuid())
+  token         String   @unique @default(cuid()) // claim link /?view=checklist&invite=<token>
+  candidateName String
+  candidateEmail String
+  candidatePhone String  @default("")     // required on the recruiter send form
+  // recruiter picks Profession → Discipline → Specialty from the cascade;
+  // candidate can still correct these during their onboarding/fill
+  profession    String   @default("")
+  jobTitle      String   @default("")
+  specialty     String   @default("")
+  recruiterName String
+  facilityName  String   @default("")
+  agencyName    String   @default("MEDS Talent")
+  message       String   @default("")
+  status        String   @default("SENT") // SENT | COMPLETED
+  // linked when a candidate account with a matching email claims it
+  accountId     String?
+  account       ChecklistAccount? @relation(fields: [accountId], references: [id])
+  completionId  String?
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+  // ── CH-07: the sending recruiter owns this invite. null = legacy invite
+  //    (created before binding existed) — visible only to the superadmin console.
+  recruiterAccountId String?
+  recruiterAccount   RecruiterAccount? @relation("ChecklistInviteSender", fields: [recruiterAccountId], references: [id])
+
+  @@index([recruiterAccountId])
+}
+
+// Candidate → superadmin: "I want this checklist on my profile"
+model ChecklistRequest {
+  id         String           @id @default(cuid())
+  accountId  String
+  account    ChecklistAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profession String
+  jobTitle   String
+  specialty  String // canonical key from the catalog
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  note       String   @default("")
+  requestedAt DateTime @default(now())
+  decidedAt  DateTime?
+  completion ChecklistCompletion?
+}
+
+// The completed self-assessment, saved in the candidate's account for 30 days
+model ChecklistCompletion {
+  id           String           @id @default(cuid())
+  accountId    String
+  account      ChecklistAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profession   String
+  jobTitle     String
+  specialty    String // canonical key
+  specialtyLabel String @default("")
+  // answers snapshot: [{ category, skill, questionType, value, na, highRisk, lastPerformed? }]
+  answers      String
+  // additional-questions snapshot: [{ id, prompt, kind, value }] (superadmin-managed set)
+  additional  String @default("[]")
+  // attestation snapshot: { agreed, mode: "draw"|"type"|"upload", signature, printedName, signedAt }
+  attestation String @default("")
+  yearsExperience Int @default(0)
+  source       String @default("SELF") // SELF (own request) | RECRUITER (invite)
+  requestId    String?  @unique
+  request      ChecklistRequest? @relation(fields: [requestId], references: [id])
+  inviteId     String?  @unique
+  completedAt  DateTime @default(now())
+  expiresAt    DateTime // completedAt + 30 days (CHECKLIST_VALIDITY_DAYS)
+
+  shareLinks ChecklistShareLink[]
+}
+
+// Candidate shares a completed checklist with a recruiter, with access rules
+model ChecklistShareLink {
+  id           String   @id @default(cuid())
+  token        String   @unique @default(cuid())
+  completionId String
+  completion   ChecklistCompletion @relation(fields: [completionId], references: [id], onDelete: Cascade)
+  accessType   String   @default("DURATION") // ONE_TIME | DURATION
+  durationDays Int?     // null for ONE_TIME
+  label        String   @default("") // optional recipient note, e.g. "For SNF recruiter"
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime? // set for DURATION
+  viewedAt     DateTime? // set on first view for ONE_TIME
+  viewCount    Int      @default(0)
+  revoked      Boolean  @default(false)
+  // ── CH-06: per-recipient binding (same semantics as ReferenceShareLink) ──
+  recipientRecruiterId String?
+  recipientRecruiter   RecruiterAccount? @relation("ChecklistShareRecipients", fields: [recipientRecruiterId], references: [id])
+  recipientEmail       String?
+
+  @@index([recipientRecruiterId])
+}
+
+// Superadmin-managed "Additional questions" rendered on every checklist fill + report
+model ChecklistExtraQuestion {
+  id          String   @id @default(cuid())
+  kind        String   @default("YES_NO") // YES_NO | TEXT
+  prompt      String
+  placeholder String   @default("")
+  specialty   String   @default("") // "" = applies to every checklist
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Zipvault-compatible skill checklist templates (MyZipVault import format)
+model SkillTemplate {
+  id          String   @id @default(cuid())
+  profession  String   @default("Nursing") // Nursing | Allied | Pharmacy | Locums
+  jobTitle    String   @default("RN")
+  specialty   String   // canonical key (MEDSURG, ICU, ...) when known, else normalized label
+  category    String   @default("General")
+  skillName   String
+  questionType String  @default("rating_1_4") // rating_1_4 | yes_no | text
+  hasNA       Boolean  @default(true)
+  highRisk    Boolean  @default(false)
+  active      Boolean  @default(true)
+  source      String   @default("BUILTIN") // BUILTIN | IMPORT
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([profession, jobTitle, specialty, skillName])
+}
+
+model NotificationLog {
+  id          String   @id @default(cuid())
+  channel     String // SMS | EMAIL
+  kind        String // INVITE | REMINDER | SWAP_NOTICE | COMPLETION | AUTH | OTP | SECURITY
+  to          String
+  subject     String   @default("")
+  body        String
+  html        String?
+  templateKey String?
+  requestId   String?
+  status      String   @default("SIMULATED") // SENT | SIMULATED | FAILED
+  provider    String   @default("sandbox")
+  createdAt   DateTime @default(now())
+}
+
+// Editable email templates (Superadmin → Templates). A row here OVERRIDES the
+// built-in default of the same key; deleting the row falls back to default.
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "reference_invite" — see emailTemplates.ts
+  name        String // display name in the console
+  subject     String
+  html        String // full HTML body; {{variables}} substituted at send time
+  description String   @default("") // purpose + available variables
+  updatedBy   String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  actorType String // CANDIDATE | REFERENCE | RECRUITER | SYSTEM
+  actorId   String   @default("")
+  action    String   // e.g. PROFILE_CREATED, REQUEST_SENT, FORM_OPENED, FORM_SUBMITTED, PDF_DOWNLOADED
+  entity    String   @default("")
+  entityId  String   @default("")
+  detail    String   @default("{}") // JSON
+  ip        String   @default("")
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────
+// PORTAL AUTH — recruiter accounts, email verification, superadmin OTP.
+// Candidates already authenticate via ChecklistAccount (above).
+// Flow for BOTH recruiter and candidate: signup → verify email →
+// onboarding (name, phone, email, location) → dashboard.
+// ─────────────────────────────────────────────────────────────
+
+model RecruiterAccount {
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  passwordHash       String
+  name               String
+  // onboarding profile — "all the details": name, number, email, location
+  phone              String   @default("")
+  company            String   @default("") // agency / facility they recruit for
+  jobTitle           String   @default("") // e.g. "Senior Recruiter"
+  city               String   @default("")
+  state              String   @default("")
+  zip                String   @default("")
+  emailVerified      Boolean  @default(false)
+  onboardingComplete Boolean  @default(false)
+  // ── Superadmin command state (Phase 1) ──
+  status             String   @default("ACTIVE") // ACTIVE | SUSPENDED — login + sessions killed on suspend
+  // ── Security center (Phase 2) ──
+  failedLogins       Int      @default(0)
+  lastFailedLogin    DateTime?
+  createdAt          DateTime @default(now())
+
+  sessions         RecruiterSession[]
+  checklistInvites ChecklistInvite[]    @relation("ChecklistInviteSender")
+  referenceShares  ReferenceShareLink[] @relation("ReferenceShareRecipients")
+  checklistShares  ChecklistShareLink[] @relation("ChecklistShareRecipients")
+}
+
+// Security center: superadmin-triggered password resets. The console emails
+// a /?reset=<token> link (optionally with a temp password); the portal form
+// consumes the token, sets the new hash, and kills every live session.
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  token      String    @unique @default(cuid())
+  kind       String    // CANDIDATE | RECRUITER
+  accountId  String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([accountId])
+}
+
+model RecruiterSession {
+  id         String           @id @default(cuid())
+  accountId  String
+  account    RecruiterAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt  DateTime         @default(now())
+  expiresAt  DateTime
+}
+
+// One-time email-verification tokens for candidate AND recruiter signups.
+// The emailed link is /?verify=<token>; consuming it flips emailVerified.
+model EmailVerification {
+  id         String    @id @default(cuid())
+  token      String    @unique @default(cuid())
+  role       String    // CANDIDATE | RECRUITER
+  email      String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// Superadmin OTP login: a 6-digit code is emailed to the requesting admin's
+// address (the OWNER address from SUPERADMIN_EMAIL, or a team member's email
+// from SuperadminAccount). Codes are hashed at rest, expire fast, and die
+// after 5 wrong tries.
+model SuperAdminOtp {
+  id         String    @id @default(cuid())
+  email      String    @default("") // identity the code was issued to ("" = legacy, owner address)
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+}
+
+// Phase 3 RBAC — the admin team. The OWNER row for SUPERADMIN_EMAIL is
+// auto-seeded on first login; sub-admins are invited from the console.
+//   role:   OWNER | ADMIN | SUPPORT   (SUPPORT is read-only by construction)
+//   status: ACTIVE | SUSPENDED        (suspension kills live console sessions)
+model SuperadminAccount {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String   @default("")
+  role      String   @default("SUPPORT")
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Issued after a correct OTP (or the static backup code). The console
+// then authenticates every call with this bearer token. Sessions carry the
+// account identity so role changes and suspensions apply immediately.
+model SuperAdminSession {
+  id        String   @id @default(cuid())
+  token     String   @unique @default(cuid())
+  accountId String?  // set for OTP team logins; null = backup-code/legacy (OWNER)
+  email     String   @default("")
+  role      String   @default("OWNER") // snapshot; authoritative role lives on the account
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// ── Superadmin Phase 1: command & enforce ─────────────────────────────
+
+// Immutable credit ledger — the single source of truth for company balances.
+// Every outbound verification (reference request, checklist invite) spends
+// exactly 1 credit via a ledger row; superadmin grants/adjustments are ledger
+// rows too. Balance = sum of deltas (last row's balanceAfter is authoritative).
+model CreditLedger {
+  id           String   @id @default(cuid())
+  agencyId     String
+  agency       Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  delta        Int      // positive = grant, negative = spend
+  reason       String   @default("")
+  actorType    String   @default("SYSTEM") // SYSTEM | SUPERADMIN
+  actorId      String   @default("")
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  @@index([agencyId, createdAt])
+}
+
+// Platform-level command switches (maintenance mode, tuning thresholds).
+// Server-only: read via src/lib/bts/platform.ts, written from the console.
+model PlatformConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  updatedBy String   @default("superadmin")
+}

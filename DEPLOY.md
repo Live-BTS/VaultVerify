@@ -7,32 +7,43 @@ Local development keeps SQLite + simulated notifications; production swaps both 
 
 ---
 
-## 1 · Database — SQLite → Supabase Postgres
+## 1 · Database — dual schema: SQLite (local) + Postgres (hosted)
 
-The app ships with `provider = "sqlite"` for local dev. For production:
+Two schema files live side by side and must stay model-identical:
 
-1. Open **Supabase → your project → Project Settings → Database**.
-2. Copy the **Connection string (URI)** — use the **Connection pooling** string (port `6543`) for serverless. It looks like:
-   `postgresql://postgres.<db-password>@aws-0-<region>.pooler.supabase.com:6543/postgres`
-   (You supply the **database password** you set when creating the project.)
-3. In `prisma/schema.prisma` change the datasource provider:
+| File | Provider | Used by |
+|---|---|---|
+| `prisma/schema.prisma` | `sqlite` | local dev, tests (`bunx vitest run`), `bun run db:push` (guarded) |
+| `prisma/schema.postgres.prisma` | `postgresql` | Vercel build (`bun run build` runs its `prisma generate`), hosted migrations (`bun run db:push:postgres`) |
 
-   ```prisma
-   datasource db {
-     provider = "postgresql"   // was "sqlite"
-     url      = env("DATABASE_URL")
-   }
-   ```
+When you edit a model, edit BOTH files the same way.
 
-4. Push the schema to Supabase:
+**One-time (or after model changes) — push the schema to the hosted DB:**
 
+1. Export the hosted connection string. Use the **pooler host** (IPv4) — the direct
+   `db.<ref>.supabase.co` host is IPv6-only and unreachable from most environments.
+   Session mode (port `5432`) is fine for migrations:
    ```bash
-   bunx prisma db push
+   export DATABASE_URL='postgresql://postgres.<PROJECT-REF>:<DB-PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require'
    ```
+2. Run the push (additive/nullable migrations only — never pass `--accept-data-loss`):
+   ```bash
+   bun run db:push:postgres
+   ```
+3. **Restore the local SQLite client** (the push regenerates the client from the
+   Postgres schema): `bunx prisma generate`
 
-5. (Optional) Seed reference/checklist catalogs in production — run the seed scripts in `scripts/` against the new `DATABASE_URL`.
+**Vercel runtime `DATABASE_URL`** — either works; keep it consistent with what you migrate against:
+- Session mode (current): `postgresql://postgres.<ref>:<pwd>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=1`
+- Transaction mode: same host, port `6543`, append `?pgbouncer=true&connection_limit=1&sslmode=require`
 
-> ⚠️ Prisma requires the connection string to include the Postgres schema search path? Not needed — Supabase's default `public` schema works as-is. If you hit prepared-statement errors on serverless, append `?pgbouncer=true&connection_limit=1` to the pooled URL.
+> ⚠️ Free-plan Supabase has no automated backups. All migrations here are
+> additive and nullable (existing rows untouched); for a manual snapshot, export
+> tables to CSV from the Table Editor before pushing.
+
+> ⚠️ `bun run db:push` (SQLite default) stays guarded: it refuses any non-local
+> DSN and never passes `--accept-data-loss`. The `db:push:postgres` path is a
+> deliberate operator action against an explicitly exported `DATABASE_URL`.
 
 ---
 
