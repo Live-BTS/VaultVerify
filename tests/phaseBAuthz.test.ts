@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/bts/checklistAuth";
+import { sha256 } from "@/lib/bts/auth";
 import { viewerAllowedByRecipient, resolveNewShareBinding } from "@/lib/bts/sharePolicy";
 import { POST as refSharePost } from "@/app/api/reference/share/route";
 import { POST as checklistSharePost } from "@/app/api/checklist/share/route";
@@ -57,9 +58,9 @@ beforeAll(async () => {
   sessionBId = `rcs_${crypto.randomUUID().replaceAll("-", "")}`;
   candSessionId = `cks_${crypto.randomUUID().replaceAll("-", "")}`;
   await Promise.all([
-    db.recruiterSession.create({ data: { id: sessionAId, accountId: recruiterAId, expiresAt: new Date(Date.now() + 86400_000) } }),
-    db.recruiterSession.create({ data: { id: sessionBId, accountId: recruiterBId, expiresAt: new Date(Date.now() + 86400_000) } }),
-    db.checklistSession.create({ data: { id: candSessionId, accountId: candAccountId, expiresAt: new Date(Date.now() + 86400_000) } }),
+    db.recruiterSession.create({ data: { id: sha256(sessionAId), accountId: recruiterAId, expiresAt: new Date(Date.now() + 86400_000) } }),
+    db.recruiterSession.create({ data: { id: sha256(sessionBId), accountId: recruiterBId, expiresAt: new Date(Date.now() + 86400_000) } }),
+    db.checklistSession.create({ data: { id: sha256(candSessionId), accountId: candAccountId, expiresAt: new Date(Date.now() + 86400_000) } }),
   ]);
 
   // Candidate profile + completed reference (funded agency for guardOutbound)

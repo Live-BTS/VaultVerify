@@ -47,6 +47,14 @@ export function maskEmail(email: string): string {
   return `${head}${"•".repeat(Math.max(1, user.length - 2))}@${domain}`;
 }
 
+// ── Token hashing at rest (Phase D) ───────────────────────────────
+// Every capability token (sessions, verification, resets) is stored as a
+// SHA-256 digest, never in plaintext. A database leak therefore yields no
+// usable bearer tokens. No salt is needed: all tokens are 192-bit random
+// values (newToken()), so there is nothing to brute-force offline and the
+// digest remains usable as a unique lookup key. The RAW value lives only in
+// the cookie or the emailed link — never in a row, a log, or an API payload.
+
 // ── Email verification ────────────────────────────────────────────
 
 export async function createVerification(role: "CANDIDATE" | "RECRUITER", email: string): Promise<string> {
@@ -55,15 +63,17 @@ export async function createVerification(role: "CANDIDATE" | "RECRUITER", email:
     where: { email, role, consumedAt: null },
     data: { consumedAt: new Date() },
   });
+  const raw = newToken();
   const row = await db.emailVerification.create({
     data: {
-      token: newToken(),
+      token: sha256(raw),
       role,
       email,
       expiresAt: new Date(Date.now() + VERIFY_TTL_MINUTES * 60 * 1000),
     },
   });
-  return row.token;
+  void row;
+  return raw;
 }
 
 export async function sendVerificationEmail(
@@ -82,7 +92,7 @@ export async function sendVerificationEmail(
 }
 
 export async function consumeVerification(token: string): Promise<{ role: string; email: string } | null> {
-  const row = await db.emailVerification.findUnique({ where: { token } });
+  const row = await db.emailVerification.findUnique({ where: { token: sha256(token) } });
   if (!row || row.consumedAt || row.expiresAt < new Date()) return null;
   await db.emailVerification.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
   return { role: row.role, email: row.email };
@@ -95,14 +105,16 @@ export const RESET_TTL_MINUTES = 60;
 export async function createPasswordReset(kind: "CANDIDATE" | "RECRUITER", accountId: string): Promise<string> {
   // Invalidate prior unconsumed resets, then issue a fresh one-hour token.
   await db.passwordResetToken.updateMany({ where: { accountId, kind, consumedAt: null }, data: { consumedAt: new Date() } });
+  const raw = newToken();
   const row = await db.passwordResetToken.create({
-    data: { token: newToken(), kind, accountId, expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000) },
+    data: { token: sha256(raw), kind, accountId, expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000) },
   });
-  return row.token;
+  void row;
+  return raw;
 }
 
 export async function consumePasswordReset(kind: "CANDIDATE" | "RECRUITER", token: string): Promise<{ accountId: string } | null> {
-  const row = await db.passwordResetToken.findUnique({ where: { token } });
+  const row = await db.passwordResetToken.findUnique({ where: { token: sha256(token) } });
   if (!row || row.kind !== kind || row.consumedAt || row.expiresAt < new Date()) return null;
   await db.passwordResetToken.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
   return { accountId: row.accountId };
@@ -111,25 +123,25 @@ export async function consumePasswordReset(kind: "CANDIDATE" | "RECRUITER", toke
 // ── Sessions ──────────────────────────────────────────────────────
 
 export async function createRecruiterSession(accountId: string): Promise<string> {
-  const id = `rcs_${randomBytes(24).toString("hex")}`;
+  const raw = `rcs_${randomBytes(24).toString("hex")}`;
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  await db.recruiterSession.create({ data: { id, accountId, expiresAt } });
+  await db.recruiterSession.create({ data: { id: sha256(raw), accountId, expiresAt } });
   const jar = await cookies();
-  jar.set(RECRUITER_COOKIE, id, {
+  jar.set(RECRUITER_COOKIE, raw, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     maxAge: SESSION_DAYS * 24 * 60 * 60,
     path: "/",
   });
-  return id;
+  return raw;
 }
 
 export async function getRecruiterSessionAccount() {
   const jar = await cookies();
   const id = jar.get(RECRUITER_COOKIE)?.value;
   if (!id) return null;
-  const session = await db.recruiterSession.findUnique({ where: { id } });
+  const session = await db.recruiterSession.findUnique({ where: { id: sha256(id) } });
   if (!session || session.expiresAt < new Date()) return null;
   const account = await db.recruiterAccount.findUnique({ where: { id: session.accountId } });
   // Defense-in-depth: suspended recruiters are dead even if a session row survived.
@@ -145,7 +157,7 @@ export async function destroyRecruiterSession(): Promise<void> {
   const jar = await cookies();
   const id = jar.get(RECRUITER_COOKIE)?.value;
   if (id) {
-    await db.recruiterSession.deleteMany({ where: { id } });
+    await db.recruiterSession.deleteMany({ where: { id: sha256(id) } });
     jar.delete(RECRUITER_COOKIE);
   }
 }

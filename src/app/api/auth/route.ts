@@ -5,8 +5,9 @@ import {
   createVerification, sendVerificationEmail, consumeVerification,
   createRecruiterSession, getRecruiterSessionAccount, destroyRecruiterSession,
   dbConfigured, emailLive,
-  createPasswordReset, consumePasswordReset,
+  createPasswordReset, consumePasswordReset, sha256,
 } from "@/lib/bts/auth";
+import { loginLockedFor, maybePruneExpiredAuthRows } from "@/lib/bts/hygiene";
 import { assertPlatformWritable } from "@/lib/bts/platform";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { createSession, destroySession, getAccount } from "@/lib/bts/checklistAuth";
@@ -114,6 +115,13 @@ export async function POST(req: NextRequest) {
       const account = role === "CANDIDATE"
         ? await db.checklistAccount.findUnique({ where: { email } })
         : await db.recruiterAccount.findUnique({ where: { email } });
+      // Phase D: the failedLogins counter finally has teeth. A locked account
+      // is rejected BEFORE the password check — no scrypt work, and the same
+      // neutral message the wrong-password path returns.
+      if (account && loginLockedFor(account) > 0) {
+        await logAudit({ actorType: "SYSTEM", actorId: email, action: "SIGNIN_LOCKED_OUT", entity: role === "CANDIDATE" ? "checklistAccount" : "recruiterAccount", entityId: account.id, ip: req.headers.get("x-forwarded-for")?.split(",")[0] ?? "" });
+        return bad("Too many failed attempts — try again in a few minutes.", 429);
+      }
       if (!account || !verifyPassword(password, account.passwordHash)) {
         // Security center: consecutive failed-login counter per account.
         if (account) {
@@ -143,6 +151,8 @@ export async function POST(req: NextRequest) {
         await createRecruiterSession(account.id);
       }
       await logAudit({ actorType: role, actorId: email, action: "SIGNIN", entity: role === "CANDIDATE" ? "checklistAccount" : "recruiterAccount", entityId: account.id });
+      // Opportunistic hygiene (throttled internally to once per 10 min).
+      await maybePruneExpiredAuthRows();
       return NextResponse.json({ ok: true, role, onboardingComplete: account.onboardingComplete });
     }
 
@@ -204,7 +214,7 @@ export async function POST(req: NextRequest) {
       // Kind is inferred from the token when the portal doesn't send it.
       let kind: "CANDIDATE" | "RECRUITER" | null = body.kind === "RECRUITER" ? "RECRUITER" : body.kind === "CANDIDATE" ? "CANDIDATE" : null;
       if (!kind) {
-        const row = await db.passwordResetToken.findUnique({ where: { token } });
+        const row = await db.passwordResetToken.findUnique({ where: { token: sha256(token) } });
         kind = row?.kind === "RECRUITER" ? "RECRUITER" : row?.kind === "CANDIDATE" ? "CANDIDATE" : null;
       }
       if (!kind) return bad("This reset link is invalid or has expired. Ask support for a new one.");

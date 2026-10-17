@@ -15,6 +15,7 @@ vi.mock("next/headers", () => ({
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/bts/checklistAuth";
+import { sha256 } from "@/lib/bts/auth";
 import { GET as recruiterGet } from "@/app/api/recruiter/route";
 
 // ── SEC-01(a) / SEC-15 / CH-05: recruiter payload minimization ──
@@ -29,7 +30,7 @@ describe("CH-05: recruiter payload carries content, never screening metadata/tok
       data: { email: "recmin@test.local", name: "Rec Min", passwordHash: hashPassword("password123"), emailVerified: true, onboardingComplete: true },
     });
     recruiterSessionId = `rcs_${crypto.randomUUID().replaceAll("-", "")}`;
-    await db.recruiterSession.create({ data: { id: recruiterSessionId, accountId: recruiter.id, expiresAt: new Date(Date.now() + 86_400_000) } });
+    await db.recruiterSession.create({ data: { id: sha256(recruiterSessionId), accountId: recruiter.id, expiresAt: new Date(Date.now() + 86_400_000) } });
     RECRUITER_SESSION_COOKIE = recruiterSessionId;
 
     const candidate = await db.candidate.create({

@@ -17,6 +17,7 @@ vi.mock("next/headers", () => ({
 
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { sha256 } from "@/lib/bts/auth";
 import { isWithinSaveWindow, evaluateCompanionRead, SHARE_SAVE_WINDOW_MINUTES } from "@/lib/bts/sharePolicy";
 import { POST as checklistSharePost } from "@/app/api/checklist/share/route";
 import { POST as refSharePost } from "@/app/api/reference/share/route";
@@ -74,7 +75,7 @@ beforeAll(async () => {
   // real session rows — the mock cookie value IS the session id
   candSessionId = `cks_${crypto.randomUUID().replaceAll("-", "")}`;
   await db.checklistSession.create({
-    data: { id: candSessionId, accountId: candId, expiresAt: new Date(Date.now() + 86400_000) },
+    data: { id: sha256(candSessionId), accountId: candId, expiresAt: new Date(Date.now() + 86400_000) },
   });
   const cand2 = await db.checklistAccount.create({
     data: { email: "cand2-unverified@phasec.local", name: "Cand Unverified", passwordHash: "x", emailVerified: false },
@@ -82,11 +83,11 @@ beforeAll(async () => {
   cand2Id = cand2.id;
   cand2SessionId = `cks_${crypto.randomUUID().replaceAll("-", "")}`;
   await db.checklistSession.create({
-    data: { id: cand2SessionId, accountId: cand2Id, expiresAt: new Date(Date.now() + 86400_000) },
+    data: { id: sha256(cand2SessionId), accountId: cand2Id, expiresAt: new Date(Date.now() + 86400_000) },
   });
   sessionAId = `rcs_${crypto.randomUUID().replaceAll("-", "")}`;
   await db.recruiterSession.create({
-    data: { id: sessionAId, accountId: recruiterAId, expiresAt: new Date(Date.now() + 86400_000) },
+    data: { id: sha256(sessionAId), accountId: recruiterAId, expiresAt: new Date(Date.now() + 86400_000) },
   });
 
   // Reference-side fixtures (agency → candidate → request → response)

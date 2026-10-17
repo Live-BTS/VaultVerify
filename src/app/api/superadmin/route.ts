@@ -10,6 +10,7 @@ import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { getPlatformFlag, setPlatformFlag, deletePlatformFlag, MAINTENANCE_KEY } from "@/lib/bts/platform";
 import { getFraudConfig, setFraudConfig, normalizeFraudConfig } from "@/lib/bts/fraudConfig";
+import { maybePruneExpiredAuthRows, maybePruneOldLogs } from "@/lib/bts/hygiene";
 
 // ── POST /api/superadmin — platform administration (OTP + backup code) ──
 // Auth model:
@@ -63,7 +64,9 @@ function forbidden(msg = "Your console role does not allow this action") {
 async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIdentity | null> {
   const token = typeof body.token === "string" ? body.token : "";
   if (token.startsWith("sas_")) {
-    const session = await db.superAdminSession.findUnique({ where: { token } });
+    // Session tokens are hashed at rest (Phase D) — the presented raw token is
+    // digested for lookup; the DB never stores a usable bearer value.
+    const session = await db.superAdminSession.findUnique({ where: { token: sha256(token) } });
     if (session && session.expiresAt > new Date()) {
       if (session.accountId) {
         const account = await db.superadminAccount.findUnique({ where: { id: session.accountId } });
@@ -341,7 +344,7 @@ export async function POST(req: NextRequest) {
         : "SUPPORT";
       const token = `sas_${randomBytes(24).toString("hex")}`;
       await db.superAdminSession.create({
-        data: { token, accountId: account.id, email: account.email, role, expiresAt: new Date(Date.now() + SESSION_HOURS * 3600 * 1000) },
+        data: { token: sha256(token), accountId: account.id, email: account.email, role, expiresAt: new Date(Date.now() + SESSION_HOURS * 3600 * 1000) },
       });
       await logAudit({ actorType: "SYSTEM", actorId: account.email, action: "ADMIN_OTP_LOGIN", entity: "superAdminSession", detail: { role } });
       return NextResponse.json({ ok: true, token, identity: { email: account.email, role }, ...(await overview()) });
@@ -350,6 +353,9 @@ export async function POST(req: NextRequest) {
     // Every other action requires a live session token or the backup code.
     const identity = await resolveIdentity(body);
     if (!identity) return unauthorized();
+    // Opportunistic hygiene (both throttled internally to once per 10 min).
+    await maybePruneExpiredAuthRows();
+    await maybePruneOldLogs();
     if (!roleAllowed(identity.role, String(body.action ?? ""))) {
       return forbidden(
         identity.role === "SUPPORT"

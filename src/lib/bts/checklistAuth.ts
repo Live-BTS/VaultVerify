@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
+import { sha256 } from "@/lib/bts/auth";
 
 // ── Skills Checklist account auth (lightweight sandbox sessions) ──
 // Production: swap for NextAuth/Supabase Auth — hash format is self-describing.
@@ -23,25 +24,27 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 export async function createSession(accountId: string): Promise<string> {
-  const id = `cks_${randomBytes(24).toString("hex")}`;
+  const raw = `cks_${randomBytes(24).toString("hex")}`;
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  await db.checklistSession.create({ data: { id, accountId, expiresAt } });
+  // Session ids are stored hashed at rest (see auth.ts, Phase D) — the raw
+  // value exists only in the cookie.
+  await db.checklistSession.create({ data: { id: sha256(raw), accountId, expiresAt } });
   const jar = await cookies();
-  jar.set(COOKIE, id, {
+  jar.set(COOKIE, raw, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     maxAge: SESSION_DAYS * 24 * 60 * 60,
     path: "/",
   });
-  return id;
+  return raw;
 }
 
 export async function destroySession(): Promise<void> {
   const jar = await cookies();
   const id = jar.get(COOKIE)?.value;
   if (id) {
-    await db.checklistSession.deleteMany({ where: { id } });
+    await db.checklistSession.deleteMany({ where: { id: sha256(id) } });
     jar.delete(COOKIE);
   }
 }
@@ -51,7 +54,7 @@ export async function getAccount() {
   const jar = await cookies();
   const id = jar.get(COOKIE)?.value;
   if (!id) return null;
-  const session = await db.checklistSession.findUnique({ where: { id } });
+  const session = await db.checklistSession.findUnique({ where: { id: sha256(id) } });
   if (!session || session.expiresAt < new Date()) return null;
   const account = await db.checklistAccount.findUnique({ where: { id: session.accountId } });
   // Defense-in-depth: a suspended account is dead everywhere, even if a live

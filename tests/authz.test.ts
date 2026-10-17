@@ -20,6 +20,7 @@ vi.mock("next/headers", () => ({
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/bts/checklistAuth";
+import { sha256 } from "@/lib/bts/auth";
 import { GET as candidateGet } from "@/app/api/candidate/route";
 import { POST as candidateActionsPost } from "@/app/api/candidate/actions/route";
 import { GET as pdfGet } from "@/app/api/pdf/[requestId]/route";
@@ -59,9 +60,9 @@ beforeAll(async () => {
   otherAccountId = other.id;
   recruiterAccountId = recruiter.id;
   sessionId = `cks_${crypto.randomUUID().replaceAll("-", "")}`;
-  await db.checklistSession.create({ data: { id: sessionId, accountId, expiresAt: new Date(Date.now() + 86400_000) } });
+  await db.checklistSession.create({ data: { id: sha256(sessionId), accountId, expiresAt: new Date(Date.now() + 86400_000) } });
   recruiterSessionId = `rcs_${crypto.randomUUID().replaceAll("-", "")}`;
-  await db.recruiterSession.create({ data: { id: recruiterSessionId, accountId: recruiterAccountId, expiresAt: new Date(Date.now() + 86400_000) } });
+  await db.recruiterSession.create({ data: { id: sha256(recruiterSessionId), accountId: recruiterAccountId, expiresAt: new Date(Date.now() + 86400_000) } });
 
   // Legacy candidate profile + a completed reference for the owner
   const candidate = await db.candidate.create({
@@ -215,7 +216,7 @@ describe("GET /api/pdf/[requestId] — owner-or-share-token (C3)", () => {
   it("401 for another user's session even with a requestId", async () => {
     // Session belongs to OTHER account; the request belongs to OWN.
     const s = `cks_other_${crypto.randomUUID().replaceAll("-", "")}`;
-    await db.checklistSession.create({ data: { id: s, accountId: otherAccountId, expiresAt: new Date(Date.now() + 86400_000) } });
+    await db.checklistSession.create({ data: { id: sha256(s), accountId: otherAccountId, expiresAt: new Date(Date.now() + 86400_000) } });
     SESSION_COOKIE = s;
     const res = await pdfGet(req(`/api/pdf/${requestId}`), { params: Promise.resolve({ requestId }) });
     expect(res.status).toBe(401);
