@@ -10,6 +10,7 @@ import { LINK_EXPIRY_DAYS, specialtyLabel } from "@/lib/bts/constants";
 import { CHECKLISTS } from "@/lib/bts/questions";
 import { newToken, sha256Hex } from "@/lib/bts/tokens";
 import { encryptRefToken, refLinkFor, callbackCodeFor } from "@/lib/bts/refTokenCrypto";
+import { candidateProfileWhere, withAccountLink } from "@/lib/bts/identity";
 
 function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
@@ -36,8 +37,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "You can only view your own profile" }, { status: 403 });
   }
 
+  // Phase E unified identity: the account's references profile resolves by its
+  // accountId link first; unlinked pre-unification rows fall back to email.
   const candidate = await db.candidate.findFirst({
-    where: { email },
+    where: candidateProfileWhere(account),
     include: {
       agency: true,
       skills: { orderBy: { id: "asc" } },
@@ -115,6 +118,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A profile with this email already exists — sign in instead." }, { status: 409 });
   }
 
+  // Phase E unified identity: when the onboarding runs signed-in (the normal
+  // portal path), the new references profile is linked to the account — one
+  // registration drives both workflows. Signed-out onboarding still works and
+  // is linked later by scripts/e-unify-accounts.ts (exact email match).
+  const sessionAccount = await getAccount();
+
   const agency = (await db.agency.findUnique({ where: { slug: "vaultverify" } })) ?? (await db.agency.findFirst());
   if (!agency) return NextResponse.json({ error: "Agency not configured" }, { status: 500 });
 
@@ -125,6 +134,7 @@ export async function POST(req: NextRequest) {
   const candidate = await db.candidate.create({
     data: {
       agencyId: agency.id,
+      ...withAccountLink(sessionAccount?.id),
       fullName: body.fullName.trim(),
       email: body.email.toLowerCase().trim(),
       phone: body.phone ?? "",

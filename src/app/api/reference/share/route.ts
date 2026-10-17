@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/bts/audit";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { specialtyLabel } from "@/lib/bts/constants";
 import { newToken, sha256Hex, tokenLookups, isTokenHashed } from "@/lib/bts/tokens";
+import { candidateProfileWhere } from "@/lib/bts/identity";
 import { viewerAllowedByRecipient, resolveNewShareBinding } from "@/lib/bts/sharePolicy";
 
 // ── /api/reference/share — candidate shares a COMPLETED reference report ──
@@ -41,7 +42,8 @@ export async function GET(_req: NextRequest) {
   const account = await getAccount();
   if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
 
-  const candidate = await db.candidate.findFirst({ where: { email: account.email.toLowerCase() }, select: { id: true } });
+  // Phase E unified identity: accountId link first, unlinked-legacy email fallback.
+  const candidate = await db.candidate.findFirst({ where: candidateProfileWhere(account), select: { id: true } });
   if (!candidate) return NextResponse.json({ ok: true, links: [] });
 
   const requests = await db.referenceRequest.findMany({

@@ -9,6 +9,7 @@ import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend } from "@/lib/bts/credits";
 import { newToken, sha256Hex } from "@/lib/bts/tokens";
 import { encryptRefToken, refLinkFor } from "@/lib/bts/refTokenCrypto";
+import { candidateProfileWhere } from "@/lib/bts/identity";
 
 // Minimum hours between candidate-initiated reminders for the same request.
 const NUDGE_COOLDOWN_HOURS = 12;
@@ -64,8 +65,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Enter a valid email for the reference" }, { status: 400 });
     }
     // Ownership: the signed-in account may only act on its own profile.
+    // Phase E unified identity: accountId link first, unlinked-legacy email fallback.
     const email = account.email.toLowerCase().trim();
-    const candidate = await db.candidate.findFirst({ where: { email }, include: { agency: true } });
+    const candidate = await db.candidate.findFirst({ where: candidateProfileWhere(account), include: { agency: true } });
     if (!candidate) return NextResponse.json({ error: "No reference profile found for this account" }, { status: 404 });
     // Command layer: company state + credits gate every new outbound request.
     const outbound = await guardOutbound(candidate.agencyId);

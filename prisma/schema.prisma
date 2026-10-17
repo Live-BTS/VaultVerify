@@ -58,6 +58,12 @@ model Candidate {
 
   requests ReferenceRequest[]
   skills   CandidateSkill[]
+  // Phase E — unified identity: the ChecklistAccount that owns this references
+  // workflow profile (one shared identity, separate workflow profiles).
+  // Nullable + additive: legacy rows created before unification are linked by
+  // scripts/e-unify-accounts.ts (exact email match) on the owner's schedule.
+  accountId String?   @unique
+  account   ChecklistAccount? @relation(fields: [accountId], references: [id])
 }
 
 model ReferenceRequest {
@@ -239,6 +245,10 @@ model ChecklistAccount {
   invites     ChecklistInvite[]
   requests    ChecklistRequest[]
   completions ChecklistCompletion[]
+  // Phase E — unified identity: ONE login drives both workflows (checklist +
+  // references). The references workflow profile is the Candidate row linked
+  // below; separate workflow profiles, one shared identity.
+  candidateProfile Candidate?
 }
 
 model ChecklistSession {

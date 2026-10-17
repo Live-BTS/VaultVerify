@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/bts/audit";
 import { evaluateChecklistShare, viewerAllowedByRecipient, resolveNewShareBinding } from "@/lib/bts/sharePolicy";
 import { specialtyLabel } from "@/lib/bts/checklistShared";
 import { newToken, sha256Hex, tokenLookups, isTokenHashed } from "@/lib/bts/tokens";
+import { candidateProfileWhere } from "@/lib/bts/identity";
 
 // ── POST /api/checklist/share — candidate shares a completed checklist ──
 // create : { completionId, accessType: "ONE_TIME" | "DURATION", durationDays?, label?, audience?, recipientEmail? }
@@ -25,7 +26,8 @@ export async function POST(req: NextRequest) {
         include: { completion: true },
         orderBy: { createdAt: "desc" },
       });
-      const candidate = await db.candidate.findFirst({ where: { email: account.email.toLowerCase() }, select: { id: true } });
+      // Phase E unified identity: accountId link first, unlinked-legacy email fallback.
+      const candidate = await db.candidate.findFirst({ where: candidateProfileWhere(account), select: { id: true } });
       const refLinks = candidate
         ? await db.referenceShareLink.findMany({
             where: { request: { candidateId: candidate.id } },
