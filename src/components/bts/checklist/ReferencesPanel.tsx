@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { specialtyLabel } from "@/lib/bts/constants";
+import { specialtyLabel, candidateStatusText } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { Spinner, StatusBadge } from "../brand";
 import { BellRing, Copy, Download, ExternalLink, Eye, EyeOff, FileDown, Link2, RefreshCcw, Send, Share2, ShieldCheck, UserPlus, UserRound, Users } from "lucide-react";
@@ -236,7 +236,7 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
                 <p className="mt-0.5 text-sm text-jade-muted">{r.facilityName} · {r.refEmail}{r.relationship ? ` · ${r.relationship}` : ""}</p>
               </div>
               <div className="flex items-center gap-2">
-                <StatusBadge status={r.status} />
+                <StatusBadge status={r.status} label={candidateStatusText(r.status)} />
                 {!isDone && <span className="rounded-full border border-vault-border px-2.5 py-0.5 text-xs text-jade-muted">Day {open}</span>}
               </div>
             </div>
@@ -294,6 +294,13 @@ export function ReferencesPanel({ email, fallbackName, onLaunchSetup, onStats, o
                     </div>
                   </motion.div>
                 )}
+              </div>
+            )}
+
+            {!isDone && r.status === "EXPIRED" && (
+              <div className="mt-3 rounded-xl border border-vault-border bg-jade-ink/5 p-3">
+                <p className="text-sm text-jade-ink">This reference link expired.</p>
+                <p className="mt-1 text-sm text-jade-muted">Use <strong>Swap</strong> below to re-request it from a different referee — the expired request is closed out automatically.</p>
               </div>
             )}
 

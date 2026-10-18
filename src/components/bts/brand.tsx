@@ -52,12 +52,14 @@ export function AgencyLogo({ logoText, name, size = "md", light = false }: { log
 }
 
 // ── Status pipeline badge ──
-export function StatusBadge({ status }: { status: string }) {
+// `label` lets candidate-facing callers substitute plain-language text
+// (constants.candidateStatusText) so internal codes never render raw.
+export function StatusBadge({ status, label }: { status: string; label?: string }) {
   const meta = STATUS_META[status] ?? { label: status, color: "bg-slate-100 text-slate-700 border-slate-200" };
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium", meta.color)}>
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
-      {meta.label}
+      {label ?? meta.label}
     </span>
   );
 }

@@ -192,7 +192,7 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
     const msg: Record<string, { title: string; body: string }> = {
       used: { title: "This one-time link was already viewed", body: "One-time links burn after the first open. Ask the candidate for a fresh link." },
       expired: { title: "This link has expired", body: "The access window the candidate set has closed. Ask them to share a new one." },
-      checklist_expired: { title: "This checklist has expired", body: "The self-assessment passed its 1-year validity. The candidate needs to retake it." },
+      checklist_expired: { title: "This checklist has expired", body: "The self-assessment's validity window has passed. Ask the candidate to complete a fresh checklist and share it again." },
       invalid: { title: "Link not found", body: "This share link doesn't exist or was revoked by the candidate." },
     };
     const m = msg[state] ?? msg.invalid;

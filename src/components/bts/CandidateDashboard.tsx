@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { AgencyLogo, StatusBadge, SkillBadge, Spinner } from "./brand";
-import { specialtyLabel, PROFICIENCY_META, STATUS_META } from "@/lib/bts/constants";
+import { specialtyLabel, PROFICIENCY_META, candidateStatusText } from "@/lib/bts/constants";
 import { cn } from "@/lib/utils";
 import { LogIn, Copy, ExternalLink, BellRing, RefreshCcw, Clock3, ShieldCheck } from "lucide-react";
 
@@ -205,7 +205,7 @@ export function CandidateDashboard({ initialEmail, onSignOut, onOpenReference }:
                       <p className="text-sm text-slate-600">{r.facilityName} · {r.refEmail}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <StatusBadge status={r.status} />
+                      <StatusBadge status={r.status} label={candidateStatusText(r.status)} />
                       {!done && <Badge variant="outline" className="text-slate-500">Day {open}</Badge>}
                     </div>
                   </div>
@@ -261,7 +261,7 @@ export function CandidateDashboard({ initialEmail, onSignOut, onOpenReference }:
         </div>
 
         <p className="mt-8 text-center text-xs text-slate-400">
-          Statuses: {Object.entries(STATUS_META).map(([k, v]) => v.label).join(" → ")} · notifications are simulated in the sandbox
+          Notifications are simulated in the sandbox
         </p>
       </main>
     </div>

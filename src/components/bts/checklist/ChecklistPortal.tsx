@@ -21,7 +21,7 @@ import {
 } from "./ReportBits";
 import {
   BadgeCheck, CalendarClock, Check, ChevronDown, ClipboardList, Copy, Download, ExternalLink, Hourglass,
-  Inbox, LayoutDashboard, Link2, Plus, Settings2, Share2, ShieldCheck, Users, X,
+  Inbox, LayoutDashboard, Link2, Plus, RefreshCcw, Settings2, Share2, ShieldCheck, Users, X,
 } from "lucide-react";
 
 // ── Skills Checklist candidate portal — accounts, onboarding, requests, invites, shares ──
@@ -615,6 +615,12 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
                       <a href={`/api/checklist/pdf?completion=${c.id}`} download>
                         <Button size="sm" variant="ghost" className="border border-vault-border text-jade-muted hover:text-jade-ink"><Download className="mr-1.5 h-3.5 w-3.5" /> PDF</Button>
                       </a>
+                      {expired && (
+                        <Button size="sm" variant="outline" onClick={() => setShowRequest(true)}
+                          className="border-vault-border text-jade-ink hover:bg-verify-green/10" title="An expired checklist can't be shared — request a fresh one">
+                          <RefreshCcw className="mr-1.5 h-3.5 w-3.5" /> Request fresh
+                        </Button>
+                      )}
                       <Button size="sm" disabled={expired} onClick={() => setShareFor(c)} className="bg-verify-green text-vault-dark hover:bg-verify-green/90">
                         <Link2 className="mr-1.5 h-3.5 w-3.5" /> Share
                       </Button>

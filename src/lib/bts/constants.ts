@@ -31,6 +31,23 @@ export const STATUS_META: Record<string, { label: string; color: string; desc: s
   EXPIRED: { label: "Expired", color: "bg-zinc-100 text-zinc-500 border-zinc-200", desc: "Link expired after 14 days" },
 };
 
+// Candidate-facing status language (UX P1): internal pipeline codes like FLAGGED
+// never surface to the candidate — "Needs your attention" is honest without
+// accusing them of fraud they cannot see or act on. Recruiter/admin views keep
+// the operational labels from STATUS_META.
+export const CANDIDATE_STATUS_TEXT: Record<string, string> = {
+  SENT: "Waiting for your referee to start",
+  OPENED: "Referee opened the form",
+  IN_PROGRESS: "Reference in progress",
+  COMPLETED: "Completed",
+  FLAGGED: "Needs your attention",
+  EXPIRED: "Link expired",
+};
+
+export function candidateStatusText(status: string): string {
+  return CANDIDATE_STATUS_TEXT[status] ?? "Update available";
+}
+
 export const PROFICIENCY_META: Record<string, { label: string; short: string }> = {
   NEVER: { label: "Never performed", short: "Never" },
   SUPERVISED: { label: "With supervision", short: "Supervised" },

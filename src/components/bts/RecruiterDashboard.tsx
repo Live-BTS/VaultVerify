@@ -31,6 +31,7 @@ interface ReqRow {
   daysOpen: number;
   refLink: string;
   flags: { id: string; type: string; severity: string; detail: string; resolved: boolean }[];
+  shares: { accessType: string; expiresAt: string | null; viewedAt: string | null; revoked: boolean }[];
   candidate: {
     id: string; fullName: string; role: string; specialty: string; city: string; state: string; email: string;
     agency: { name: string; logoText: string };
@@ -337,6 +338,17 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                       </div>
                       <div className="flex items-center gap-2">
                         <StatusBadge status={r.status} />
+                        {(() => {
+                          // CH-06 access banner: what the candidate has actually shared with this recruiter
+                          const active = r.shares.filter((s) => !s.revoked
+                            && !(s.expiresAt && new Date(s.expiresAt) < new Date())
+                            && !(s.accessType === "ONE_TIME" && s.viewedAt)).length;
+                          return active > 0 ? (
+                            <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700" title="The candidate shared this report with you">
+                              {active} active share{active > 1 ? "s" : ""}
+                            </span>
+                          ) : null;
+                        })()}
                         {(r.status === "SENT" || r.status === "OPENED" || r.status === "IN_PROGRESS") && <span className="text-xs text-slate-400">day {r.daysOpen}</span>}
                       </div>
                       <div className="w-24">{r.response?.overallRating != null && <RatingPips value={r.response.overallRating} />}</div>
@@ -482,7 +494,27 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                     )}
 
                     {detail.status === "COMPLETED" || detail.status === "FLAGGED" ? (
-                      <p className="text-center text-xs text-slate-400">Report PDFs are moving to authenticated recruiter access (bearer links are being retired) — downloads return with the sharing update.</p>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-left">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Your access</p>
+                        {detail.shares.length === 0 ? (
+                          <p className="mt-1 text-xs text-slate-500">No share links right now — the candidate hasn&apos;t shared this report with you yet.</p>
+                        ) : (
+                          <ul className="mt-1.5 space-y-1">
+                            {detail.shares.map((s, i) => (
+                              <li key={i} className="text-xs text-slate-600">
+                                {s.revoked
+                                  ? "Revoked by the candidate"
+                                  : s.accessType === "ONE_TIME"
+                                    ? (s.viewedAt ? `One-time link — viewed ${new Date(s.viewedAt).toLocaleDateString("en-US")}` : "One-time link — not yet opened")
+                                    : s.expiresAt && new Date(s.expiresAt) < new Date()
+                                      ? "Date-limited link — expired"
+                                      : `Date-limited link — active until ${s.expiresAt ? new Date(s.expiresAt).toLocaleDateString("en-US") : "—"}`}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="mt-2 text-[11px] text-slate-400">The candidate controls these links and can revoke or extend them anytime. Revoking stops future access — copies already viewed or downloaded can&apos;t be retracted.</p>
+                      </div>
                     ) : (
                       <p className="text-center text-xs text-slate-400">Branded PDF packet generates automatically once this reference is signed.</p>
                     )}

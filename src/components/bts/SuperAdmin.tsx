@@ -184,6 +184,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const readOnly = role === "SUPPORT";
   const [cqRequests, setCqRequests] = useState<ChecklistRequestRow[] | null>(null);
   const [sys, setSys] = useState<SystemStatus | null>(null);
+  const [liveSessions, setLiveSessions] = useState<{ candidate: number; recruiter: number; superadmin: number } | null>(null);
   const [openSet, setOpenSet] = useState<string | null>(null);
   const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -262,6 +263,10 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
 
   const loadSystem = async () => {
     try { const d = await call({ action: "system_config" }); setSys({ items: d.items, protections: d.protections, runtime: d.runtime }); } catch { /* keep old */ }
+  };
+
+  const loadSessions = async () => {
+    try { const d = await call({ action: "sessions_status" }); setLiveSessions(d.live); } catch { /* keep old */ }
   };
 
   const decide = async (id: string, approve: boolean) => {
@@ -768,7 +773,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         const badge = badgeFor(sec);
         return (
           <button key={sec} type="button"
-            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); if (sec === "shares" && !shares) loadShares(); if (sec === "system") { loadNotifications(); loadFraud(); } if (sec === "team" && !team) loadTeam(); if (sec === "templates" && !tplList) loadTemplates(); }}
+            onClick={() => { setSection(sec); if (sec === "requests" && !cqRequests) loadRequests(); if (sec === "system" && !sys) loadSystem(); if (sec === "audit" && !audit) loadAudit(); if (sec === "credits" && !ledger) loadLedger(); if (sec === "shares" && !shares) loadShares(); if (sec === "system") { loadNotifications(); loadFraud(); loadSessions(); } if (sec === "team" && !team) loadTeam(); if (sec === "templates" && !tplList) loadTemplates(); }}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
               active ? "bg-verify-green/15 text-verify-ink" : "text-jade-muted hover:bg-jade-ink/5 hover:text-jade-ink"
@@ -1780,11 +1785,16 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                   )}
                 </div>
 
-                {/* Breach response */}
+                {/* Breach response — UX P1: live session footprint + revocation */}
                 <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-vault-border/60 pt-5">
                   <div>
                     <h4 className="text-sm font-semibold text-jade-ink">Breach response</h4>
-                    <p className="mt-0.5 text-xs text-jade-muted">Sign out every candidate and recruiter on the platform. The superadmin console stays signed in.</p>
+                    <p className="mt-0.5 text-xs text-jade-muted">
+                      {liveSessions
+                        ? `Live sessions: ${liveSessions.candidate} candidate · ${liveSessions.recruiter} recruiter · ${liveSessions.superadmin} superadmin.`
+                        : "Live session counts load with this section."}
+                    </p>
+                    <button type="button" onClick={loadSessions} className="mt-0.5 text-[11px] text-verify-ink underline hover:text-verify-deep">Refresh counts</button>
                   </div>
                   {isOwner && (
                     <Button size="sm" variant="ghost" onClick={killAllSessions} className="border border-rose-300 text-rose-600 hover:bg-rose-50">

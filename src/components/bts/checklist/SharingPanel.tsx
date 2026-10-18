@@ -90,15 +90,16 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
 
+  const stateRank: Record<LinkState, number> = { active: 0, used: 1, expired: 2, revoked: 3 };
   const rows = useMemo(
     () =>
       completions.flatMap((c) =>
-        c.shareLinks.map((l) => ({ ...l, completion: c, state: linkState(l) })),
-      ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+        c.shareLinks.map((l) => ({ ...l, completion: c, state: linkState(l), reportExpired: c.expired })),
+      ).sort((a, b) => stateRank[a.state] - stateRank[b.state] || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [completions],
   );
   const refRows = useMemo(
-    () => refShares.map((l) => ({ ...l, state: linkState(l) })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    () => refShares.map((l) => ({ ...l, state: linkState(l) })).sort((a, b) => stateRank[a.state] - stateRank[b.state] || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [refShares],
   );
   const activeCount = rows.filter((r) => r.state === "active").length;
@@ -115,7 +116,7 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
       });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Action failed");
-      toast({ title: action === "revoke" ? "Link revoked — nobody can open it now" : `Access extended by ${days} day(s)` });
+      toast({ title: action === "revoke" ? "Link revoked — nobody can open it now" : `Access extended by ${days} day(s)`, description: action === "revoke" ? "Revoking stops future access; copies the recipient already viewed or downloaded can't be retracted." : undefined });
       onChanged();
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Action failed", variant: "destructive" });
@@ -126,6 +127,14 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
 
   return (
     <div className="mt-6 space-y-6">
+      {/* consent consequences — UX plan 11.3: revocation is forward-looking only */}
+      <div className="rounded-xl border border-vault-border bg-[#f7fbf8] px-4 py-3">
+        <p className="text-xs leading-relaxed text-jade-ink">
+          <strong>You stay in control of access.</strong> Active links work until they expire; you can revoke or extend each one below.
+          Revoking or letting a link expire stops future access — it <strong>can&apos;t retract copies</strong> the recipient already viewed or downloaded.
+        </p>
+      </div>
+
       {/* reference share ledger — the completed reference reports the candidate controls */}
       <section>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -246,7 +255,13 @@ export function SharingPanel({ completions, refShares, recruiterAccess, onChange
                       {l.viewCount > 0 && <span>{l.viewCount} view{l.viewCount > 1 ? "s" : ""}</span>}
                     </p>
                   </div>
-                  <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold", meta.cls)}>{meta.label}</span>
+                  <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold",
+                    l.reportExpired && l.state === "active" ? "border-vault-border bg-jade-ink/5 text-jade-muted" : meta.cls)}>
+                    {l.reportExpired && l.state === "active" ? "Report expired" : meta.label}
+                  </span>
+                  {l.reportExpired && l.state === "active" && (
+                    <p className="mt-1 w-full text-[11px] text-jade-muted">The checklist itself passed its validity window, so this link no longer shows report data — complete a fresh checklist to share again.</p>
+                  )}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {l.linkUrl ? (

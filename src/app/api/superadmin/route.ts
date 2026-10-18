@@ -98,7 +98,7 @@ const OWNER_ONLY = new Set([
 const READ_ONLY = new Set([
   "auth", "system_config", "requests", "impersonate_view", "audit_query",
   "ledger_query", "shares_list", "notifications_list", "ping", "fraud_config_get",
-  "templates_list", "template_get", "retention_status",
+  "templates_list", "template_get", "retention_status", "sessions_status",
 ]);
 
 function roleAllowed(role: AdminRole, action: string): boolean {
@@ -689,6 +689,19 @@ export async function POST(req: NextRequest) {
           auditDeletion: "DISABLED — AuditEvent auto-deletion stays off until compliance/contractual review confirms the proposed 180-day window",
           auditBeyondRetention: await countAuditEventsBeyondRetention(),
         });
+      }
+
+      case "sessions_status": {
+        // UX P1: counts-only session inventory for the console's breach-response
+        // card. Session ids are hashes at rest — there is nothing to list, only
+        // live counts per audience. No tokens, no emails, no row content.
+        const now = new Date();
+        const [candidateSessions, recruiterSessions, adminSessions] = await Promise.all([
+          db.checklistSession.count({ where: { expiresAt: { gt: now } } }),
+          db.recruiterSession.count({ where: { expiresAt: { gt: now } } }),
+          db.superAdminSession.count({ where: { expiresAt: { gt: now } } }),
+        ]);
+        return NextResponse.json({ ok: true, live: { candidate: candidateSessions, recruiter: recruiterSessions, superadmin: adminSessions } });
       }
 
       case "retention_sweep": {
