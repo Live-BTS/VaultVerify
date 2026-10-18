@@ -62,6 +62,7 @@ Set these in **Vercel → Project → Settings → Environment Variables** (mirr
 | `RECRUITER_CODE` | your legacy agency access code | optional — recruiters now sign up with accounts |
 | `REFERENCE_TOKEN_ENCRYPTION_KEY` | 32 random bytes, base64 | **D4b — required in production.** Generate locally with `openssl rand -base64 32`; paste the result into Vercel (all environments) and into your local `.env`. NEVER commit it, never log it, never send it to the client. See §7. |
 | `REFERENCE_TOKEN_ENCRYPTION_KEY_PREVIOUS` | previous key during a rotation window | **D4b — optional.** Set only while rotating (§7.3), remove afterwards. |
+| `CRON_SECRET` | long random string (`openssl rand -hex 32`) | **OD-11 — required for the scheduled retention sweep.** Vercel Cron sends it as `Authorization: Bearer …` to `/api/cron/retention` (§9). Without it the endpoint fail-closes and daily sweeps 403 — the console sweep still enforces retention regardless. |
 
 Local only (never needed on Vercel): `DATABASE_URL=file:./db/custom.db`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — add the Supabase trio to Vercel too if/when client features use Supabase directly.
 
@@ -228,6 +229,40 @@ in `~/.git-credentials` only — never in source code, logs, chat messages, or
 committed files. If it was ever pasted into chat, rotate it immediately.
 Provisioning restores the ABILITY to push; every push still waits for your
 explicit per-delivery approval.
+
+---
+
+## 9 · Log retention (OD-11) — what runs, what you control
+
+Owner-approved policy, enforced by `src/lib/bts/hygiene.ts`:
+
+- **NotificationLog** — past **90 days** every row keeps METADATA only: body
+  is tombstoned and html nulled (row survives for delivery audit). OTP emails
+  (kind `OTP`) are purged after just **24 hours** — the 6-digit code is
+  worthless minutes after send. No exemptions.
+- **AuditEvent** — the **180-day** window is PROPOSED only: auto-deletion is
+  disabled until compliance/contractual review confirms it. The console's
+  retention status shows how many rows sit beyond the window; nothing is
+  deleted.
+- **Self-healing scrub** — every sweep also re-applies the SEC-17 token
+  redaction to retained rows, so a raw capability URL never survives longer
+  than one sweep interval, whatever wrote it.
+
+**Enforcement triggers (any one suffices):** every superadmin/sign-in call
+(throttled to once per 10 min per process), the owner-only `retention_sweep`
+console action, and the daily **Vercel Cron** hitting
+`/api/cron/retention` (vercel.json, 03:00 UTC) — set `CRON_SECRET` in Vercel
+(§2) or the cron 403s. Cron passes are audited as `RETENTION_SWEEP_CRON`;
+manual sweeps as `RETENTION_SWEEP`; both record counts only.
+
+**One-time production backfill** (closes the pre-SEC-17 residual immediately
+instead of waiting out the 90-day window):
+
+```bash
+DATABASE_URL='<pooler dsn>' bun scripts/scrub-log-bodies.ts --i-understand-production
+```
+
+Counts only, idempotent, resumable — safe to re-run.
 
 ---
 

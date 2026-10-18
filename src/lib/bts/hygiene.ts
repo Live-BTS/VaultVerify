@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getPlatformFlag } from "@/lib/bts/platform";
+import { scrubLogText } from "@/lib/bts/logRedaction";
 
 // ── Auth hygiene & log retention (Phase D) ────────────────────────
 // Three housekeeping jobs that used to be missing entirely:
@@ -32,6 +33,7 @@ const logGate = { last: 0 };
 export const DEFAULT_LOG_RETENTION_DAYS = 90; // owner-set (OD-11): NotificationLog body/html purge window
 export const LOG_RETENTION_KEY = "LOG_RETENTION_DAYS";
 export const AUDIT_RETENTION_DAYS = 180; // owner-PROPOSED (OD-11) — NOT enforced; deletion pending compliance verification
+export const OTP_BODY_RETENTION_HOURS = 24; // owner-approved OD-11 follow-through: OTP secrets are worthless minutes after send
 export const PURGED_BODY_TOMBSTONE = "[purged: retention policy]";
 export const LOGIN_LOCKOUT_THRESHOLD = 5;
 export const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
@@ -124,18 +126,62 @@ export async function configuredNotificationRetentionDays(): Promise<number> {
 }
 
 // OD-11: NotificationLog rows past the window keep metadata only — body is
-// tombstoned and html nulled. The OR guard makes the sweep idempotent: a row
-// already fully purged (tombstone body AND null html) never matches again.
+// tombstoned and html nulled. TWO TIERS:
+//   · OTP rows are purged after just 24 HOURS (owner decision: never retain
+//     OTP secrets unnecessarily — the 6-digit code is disposable minutes
+//     after send). This tier is a constant, not flag-driven, and is
+//     intentionally NOT subject to the 7-day clamp floor.
+//   · Every other kind uses the configured window (clamped 7..3650).
+// The OR guard makes both tiers idempotent: a row already fully purged
+// (tombstone body AND null html) never matches again.
 export async function purgeExpiredNotificationBodies(retentionDays: number = DEFAULT_LOG_RETENTION_DAYS): Promise<number> {
-  const cutoff = new Date(Date.now() - clampRetentionDays(retentionDays) * 86400_000);
-  const res = await db.notificationLog.updateMany({
-    where: {
-      createdAt: { lt: cutoff },
-      OR: [{ body: { not: PURGED_BODY_TOMBSTONE } }, { html: { not: null } }],
-    },
-    data: { body: PURGED_BODY_TOMBSTONE, html: null },
+  const now = Date.now();
+  const purgeFilter = (cutoff: Date) => ({
+    createdAt: { lt: cutoff },
+    OR: [{ body: { not: PURGED_BODY_TOMBSTONE } }, { html: { not: null } }],
   });
-  return res.count;
+  const [otp, general] = await Promise.all([
+    db.notificationLog.updateMany({
+      where: { kind: "OTP", ...purgeFilter(new Date(now - OTP_BODY_RETENTION_HOURS * 3600_000)) },
+      data: { body: PURGED_BODY_TOMBSTONE, html: null },
+    }),
+    db.notificationLog.updateMany({
+      where: purgeFilter(new Date(now - clampRetentionDays(retentionDays) * 86400_000)),
+      data: { body: PURGED_BODY_TOMBSTONE, html: null },
+    }),
+  ]);
+  return otp.count + general.count;
+}
+
+// Self-healing half of the OD-11 follow-through (owner-approved): rows YOUNGER
+// than the window written before the SEC-17 write-time redaction (or after a
+// rollback of it) still hold raw capability URLs. Every sweep pass re-applies
+// the same scrubLogText to candidate rows, so a raw token survives at most one
+// sweep interval after its write, regardless of age. Idempotent: text that no
+// longer matches the token regex is written back unchanged (no update).
+// Candidate selection over-matches on purpose ("?r=", "?verify=", "invite="
+// hints; scrubLogText is the precise filter and a no-op on non-token text).
+export async function scrubRetainedNotificationBodies(): Promise<number> {
+  const candidates = await db.notificationLog.findMany({
+    where: {
+      OR: [
+        { body: { contains: "?r=" } }, { body: { contains: "?verify=" } }, { body: { contains: "invite=" } },
+        { html: { contains: "?r=" } }, { html: { contains: "?verify=" } }, { html: { contains: "invite=" } },
+      ],
+    },
+    select: { id: true, body: true, html: true, subject: true },
+  });
+  let scrubbed = 0;
+  for (const row of candidates) {
+    const body = scrubLogText(row.body);
+    const html = row.html === null ? null : scrubLogText(row.html);
+    const subject = scrubLogText(row.subject);
+    if (body !== row.body || html !== row.html || subject !== row.subject) {
+      await db.notificationLog.update({ where: { id: row.id }, data: { body, html, subject } });
+      scrubbed++;
+    }
+  }
+  return scrubbed;
 }
 
 // OD-11 caveat: INFORMATIONAL ONLY — returns how many AuditEvent rows sit
@@ -148,15 +194,23 @@ export async function countAuditEventsBeyondRetention(now = new Date()): Promise
 
 export interface RetentionSweepResult {
   purgedNotificationBodies: number;
+  scrubbedRetainedBodies: number; // pre-SEC-17 / rollback rows whose raw tokens were scrubbed this pass
   auditBeyondRetention: number; // informational — these rows are NOT deleted
 }
 
 export async function pruneOldLogs(retentionDays?: number): Promise<RetentionSweepResult> {
-  const [purgedNotificationBodies, auditBeyondRetention] = await Promise.all([
-    purgeExpiredNotificationBodies(retentionDays),
+  // ORDER MATTERS: the purge tier must complete before the self-healing scrub
+  // starts. The scrub is a read-modify-write — run concurrently it can read a
+  // pre-purge body and write the redacted text back OVER a fresh tombstone,
+  // resurrecting content on rows that should have been purged. Sequential
+  // execution makes the purge authoritative for out-of-window rows and leaves
+  // the scrub to heal only what remains.
+  const purgedNotificationBodies = await purgeExpiredNotificationBodies(retentionDays);
+  const [scrubbedRetainedBodies, auditBeyondRetention] = await Promise.all([
+    scrubRetainedNotificationBodies(),
     countAuditEventsBeyondRetention(),
   ]);
-  return { purgedNotificationBodies, auditBeyondRetention };
+  return { purgedNotificationBodies, scrubbedRetainedBodies, auditBeyondRetention };
 }
 
 export async function maybePruneOldLogs(): Promise<void> {

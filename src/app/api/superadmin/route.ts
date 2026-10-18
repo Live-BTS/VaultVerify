@@ -695,7 +695,7 @@ export async function POST(req: NextRequest) {
         // opportunistic throttle. Counts only in the response and the audit
         // detail — never row content.
         const sweep = await pruneOldLogs(await configuredNotificationRetentionDays());
-        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "RETENTION_SWEEP", detail: { purged: sweep.purgedNotificationBodies, auditBeyondRetention: sweep.auditBeyondRetention } });
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "RETENTION_SWEEP", detail: { purged: sweep.purgedNotificationBodies, scrubbed: sweep.scrubbedRetainedBodies, auditBeyondRetention: sweep.auditBeyondRetention } });
         return NextResponse.json({ ok: true, ...sweep });
       }
 
