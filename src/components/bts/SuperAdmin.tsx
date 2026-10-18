@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -194,28 +194,16 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
     const d = await res.json();
     if (res.status === 401) {
       // Session expired or revoked — drop back to the gate.
-      sessionStorage.removeItem("bts_sa_token");
-      sessionStorage.removeItem("bts_sa_code");
       setToken(""); setCode(""); setData(null);
     }
     if (!res.ok || !d.ok) throw new Error(d.error ?? "Request failed");
     return d;
   }, [token, code]);
 
-  // Restore an unexpired session (token first, backup code second) on mount.
-  useEffect(() => {
-    const t = sessionStorage.getItem("bts_sa_token") ?? "";
-    const c = sessionStorage.getItem("bts_sa_code") ?? "";
-    if (!t && !c) return;
-    (async () => {
-      try {
-        const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", token: t || undefined, code: c || undefined }) });
-        const d = await res.json();
-        if (res.ok && d.ok) { setToken(t); setCode(c); setData(d); }
-        else { sessionStorage.removeItem("bts_sa_token"); sessionStorage.removeItem("bts_sa_code"); }
-      } catch { /* stay on gate */ }
-    })();
-  }, []);
+  // SEC-20: the console bearer and backup code live ONLY in React state —
+  // never in browser web storage, which any XSS payload can read.
+  // Deliberate trade-off: a full page reload signs the console out and the
+  // gate is shown again; OTP re-issue is one click away.
 
   const requestOtp = async () => {
     setLoading(true);
@@ -240,7 +228,6 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
       const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "verify_otp", otp: otp.trim() }) });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Verification failed");
-      sessionStorage.setItem("bts_sa_token", d.token);
       setToken(d.token); setOtp(""); setData(d);
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Verification failed", variant: "destructive" });
@@ -257,7 +244,6 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
       const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", code: useCode }) });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Invalid code");
-      sessionStorage.setItem("bts_sa_code", useCode);
       setCode(useCode); setToken(""); setData(d);
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Sign-in failed", variant: "destructive" });
@@ -750,6 +736,9 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           <button type="button" onClick={() => { setGateMode(gateMode === "otp" ? "backup" : "otp"); setOtpSentTo(null); setOtp(""); }} className="mt-4 w-full text-center text-xs text-jade-muted underline hover:text-jade-ink">
             {gateMode === "otp" ? "Use backup access code instead" : "Email me a login code instead"}
           </button>
+          <p className="mt-3 text-center text-[11px] leading-relaxed text-jade-muted/80">
+            For security, the console does not stay signed in across page reloads — credentials are kept in memory only.
+          </p>
           <button type="button" onClick={onExit} className="mt-3 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
             ← Back to site
           </button>

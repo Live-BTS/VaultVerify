@@ -32,6 +32,17 @@ export function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
+// SEC-19: constant-time comparison for any plaintext secret a caller supplies
+// (superadmin backup code). Passwords are scrypt-verified (inherently safe);
+// this closes the remaining raw `===` secret compare. Length difference is
+// still observable — unavoidable without leaking-safe equalization, and the
+// code is fixed-format so it reveals nothing usable.
+export function safeEqual(candidate: string, expected: string): boolean {
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }

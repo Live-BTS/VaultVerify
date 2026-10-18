@@ -200,18 +200,28 @@ export async function POST(req: NextRequest) {
     }
     // sandbox email delivery (simulated → NotificationLog): the candidate gets a
     // setup link — email is pre-filled, they only set a password + onboarding form
+    // SEC-25: the delivery result is SURFACED, never swallowed — the recruiter
+    // sees whether the invite actually went out (SENT / SIMULATED / FAILED).
     const setupLink = `/?view=checklist&invite=${rawInviteToken}`;
-    await sendTemplatedEmail("checklist_invite", candidateEmail, {
-      recruiterName: invite.recruiterName,
-      organization: invite.facilityName || invite.agencyName,
-      candidateName,
-      setupLink,
-    }).catch(() => undefined);
+    let emailDelivery: "SENT" | "SIMULATED" | "FAILED" = "FAILED";
+    try {
+      const logRow = await sendTemplatedEmail("checklist_invite", candidateEmail, {
+        recruiterName: invite.recruiterName,
+        organization: invite.facilityName || invite.agencyName,
+        candidateName,
+        setupLink,
+      });
+      emailDelivery = (logRow?.status as typeof emailDelivery) ?? "FAILED";
+    } catch {
+      emailDelivery = "FAILED"; // invite row survives; the recruiter can resend from the dashboard
+    }
     await creditSpend(outbound.agencyId ?? (await primaryAgencyId()) ?? "", `Checklist invite — ${candidateName}`, 1, "RECRUITER", invite.recruiterName);
     await logAudit({
       actorType: "RECRUITER", actorId: recruiter.id, action: "CHECKLIST_INVITE_SENT",
       entity: "checklistInvite", entityId: invite.id,
-      detail: { candidateEmail, specialty: invite.specialty },
+      // F4 consistency: no candidate email in the audit detail — entityId links
+      // to the invite row, which holds contact data behind access control.
+      detail: { specialty: invite.specialty, emailDelivery },
     });
 
     return NextResponse.json({
@@ -221,6 +231,7 @@ export async function POST(req: NextRequest) {
         claimUrl: existing ? null : `/?view=checklist&invite=${rawInviteToken}`,
       },
       claimedByAccount: !!existing,
+      emailDelivery,
     });
   } catch (e) {
     console.error("[checklist/invite]", e);

@@ -90,6 +90,35 @@ export async function resendThrottleSecondsRemaining(
   return Math.max(1, Math.ceil((oldest.createdAt.getTime() + RESEND_WINDOW_MS - now.getTime()) / 1000));
 }
 
+// ── SEC-14: unauthenticated onboarding throttle ───────────────────
+// The candidate onboarding POST is intentionally open (it is the product's
+// funnel) and credit-bounded per agency — but a scripted client could still
+// spray referee-invite emails at network speed. The durable per-IP signal
+// that ALREADY exists without new storage: each successful onboarding writes
+// one PROFILE_CREATED AuditEvent carrying the caller IP (operator telemetry,
+// established pattern). Counting those rows per IP inside a sliding window
+// IS the attempt count — durable across serverless instances, zero schema
+// change, and it counts only COMPLETED onboardings, so probing costs nothing
+// but spraying does not scale.
+export const ONBOARDING_MAX_PER_WINDOW = 3;
+export const ONBOARDING_WINDOW_MS = 10 * 60 * 1000;
+
+export async function onboardingThrottleSecondsRemaining(ip: string, now = new Date()): Promise<number> {
+  if (!ip || ip === "sandbox") return 0; // tests/dev harness callers are never throttled
+  const windowStart = new Date(now.getTime() - ONBOARDING_WINDOW_MS);
+  const attempts = await db.auditEvent.count({
+    where: { action: "PROFILE_CREATED", ip, createdAt: { gte: windowStart } },
+  });
+  if (attempts < ONBOARDING_MAX_PER_WINDOW) return 0;
+  const oldest = await db.auditEvent.findFirst({
+    where: { action: "PROFILE_CREATED", ip, createdAt: { gte: windowStart } },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
+  if (!oldest) return 0;
+  return Math.max(1, Math.ceil((oldest.createdAt.getTime() + ONBOARDING_WINDOW_MS - now.getTime()) / 1000));
+}
+
 export async function pruneExpiredAuthRows(): Promise<number> {
   const now = new Date();
   const [a, b, c, d, e] = await Promise.all([

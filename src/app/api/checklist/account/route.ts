@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createSession, destroySession, getAccount, hashPassword, verifyPassword } from "@/lib/bts/checklistAuth";
-import { createVerification, sendVerificationEmail, maskEmail, dbConfigured, emailLive } from "@/lib/bts/auth";
+import { createVerification, sendVerificationEmail, maskEmail, dbConfigured } from "@/lib/bts/auth";
 import { assertPlatformWritable } from "@/lib/bts/platform";
 import { logAudit } from "@/lib/bts/audit";
 import { isTokenHashed } from "@/lib/bts/tokens";
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
       }
       const token = await createVerification("CANDIDATE", email);
       await sendVerificationEmail("CANDIDATE", email, token, originOf(req));
-      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email), emailLive: emailLive() });
+      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email) });
     }
 
     if (action === "login") {

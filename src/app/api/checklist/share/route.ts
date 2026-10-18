@@ -144,7 +144,6 @@ export async function POST(req: NextRequest) {
         completion: {
           candidateName: account?.name ?? "Candidate",
           candidateTitle: account?.title ?? "RN",
-          email: account?.email ?? "",
           profession: link.completion.profession,
           jobTitle: link.completion.jobTitle,
           specialty: link.completion.specialty,

@@ -6,6 +6,7 @@ import { tokenLookups, isTokenHashed, sha256Hex, deriveCallbackCode, newToken } 
 import { encryptRefToken, rawTokenFor } from "@/lib/bts/refTokenCrypto";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { hashPassword } from "@/lib/bts/checklistAuth";
+import { createVerification, sendVerificationEmail } from "@/lib/bts/auth";
 import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
 import { specialtyLabel, type AnswerRecord } from "@/lib/bts/constants";
 
@@ -321,6 +322,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // Completing the reference creates their account with the password they set
   // in the onboarding section — exactly like any other candidate signup.
   let accountCreated = false;
+  let verificationEmailSent = false;
   const password = String(body.accountPassword ?? "");
   const refEmail = request.refEmail.toLowerCase().trim();
   const alreadyExists = await db.checklistAccount.findUnique({ where: { email: refEmail } });
@@ -340,6 +342,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       });
       accountCreated = true;
       await logAudit({ actorType: "REFERENCE", action: "REFERRER_ACCOUNT_CREATED", entity: "checklistAccount", entityId: account.id, detail: { requestId: request.id }, ip });
+      // SEC-23: the auto-created account is NOT a silent side effect anymore —
+      // the referee owns that inbox (they just completed the reference on it),
+      // so the standard verification email goes out immediately and the
+      // response says so. Until verified, the account carries no sharing
+      // powers (CH-09 gates already hold).
+      try {
+        const verificationToken = await createVerification("CANDIDATE", refEmail);
+        const proto = req.headers.get("x-forwarded-proto") ?? "http";
+        const host = req.headers.get("host") ?? "localhost:3000";
+        await sendVerificationEmail("CANDIDATE", refEmail, verificationToken, `${proto}://${host}`);
+        verificationEmailSent = true;
+      } catch {
+        verificationEmailSent = false; // reference stays saved; they can request the link from the portal
+      }
     } catch {
       // unique-race or DB issue — the reference itself is already saved
       accountCreated = false;
@@ -361,7 +377,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     ip,
   });
 
-  return NextResponse.json({ ok: true, status: finalStatus, responseId: response.id, flags, accountCreated });
+  return NextResponse.json({ ok: true, status: finalStatus, responseId: response.id, flags, accountCreated, verificationEmailSent });
   } catch (e) {
     // Concurrent double-submit hits the requestId @unique guard (P2002) — return
     // a clean 409 instead of an unstyled 500. Data integrity is preserved.

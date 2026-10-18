@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
 import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
+import { TERMS_VERSION, termsContentHash } from "@/lib/bts/terms";
 import { LABELS, LAST_PERFORMED } from "@/lib/bts/checklistShared";
 
 // ── POST /api/checklist/complete — save the self-assessment (once per checklist) ──
@@ -133,7 +134,7 @@ export async function POST(req: NextRequest) {
     const yearsExperience = Math.max(0, Math.min(60, Number(body.yearsExperience) || 0));
     const now = new Date();
     const expiresAt = new Date(now.getTime() + CHECKLIST_VALIDITY_DAYS * 24 * 60 * 60 * 1000);
-    const attestation = JSON.stringify({ agreed: true, consentAccepted: true, mode: attMode, signature: attSignature, printedName: attPrinted || account.name, signedAt: now.toISOString() });
+    const attestation = JSON.stringify({ agreed: true, consentAccepted: true, mode: attMode, signature: attSignature, printedName: attPrinted || account.name, signedAt: now.toISOString(), termsVersion: TERMS_VERSION, termsHash: termsContentHash() });
 
     const completion = await db.checklistCompletion.create({
       data: {

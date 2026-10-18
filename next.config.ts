@@ -6,6 +6,11 @@ const isDev = process.env.NODE_ENV === "development";
 // bootstrap + React hydration (inline). 'unsafe-eval' only for dev (HMR).
 // connect-src 'self' — the browser may ONLY talk to this origin: no external
 // API hosts are reachable from client code by policy, not just by convention.
+// SEC-22: HTML DOCUMENT requests additionally get a per-request nonce CSP via
+// src/middleware.ts (scripts: 'nonce-…' + 'strict-dynamic'). Browsers
+// intersect the two headers, so injected bare inline scripts are blocked on
+// pages while nonce-approved app scripts run. This static header remains the
+// fallback for non-document paths (API/static), which need no nonce.
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,

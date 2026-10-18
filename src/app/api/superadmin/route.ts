@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
-import { sha256, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES } from "@/lib/bts/auth";
+import { sha256, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES, safeEqual } from "@/lib/bts/auth";
 import { sendTemplatedEmail, listTemplates, renderEmail, TEMPLATE_INDEX } from "@/lib/bts/emailTemplates";
 import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
@@ -80,7 +80,8 @@ async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIden
     }
   }
   const supplied = typeof body.code === "string" ? body.code.trim() : "";
-  if (SUPERADMIN_CODE && supplied === SUPERADMIN_CODE.trim()) {
+  // SEC-19: the backup code is compared constant-time, not with `===`.
+  if (SUPERADMIN_CODE && safeEqual(supplied, SUPERADMIN_CODE.trim())) {
     return { role: "OWNER", email: SUPERADMIN_EMAIL || "owner", accountId: null, token: null };
   }
   return null;

@@ -7,6 +7,8 @@ import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { LINK_EXPIRY_DAYS, specialtyLabel } from "@/lib/bts/constants";
+import { onboardingThrottleSecondsRemaining } from "@/lib/bts/hygiene";
+import { TERMS_VERSION, termsContentHash } from "@/lib/bts/terms";
 import { CHECKLISTS } from "@/lib/bts/questions";
 import { newToken, sha256Hex } from "@/lib/bts/tokens";
 import { encryptRefToken, refLinkFor, callbackCodeFor } from "@/lib/bts/refTokenCrypto";
@@ -118,6 +120,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A profile with this email already exists — sign in instead." }, { status: 409 });
   }
 
+  // SEC-14: durable per-IP throttle on completed onboardings (audit-row based,
+  // see hygiene.ts). The funnel stays open; spraying referee invites does not.
+  const ip = clientIp(req);
+  const throttleSeconds = await onboardingThrottleSecondsRemaining(ip);
+  if (throttleSeconds > 0) {
+    return NextResponse.json(
+      { error: "Too many onboardings from this network right now — try again shortly.", retryAfterSeconds: throttleSeconds },
+      { status: 429 },
+    );
+  }
+
   // Phase E unified identity: when the onboarding runs signed-in (the normal
   // portal path), the new references profile is linked to the account — one
   // registration drives both workflows. Signed-out onboarding still works and
@@ -201,6 +214,16 @@ export async function POST(req: NextRequest) {
     // control; duplicating it here expanded the log-breach blast radius.
     await logAudit({ actorType: "SYSTEM", action: "REQUEST_SENT", entity: "reference_request", entityId: r.id, ip: clientIp(req) });
   }
+  // SEC-14/16: consent capture stamp — records WHICH consent version was in
+  // force (version + content hash) and a digest of the typed signature. The
+  // raw signature stays on the Candidate row it belongs to; the audit detail
+  // never duplicates it or the email.
+  await logAudit({
+    actorType: "CANDIDATE", actorId: candidate.id, action: "CONSENT_CAPTURED",
+    entity: "candidate", entityId: candidate.id,
+    detail: { termsVersion: TERMS_VERSION, termsHash: termsContentHash(), consentDigest: sha256Hex(body.consentSignature) },
+    ip: clientIp(req),
+  });
   await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "PROFILE_CREATED", entity: "candidate", entityId: candidate.id, detail: { specialty: specialtyLabel(body.specialty), refs: candidate.requests.length }, ip: clientIp(req) });
   // Meter: 1 credit per outbound verification (one batch = one request here).
   await creditSpend(agency.id, `Reference request — ${candidate.fullName}`, 1, "CANDIDATE", candidate.id);

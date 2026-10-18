@@ -4,7 +4,7 @@ import {
   hashPassword, verifyPassword, isValidEmail, maskEmail,
   createVerification, sendVerificationEmail, consumeVerification,
   createRecruiterSession, getRecruiterSessionAccount, destroyRecruiterSession,
-  dbConfigured, emailLive,
+  dbConfigured,
   createPasswordReset, consumePasswordReset, sha256,
 } from "@/lib/bts/auth";
 import { loginLockedFor, maybePruneExpiredAuthRows, resendThrottleSecondsRemaining } from "@/lib/bts/hygiene";
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
       const token = await createVerification(role, email);
       await sendVerificationEmail(role, email, token, originOf(req));
       await logAudit({ actorType: role, actorId: email, action: "SIGNUP", entity: role === "CANDIDATE" ? "checklistAccount" : "recruiterAccount", entityId: email });
-      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email), emailLive: emailLive() });
+      return NextResponse.json({ ok: true, checkEmail: true, sentTo: maskEmail(email) });
     }
 
     // ── verify (emailed link) ─────────────────────────────────────

@@ -2,6 +2,15 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+
+// SEC-22: per-request nonce CSP (src/proxy.ts + lib/bts/csp.ts) requires that
+// every page is server-rendered PER REQUEST — a statically prerendered page
+// is frozen at build time and Next cannot inject the request nonce into its
+// bootstrap scripts, which would leave them blocked by 'strict-dynamic'.
+// Forcing dynamic rendering app-wide keeps the nonce CSP valid everywhere;
+// this app is API-bound and low-traffic, so the SSR cost is the right trade.
+export const dynamic = "force-dynamic";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
