@@ -8,6 +8,7 @@ import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend, primaryAgencyId } from "@/lib/bts/credits";
 import { newToken, sha256Hex, tokenLookups, isTokenHashed } from "@/lib/bts/tokens";
+import { originFor } from "@/lib/bts/origin";
 
 // ── POST /api/checklist/invite — recruiter sends a checklist to a candidate ──
 // CH-07 (PO decision): invitations are bound to the sending recruiter — a
@@ -79,6 +80,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Recruiter access requires a verified VaultVerify account. Sign in first." }, { status: 401 });
   }
 
+  // Emailed claim links MUST be absolute — an email client has no base-URL
+  // context, and Brevo's click-tracking wrapper 404s on relative URLs
+  // ("invalid URL: host missing", prod incident 2026-10-18). Every other
+  // email flow builds links via originFor(); this route is no exception.
+  const origin = originFor(req);
+
   // recruiter asks: does this candidate already have an account? Pre-fill is
   // answered ONLY from invitations THIS recruiter already sent — never a
   // platform-wide directory probe (SEC-02).
@@ -144,7 +151,7 @@ export async function POST(req: NextRequest) {
             completedAt: i.completedAt,
             // D4: hashed invites can't re-build their claim URL (shown once in
             // the send response and delivered by email). Legacy invites keep it.
-            claimUrl: i.accountId || isTokenHashed(i.token) ? null : `/?view=checklist&invite=${i.token}`,
+            claimUrl: i.accountId || isTokenHashed(i.token) ? null : `${origin}/?view=checklist&invite=${i.token}`,
             completion: c
               ? {
                   candidateName: c.account.name,
@@ -202,7 +209,7 @@ export async function POST(req: NextRequest) {
     // setup link — email is pre-filled, they only set a password + onboarding form
     // SEC-25: the delivery result is SURFACED, never swallowed — the recruiter
     // sees whether the invite actually went out (SENT / SIMULATED / FAILED).
-    const setupLink = `/?view=checklist&invite=${rawInviteToken}`;
+    const setupLink = `${origin}/?view=checklist&invite=${rawInviteToken}`;
     let emailDelivery: "SENT" | "SIMULATED" | "FAILED" = "FAILED";
     try {
       const logRow = await sendTemplatedEmail("checklist_invite", candidateEmail, {
@@ -231,7 +238,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       invite: {
         id: invite.id,
-        claimUrl: existing ? null : `/?view=checklist&invite=${rawInviteToken}`,
+        claimUrl: existing ? null : `${origin}/?view=checklist&invite=${rawInviteToken}`,
       },
       claimedByAccount: !!existing,
       emailDelivery,

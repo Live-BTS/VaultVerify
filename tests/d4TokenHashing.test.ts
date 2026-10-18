@@ -272,11 +272,22 @@ describe("D4 — ChecklistInvite hashed at rest + delivered once", () => {
     expect(d.ok).toBe(true);
     const claimUrl: string | null = d.invite.claimUrl;
     expect(claimUrl).toContain("/?view=checklist&invite=");
+    // EMAIL-LINK HOST GATE (prod incident 2026-10-18): the claim URL must be
+    // ABSOLUTE. A relative link 404s inside email clients and breaks Brevo's
+    // click-tracking redirect ("invalid URL: host missing").
+    expect(claimUrl!.startsWith("http://localhost:3000/?view=checklist&invite=")).toBe(true);
     const raw = claimUrl!.split("invite=")[1];
     expect(raw).toMatch(/^[A-Za-z0-9_-]{32}$/);
     const row = await db.checklistInvite.findUniqueOrThrow({ where: { token: sha256Hex(raw) } });
     expect(row.token).not.toBe(raw);
     expect(row.recruiterAccountId).toBe(recruiterAId);
+
+    // The email HTML the provider receives (Brevo tracker source) must carry
+    // the host. The persisted log copy is token-scrubbed (SEC-17), so assert
+    // on the host portion, which survives scrubbing.
+    const mail = await db.notificationLog.findFirst({ where: { templateKey: "checklist_invite" }, orderBy: { createdAt: "desc" } });
+    expect(mail).toBeTruthy();
+    expect(mail!.html).toContain("http://localhost:3000");
 
     // claim by the raw token (digest-first lookup)
     useCandidate();
