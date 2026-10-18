@@ -33,6 +33,8 @@ export interface FillSpec {
   recruiterName?: string;
   facilityName?: string;
   message?: string;
+  // UX pack (C2): restored autosaved draft so a refresh mid-fill never loses work
+  initialDraft?: { years?: string; answers?: AnswerMap };
 }
 
 interface RowState { value: number | string | null; na: boolean; lastPerformed?: string }
@@ -60,11 +62,28 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
   onExit: () => void;
 }) {
   const [stage, setStage] = useState<"intro" | "form">("intro");
-  const [years, setYears] = useState("3");
-  const [answers, setAnswers] = useState<AnswerMap>({});
+  const [years, setYears] = useState(spec.initialDraft?.years ?? "3");
+  const [answers, setAnswers] = useState<AnswerMap>(spec.initialDraft?.answers ?? {});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
+  // UX pack (C2): debounced draft autosave for invite-driven fills — the
+  // recruiter sees live progress ("In progress · 64%") on refresh. Best-effort:
+  // failures (e.g. legacy unclaimed invite → 403) never interrupt the fill.
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!spec.inviteId || stage !== "form") return;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/checklist/invite", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "progress", inviteId: spec.inviteId, draft: { years, answers } }),
+        });
+        if (res.ok) setDraftSavedAt(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
+      } catch { /* silent — draft save is advisory */ }
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [spec.inviteId, stage, years, answers]);
   // recruiter may leave the specialty blank — the candidate fills it here
   const [chosen, setChosen] = useState<{ specialty: string; jobTitle: string; profession: string } | null>(null);
   const effSpec = chosen ? { ...spec, ...chosen } : spec;
@@ -578,6 +597,9 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
               </span>
             ) : (
               "All set — ready to submit."
+            )}
+            {spec.inviteId && draftSavedAt && !error && (
+              <span className="ml-2 font-medium text-verify-ink">· Draft saved {draftSavedAt}</span>
             )}
           </div>
           <Button onClick={submit} disabled={saving || !canSubmit} className="shrink-0 bg-verify-green text-vault-dark hover:bg-verify-green/90 disabled:opacity-40">

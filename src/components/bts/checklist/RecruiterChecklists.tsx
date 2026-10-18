@@ -24,12 +24,26 @@ interface InviteRow {
   profession: string; jobTitle: string; specialty: string; specialtyLabel: string;
   recruiterName: string; facilityName: string; status: string;
   createdAt: string; completedAt: string | null; claimUrl: string | null;
+  // UX pack: engagement + live draft progress from the candidate's fill screen
+  firstViewedAt: string | null; lastViewedAt: string | null; viewCount: number;
+  draftAnswered: number; draftUpdatedAt: string | null;
   completion: { candidateName: string; candidateTitle: string; jobTitle: string; specialtyLabel: string; yearsExperience: number; completedAt: string; expiresAt: string } | null;
 }
 
 interface CatalogSet { key: string; profession: string; jobTitle: string; specialty: string; label: string; skills: { name: string }[] }
 
 const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+// UX pack: compact relative time for the "Opened" signal ("just now", "2h ago").
+function rel(d: string | Date): string {
+  const ms = Date.now() - new Date(d).getTime();
+  if (ms < 90_000) return "just now";
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
 const selectCls = "mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600/30";
 
@@ -61,6 +75,23 @@ export function RecruiterChecklists({ recruiterName }: { recruiterName: string }
     load();
     fetch("/api/checklists").then((r) => r.json()).then((d) => { if (d.ok) setCatalog(d.checklists); }).catch(() => undefined);
   }, [load]);
+
+  // UX pack (C3): live refresh — re-pull when the tab regains focus so the
+  // waiting/opened/progress states are never stale on a glance.
+  useEffect(() => {
+    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [load]);
+
+  // total skills for an invite's checklist, from the published catalog
+  const totalSkillsFor = useCallback((r: InviteRow): number | null =>
+    catalog.find((c) => c.profession === r.profession && c.jobTitle === r.jobTitle && c.specialty === r.specialty)?.skills.length ?? null,
+  [catalog]);
 
   // published specialties for the chosen profession + discipline
   const published = useMemo(
@@ -257,15 +288,24 @@ export function RecruiterChecklists({ recruiterName }: { recruiterName: string }
                     <Button size="sm" variant="outline" className="border-teal-200 text-teal-800 hover:bg-teal-50"><Download className="mr-1.5 h-3.5 w-3.5" /> PDF</Button>
                   </a>
                 </div>
+              ) : r.draftAnswered > 0 ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                  <ClipboardList className="h-3 w-3" /> In progress{totalSkillsFor(r) ? ` · ${Math.min(100, Math.round((r.draftAnswered / (totalSkillsFor(r) as number)) * 100))}% (${r.draftAnswered}/${totalSkillsFor(r)})` : ` · ${r.draftAnswered} skill${r.draftAnswered === 1 ? "" : "s"} done`}
+                </span>
+              ) : r.firstViewedAt ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                  <Eye className="h-3 w-3" /> Opened · {rel(r.lastViewedAt ?? r.firstViewedAt)}
+                </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-                  <UserRoundX className="h-3 w-3" /> Waiting for candidate
+                  <UserRoundX className="h-3 w-3" /> Not opened yet
                 </span>
               )}
             </div>
             {r.status !== "COMPLETED" && r.claimUrl && (
               <p className="mt-3 flex items-center gap-1.5 rounded-lg bg-slate-50 p-2.5 text-[11px] text-slate-500">
-                <Eye className="h-3 w-3 shrink-0" /> Candidate hasn't claimed it yet —
+                <Eye className="h-3 w-3 shrink-0" />
+                {r.firstViewedAt ? <>Link opened {rel(r.lastViewedAt ?? r.firstViewedAt)} — waiting for the candidate to claim and complete:</> : <>Candidate hasn't opened the link yet —</>}
                 <a href={r.claimUrl} className="font-mono text-teal-700 underline">{r.claimUrl}</a>
               </p>
             )}

@@ -256,6 +256,11 @@ export async function POST(req: NextRequest) {
           id: i.id, recruiterName: i.recruiterName, facilityName: i.facilityName, agencyName: i.agencyName,
           profession: i.profession, jobTitle: i.jobTitle, specialty: i.specialty, specialtyLabel: specialtyLabel(i.specialty),
           status: i.status, createdAt: i.createdAt, completionId: i.completionId, message: i.message,
+          // UX pack: return the autosaved draft so a refresh mid-fill restores
+          // the candidate's work. Parsed server-side; malformed JSON → null.
+          draft: i.draftProgress
+            ? (() => { try { return JSON.parse(i.draftProgress) as { years?: string; answers?: unknown }; } catch { return null; } })()
+            : null,
         })),
         requests: requests.map((r) => ({
           id: r.id, profession: r.profession, jobTitle: r.jobTitle, specialty: r.specialty,

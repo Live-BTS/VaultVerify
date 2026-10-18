@@ -14,7 +14,7 @@ import { AuthPanel } from "./AuthPanel";
 import { RecruiterOnboarding } from "./RecruiterOnboarding";
 import { PortalShell } from "./shell/PortalShell";
 import { cn } from "@/lib/utils";
-import { RefreshCcw, ShieldAlert, Inbox, Users, Clock3, Star, Flag, LayoutDashboard, ClipboardList, FileSearch } from "lucide-react";
+import { RefreshCcw, ShieldAlert, Inbox, Users, Clock3, Star, Flag, LayoutDashboard, ClipboardList, FileSearch, Eye, Check } from "lucide-react";
 
 interface ReqRow {
   id: string;
@@ -54,6 +54,9 @@ interface RecruiterData {
     totalRequests: number; completedCount: number; completionRate: number;
     flaggedCount: number; pendingCount: number; medianCompletionSeconds: number | null; avgRating: number | null;
   };
+  // UX pack: the dashboard represents BOTH pipelines now — these five numbers
+  // cover the skills-checklist flow (sent / opened / awaiting / completed / %).
+  checklistStats: { sent: number; completed: number; opened: number; awaiting: number; rate: number };
   requests: ReqRow[];
 }
 
@@ -70,7 +73,23 @@ const identityLabel = (m: string) => IDENTITY_LABEL[m] ?? m;
 // they are no longer sent to recruiters at all (payload minimization), so the
 // recruiter UI no longer builds share-token PDF links.
 
-export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
+// UX pack: every section is a REAL addressable URL (/dashboard, /references,
+// /skill-checklists) — refresh keeps your place, the back button works, and
+// sections can be opened in new tabs. pushState keeps navigation instant
+// (no remount/refetch); popstate syncs section state on back/forward.
+export type RecruiterSection = "dashboard" | "references" | "checklists" | "notifications" | "audit";
+const SECTION_PATH: Record<RecruiterSection, string> = {
+  dashboard: "/dashboard",
+  references: "/references",
+  checklists: "/skill-checklists",
+  notifications: "/notifications",
+  audit: "/audit",
+};
+const PATH_SECTION: Record<string, RecruiterSection> = Object.fromEntries(
+  Object.entries(SECTION_PATH).map(([k, v]) => [v, k as RecruiterSection])
+);
+
+export function RecruiterDashboard({ onSignOut, initialSection = "dashboard" }: { onSignOut: () => void; initialSection?: RecruiterSection }) {
   const { toast } = useToast();
   // (legacy agency access-code state removed — account session is the only path)
   const [me, setMe] = useState<{ name: string; email: string; onboardingComplete: boolean } | null>(null);
@@ -79,7 +98,21 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReqRow | null>(null);
   const [sweeping, setSweeping] = useState(false);
-  const [section, setSection] = useState<"dashboard" | "references" | "checklists" | "notifications" | "audit">("dashboard");
+  const [section, setSectionState] = useState<RecruiterSection>(initialSection);
+
+  const navigate = useCallback((key: RecruiterSection) => {
+    setSectionState(key);
+    try { window.history.pushState({}, "", SECTION_PATH[key]); } catch { /* URL sync is cosmetic */ }
+  }, []);
+
+  useEffect(() => {
+    const onPop = () => {
+      const key = PATH_SECTION[window.location.pathname];
+      if (key) setSectionState(key);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,6 +128,18 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
       setLoading(false);
     }
   }, []);
+
+  // UX pack (C3): live refresh — re-pull when the tab regains focus so the
+  // "Waiting" states and progress numbers are never stale on a glance.
+  useEffect(() => {
+    const onFocus = () => { if (document.visibilityState === "visible" && me) load(); };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [load, me]);
 
   useEffect(() => {
     let alive = true;
@@ -165,8 +210,10 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   }
 
   const s = data.stats;
+  const cs = data.checklistStats;
   const flaggedRequests = data.requests.filter((r) => r.status === "FLAGGED");
   const awaitingRequests = data.requests.filter((r) => r.status === "SENT" || r.status === "OPENED" || r.status === "IN_PROGRESS");
+  const nothingYet = s.totalRequests === 0 && cs.sent === 0;
   return (
     <PortalShell
       badge="Recruiter console"
@@ -179,7 +226,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
       userEmail={me ? me.email : "Access-code sign-in"}
       wide
       active={section}
-      onNavigate={(k) => setSection(k as "dashboard" | "references" | "checklists" | "notifications" | "audit")}
+      onNavigate={(k) => navigate(k as RecruiterSection)}
       onSignOut={signOut}
       headerActions={
         <Button size="sm" variant="outline" onClick={sweep} disabled={sweeping} className="border-verify-green/40 text-verify-ink hover:bg-verify-green/10">
@@ -218,14 +265,51 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
             ))}
           </div>
 
+          {/* UX pack: the checklist pipeline — the six cards above count references only */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            {[
+              { icon: ClipboardList, label: "Checklists sent", value: String(cs.sent), sub: "all time" },
+              { icon: Eye, label: "Opened", value: String(cs.opened), sub: "link clicked, not done" },
+              { icon: Clock3, label: "Awaiting", value: String(cs.awaiting), sub: "not completed yet" },
+              { icon: Check, label: "Completed", value: String(cs.completed), sub: "valid 30 days" },
+              { icon: Star, label: "Completion", value: `${cs.rate}%`, sub: "sent → completed", good: cs.sent > 0 && cs.rate >= 70 },
+            ].map((c) => (
+              <Card key={c.label} className="border-slate-200">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                    <c.icon className={cn("h-3.5 w-3.5", c.good ? "text-teal-600" : "text-slate-400")} />
+                    {c.label}
+                  </div>
+                  <p className={cn("mt-1.5 text-2xl font-bold", c.good ? "text-teal-700" : "text-slate-900")}>{c.value}</p>
+                  <p className="text-[11px] text-slate-400">{c.sub}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
           {/* needs attention */}
+          {nothingYet ? (
+            <Card className="border-dashed border-teal-300 bg-teal-50/40">
+              <CardContent className="p-8 text-center">
+                <p className="text-base font-semibold text-slate-900">Start by sending a skills checklist</p>
+                <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+                  Pick a profession and specialty, add the candidate's email, and VaultVerify does the rest —
+                  the candidate fills the checklist once, adds their own referees from their portal, and the
+                  verified reports land right here.
+                </p>
+                <Button onClick={() => navigate("checklists")} className="mt-5 bg-teal-700 hover:bg-teal-800">
+                  <ClipboardList className="mr-2 h-4 w-4" /> Send your first checklist
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="border-slate-200">
               <CardContent className="p-5">
                 <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Flag className="h-4 w-4 text-rose-500" /> Fraud review ({flaggedRequests.length})</p>
                 <div className="mt-3 space-y-2">
                   {flaggedRequests.slice(0, 4).map((r) => (
-                    <button key={r.id} type="button" onClick={() => { setSection("references"); setDetail(r); }}
+                    <button key={r.id} type="button" onClick={() => { navigate("references"); setDetail(r); }}
                       className="flex w-full items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-2 text-left text-sm transition hover:bg-rose-50">
                       <span className="text-slate-800">{r.candidate.fullName} · {r.refName}</span>
                       <span className="text-xs font-semibold text-rose-600">In review</span>
@@ -240,7 +324,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                 <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4 text-amber-500" /> Awaiting references ({awaitingRequests.length})</p>
                 <div className="mt-3 space-y-2">
                   {awaitingRequests.slice(0, 4).map((r) => (
-                    <button key={r.id} type="button" onClick={() => { setSection("references"); setDetail(r); }}
+                    <button key={r.id} type="button" onClick={() => { navigate("references"); setDetail(r); }}
                       className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:bg-slate-50">
                       <span className="text-slate-800">{r.candidate.fullName} · {r.refName}</span>
                       <span className="text-xs text-slate-400">day {r.daysOpen}</span>
@@ -251,6 +335,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
               </CardContent>
             </Card>
           </div>
+          )}
         </div>
       )}
 

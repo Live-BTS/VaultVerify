@@ -148,6 +148,18 @@ export async function GET(req: NextRequest) {
         accentColor: "#7cc118",
       };
 
+  // UX pack: checklist-pipeline stats so the dashboard represents BOTH flows —
+  // previously the six cards counted references only, leaving recruiters who
+  // had only sent checklists staring at an all-zero dashboard (owner report
+  // 2026-10-18). opened = not completed AND the claim link was opened.
+  const inviteRows = await db.checklistInvite.findMany({
+    where: { recruiterAccountId: recruiter.id },
+    select: { status: true, firstViewedAt: true },
+  });
+  const checklistSent = inviteRows.length;
+  const checklistCompleted = inviteRows.filter((i) => i.status === "COMPLETED").length;
+  const checklistOpened = inviteRows.filter((i) => i.status !== "COMPLETED" && i.firstViewedAt).length;
+
   return NextResponse.json({
     agency,
     stats: {
@@ -158,6 +170,13 @@ export async function GET(req: NextRequest) {
       pendingCount: active.length,
       medianCompletionSeconds: median,
       avgRating,
+    },
+    checklistStats: {
+      sent: checklistSent,
+      completed: checklistCompleted,
+      opened: checklistOpened,
+      awaiting: checklistSent - checklistCompleted,
+      rate: checklistSent > 0 ? Math.round((checklistCompleted / checklistSent) * 100) : 0,
     },
     requests,
     // Platform notification/audit tails are internal ops data — not recruiter-visible.

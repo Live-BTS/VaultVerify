@@ -29,7 +29,7 @@ import {
 interface ShareLinkDto { id: string; linkUrl: string | null; accessType: string; durationDays: number | null; label: string; createdAt: string; expiresAt: string | null; viewedAt: string | null; viewCount: number; revoked: boolean }
 interface CompletionDto { id: string; profession: string; jobTitle: string; specialty: string; specialtyLabel: string; source: string; completedAt: string; expiresAt: string; yearsExperience: number; shareLinks: ShareLinkDto[]; answers: SkillAnswer[]; additional: AdditionalAnswer[]; attestation: AttestationData | null }
 interface RequestDto { id: string; profession: string; jobTitle: string; specialty: string; status: string; requestedAt: string; decidedAt: string | null; completionId: string | null }
-interface InviteDto { id: string; recruiterName: string; facilityName: string; agencyName: string; profession: string; jobTitle: string; specialty: string; status: string; createdAt: string; completedAt: string | null; completionId: string | null; message: string; specialtyLabel?: string }
+interface InviteDto { id: string; recruiterName: string; facilityName: string; agencyName: string; profession: string; jobTitle: string; specialty: string; status: string; createdAt: string; completedAt: string | null; completionId: string | null; message: string; specialtyLabel?: string; draft?: { years?: string; answers?: Record<string, { value: number | string | null; na: boolean; lastPerformed?: string }> } | null }
 interface AccountDto extends ProfileData { onboardingComplete: boolean }
 interface MeData { account: AccountDto | null; invites?: InviteDto[]; requests?: RequestDto[]; completions?: CompletionDto[] }
 
@@ -765,7 +765,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
                   <p className="mt-0.5 text-xs text-jade-muted">From {i.recruiterName}{i.facilityName ? ` · ${i.facilityName}` : ""} · {fmt(i.createdAt)}</p>
                   {i.message && <p className="mt-1 text-xs italic text-jade-muted">“{i.message}”</p>}
                 </div>
-                <Button size="sm" onClick={() => startFill({ inviteId: i.id, profession: i.profession || "Nursing", jobTitle: i.jobTitle || "RN", specialty: i.specialty, recruiterName: i.recruiterName, facilityName: i.facilityName, message: i.message })}
+                <Button size="sm" onClick={() => startFill({ inviteId: i.id, profession: i.profession || "Nursing", jobTitle: i.jobTitle || "RN", specialty: i.specialty, recruiterName: i.recruiterName, facilityName: i.facilityName, message: i.message, initialDraft: i.draft ?? undefined })}
                   className="bg-verify-green text-vault-dark hover:bg-verify-green/90">Complete now</Button>
               </div>
             ))}

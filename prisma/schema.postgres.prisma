@@ -283,6 +283,15 @@ model ChecklistInvite {
   agencyName    String   @default("MEDS Talent")
   message       String   @default("")
   status        String   @default("SENT") // SENT | COMPLETED
+  // Engagement tracking (UX pack, owner-directed): link opens are recorded
+  // when the candidate opens the claim link (preview/claim); draftProgress
+  // autosaves the in-flight fill so recruiters see live completion %. All
+  // additive/nullable — safe for online migration on both stores.
+  firstViewedAt DateTime?
+  lastViewedAt  DateTime?
+  viewCount     Int      @default(0)
+  draftProgress String?  // JSON draft { years, answers } — keyed by skill
+  draftUpdatedAt DateTime?
   // linked when a candidate account with a matching email claims it
   accountId     String?
   account       ChecklistAccount? @relation(fields: [accountId], references: [id])
