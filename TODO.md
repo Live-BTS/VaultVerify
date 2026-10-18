@@ -24,9 +24,9 @@ Statuses below were verified against actual git history at the time of writing �
 - Force-complete checklists — violates candidate attestation integrity.
 - Redis / DLQ / SMTP-interceptor items — not applicable to the current stack.
 
-## Operational follow-ups (user-side) — refreshed 2026-10-18
+## Operational follow-ups (user-side) — updated 2026-10-18 (owner decisions applied)
 
-- [ ] **Supabase: reset the DB password** (Settings → Database → Reset database password). The old value is burned (git history since ~Oct 4 + chat). Use Supabase's generator; do not store it anywhere except the two places below.
-- [ ] **Vercel env, after the reset**: (1) update `DATABASE_URL` with the new password; (2) add `APP_ORIGIN=https://vaultverify.vercel.app` (pins emailed-link origin, anti-poisoning); (3) delete `SUPERADMIN_CODE` and `RECRUITER_CODE` (paths retired in code — the values are dead weight). Then redeploy.
+- [x] **Supabase DB password: rotation DECLINED by owner** (2026-10-18). Current password stays; git-history exposure accepted. Custody: agent keeps it only in gitignored `.vv-prod-dsn` (chmod 600), connectivity re-verified live (55 templates, clean slate). No `DATABASE_URL` change needed in Vercel.
+- [ ] **Vercel env**: add `APP_ORIGIN=https://vaultverify.vercel.app` (Production only; exact value — no trailing slash, no quotes) — pins the origin used to build absolute emailed links (anti Host-header poisoning; completes MAIL-F1). Then redeploy. Optional cleanup: delete `SUPERADMIN_CODE` and `RECRUITER_CODE` (code no longer reads either — OD-01).
 - [ ] **Brevo: buy the domain, then authenticate the sender** (SPF + DKIM + DMARC) so verification/invite emails stop landing in spam.
 - [ ] **Live validation**: re-send one skills-checklist invite and watch the row move Sent → Opened → In progress % → Completed (UX-F3 tracking is live but has never run against a real invite).
