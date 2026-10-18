@@ -14,9 +14,16 @@ fi
 echo "=== 2. Cron fail-closed (expect 403) ==="
 curl -s -o /dev/null -w "status=%{http_code}\n" "$BASE/api/cron/retention"
 
-echo "=== 3. Superadmin OD-01 marker (garbage 3-char code, expect 401 + OTP-era copy) ==="
+echo "=== 3b. OD-01-amended marker: backup path unset-env copy (expect 401 + 'No backup code is configured') ==="
 curl -s -w "\nstatus=%{http_code}\n" -X POST "$BASE/api/superadmin" \
-  -H 'content-type: application/json' -d '{"action":"auth","code":"123"}'
+  -H 'content-type: application/json' -d '{"action":"auth","code":"probe-garbage"}'
+
+echo "=== 3c. OTP primary path marker (expect 401 + OTP-era copy) ==="
+curl -s -w "\nstatus=%{http_code}\n" -X POST "$BASE/api/superadmin" \
+  -H 'content-type: application/json' -d '{"action":"verify_otp","otp":"123"}'
+
+echo "=== 3d. Loading shell live? (expect 'Loading the console' in initial HTML) ==="
+curl -s "$BASE/SuperAdmin" | rg -o 'Loading the console' | head -1 || echo "shell NOT in initial HTML"
 
 echo "=== 4. Graceful 401 on scoped API (expect 401 + ok:false JSON) ==="
 curl -s -w "\nstatus=%{http_code}\n" "$BASE/api/checklist/account"
