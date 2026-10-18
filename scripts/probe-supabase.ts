@@ -4,7 +4,9 @@
 import { SQL } from "bun";
 
 const REF = "qdarfofiofwzkfadvkkx";
-const PASSWORD = encodeURIComponent("Shaswat@0047");
+// Credential hygiene (SEC-17): the live password must never live in the tree.
+// Run as: SUPABASE_DB_PASSWORD='...' bun scripts/probe-supabase.ts
+const PASSWORD = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD ?? "");
 
 const REGIONS = [
   "us-east-1", "us-east-2", "us-west-1", "us-west-2",
