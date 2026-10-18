@@ -8,6 +8,7 @@ import { encryptRefToken, rawTokenFor } from "@/lib/bts/refTokenCrypto";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { hashPassword } from "@/lib/bts/checklistAuth";
 import { createVerification, sendVerificationEmail } from "@/lib/bts/auth";
+import { emailIdentityConflict } from "@/lib/bts/emailExclusivity";
 import { QUESTIONS, Q8_EXPLANATION_PROMPT } from "@/lib/bts/questions";
 import { specialtyLabel, type AnswerRecord } from "@/lib/bts/constants";
 
@@ -339,7 +340,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const password = String(body.accountPassword ?? "");
   const refEmail = request.refEmail.toLowerCase().trim();
   const alreadyExists = await db.checklistAccount.findUnique({ where: { email: refEmail } });
-  if (password.length >= 8 && !alreadyExists) {
+  // EMAIL-EXCLUSIVITY: never auto-create a candidate account for a
+  // recruiter-registered email — the reference still completes, the referrer
+  // just doesn't get a candidate login (owner rule: one email, one identity).
+  const referrerIsRecruiter = alreadyExists
+    ? false
+    : (await emailIdentityConflict(refEmail)) === "recruiter";
+  if (password.length >= 8 && !alreadyExists && !referrerIsRecruiter) {
     try {
       const account = await db.checklistAccount.create({
         data: {

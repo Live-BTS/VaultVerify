@@ -13,6 +13,7 @@ import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { createSession, destroySession, getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
 import { originFor } from "@/lib/bts/origin";
+import { emailIdentityConflict } from "@/lib/bts/emailExclusivity";
 
 // ── POST /api/auth — signup / verify / signin / signout / me / onboard ──
 // Unified portal auth for candidates and recruiters:
@@ -69,6 +70,11 @@ export async function POST(req: NextRequest) {
 
       const passwordHash = hashPassword(password);
       if (role === "CANDIDATE") {
+        // EMAIL-EXCLUSIVITY: a recruiter-registered email can never become a
+        // candidate account (owner rule — one email, one identity type).
+        if ((await emailIdentityConflict(email)) === "recruiter") {
+          return bad("This email is registered as a recruiter. Recruiter and candidate accounts must use different emails.", 409);
+        }
         const existing = await db.checklistAccount.findUnique({ where: { email } });
         if (existing) {
           if (existing.emailVerified) return bad("An account with this email already exists — sign in instead.", 409);
@@ -90,6 +96,12 @@ export async function POST(req: NextRequest) {
           await db.checklistAccount.create({ data: { email, name, passwordHash } });
         }
       } else {
+        // EMAIL-EXCLUSIVITY: a candidate-registered email (unified login OR a
+        // references-workflow profile) can never become a recruiter account.
+        const candidateConflict = await emailIdentityConflict(email);
+        if (candidateConflict) {
+          return bad("This email is registered as a candidate. Recruiter and candidate accounts must use different emails.", 409);
+        }
         const existing = await db.recruiterAccount.findUnique({ where: { email } });
         if (existing) {
           if (existing.emailVerified) return bad("An account with this email already exists — sign in instead.", 409);

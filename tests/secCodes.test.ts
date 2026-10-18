@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
+import { POST as superadminPost } from "@/app/api/superadmin/route";
 
 // ── SEC-03 / CH-01: burned access codes are removed from the source tree ──
 // K9-style grep gate: no published code literal may reappear in src/ or scripts/.
@@ -43,5 +45,27 @@ describe("CH-01: burned access-code literals absent from source tree", () => {
       .filter((f) => readFileSync(f, "utf8").includes(burnedDemoPassword))
       .map((f) => path.relative(ROOT, f));
     expect(offenders).toEqual([]);
+  });
+});
+
+// ── OD-01 (owner decision): the static superadmin recovery code is retired ──
+// The emailed-OTP session is the only console entry; any `code` field is
+// ignored and fail-closed. These gates keep it that way.
+describe("OD-01 — static superadmin code path is gone", () => {
+  it("source gate: the superadmin route never reads a static-code env", () => {
+    const src = readFileSync(path.join(ROOT, "src", "app", "api", "superadmin", "route.ts"), "utf8");
+    expect(src).not.toContain("SUPERADMIN_CODE");
+  });
+
+  it("behavior gate: a static code no longer authenticates the console", async () => {
+    const req = new NextRequest("http://localhost:3000/api/superadmin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "auth", code: "any-static-code-ever-published" }),
+    });
+    const res = await superadminPost(req);
+    expect(res.status).toBe(401);
+    const d = await res.json();
+    expect(d.ok).toBe(false);
   });
 });

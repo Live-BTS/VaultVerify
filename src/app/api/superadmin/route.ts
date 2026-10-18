@@ -5,7 +5,7 @@ import { logAudit } from "@/lib/bts/audit";
 import { originFor } from "@/lib/bts/origin";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
-import { sha256, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES, safeEqual } from "@/lib/bts/auth";
+import { sha256, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES } from "@/lib/bts/auth";
 import { sendTemplatedEmail, listTemplates, renderEmail, TEMPLATE_INDEX } from "@/lib/bts/emailTemplates";
 import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
@@ -13,15 +13,15 @@ import { getPlatformFlag, setPlatformFlag, deletePlatformFlag, MAINTENANCE_KEY }
 import { getFraudConfig, setFraudConfig, normalizeFraudConfig } from "@/lib/bts/fraudConfig";
 import { maybePruneExpiredAuthRows, maybePruneOldLogs, pruneOldLogs, countAuditEventsBeyondRetention, configuredNotificationRetentionDays, AUDIT_RETENTION_DAYS } from "@/lib/bts/hygiene";
 
-// ── POST /api/superadmin — platform administration (OTP + backup code) ──
+// ── POST /api/superadmin — platform administration (OTP-only) ──
 // Auth model:
-//   1. PRIMARY — emailed OTP: `request_otp` emails a 6-digit code to the
-//      OWNER address (SUPERADMIN_EMAIL) or to an ACTIVE team member's
-//      address (Phase 3 RBAC); `verify_otp` exchanges it for an 8h session
-//      token that authenticates every subsequent call.
-//   2. BACKUP — the static SUPERADMIN_CODE still works (the owner's recovery
-//      path when email is down; always OWNER privileges). Fail-closed:
-//      neither configured → nobody gets in.
+//   Emailed OTP: `request_otp` emails a 6-digit code to the OWNER address
+//   (SUPERADMIN_EMAIL) or to an ACTIVE team member's address (Phase 3 RBAC);
+//   `verify_otp` exchanges it for an 8h session token that authenticates
+//   every subsequent call. This is the ONLY way in — the static recovery
+//   code path was retired by owner decision (OD-01); any `code` field is
+//   ignored and fail-closed. If email delivery is down, wait and re-request
+//   a code.
 // Roles (Phase 3):
 //   OWNER   — everything, incl. team management, maintenance, breach nuke.
 //   ADMIN   — everything except those owner-only commands.
@@ -35,7 +35,6 @@ import { maybePruneExpiredAuthRows, maybePruneOldLogs, pruneOldLogs, countAuditE
 //   team_list / team_invite / team_set_role / team_set_status / team_remove
 //   fraud_config_get / fraud_config_set
 
-const SUPERADMIN_CODE = process.env.SUPERADMIN_CODE ?? "";
 const SUPERADMIN_EMAIL = (process.env.SUPERADMIN_EMAIL ?? "").trim().toLowerCase();
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -46,7 +45,7 @@ type AdminRole = "OWNER" | "ADMIN" | "SUPPORT";
 interface AdminIdentity {
   role: AdminRole;
   email: string;
-  accountId: string | null; // null = backup-code/legacy access → OWNER
+  accountId: string | null; // null = legacy owner access → OWNER
   token: string | null;
 }
 
@@ -61,7 +60,7 @@ function forbidden(msg = "Your console role does not allow this action") {
 // ── Phase 3 RBAC: resolve WHO is calling ──
 // The authoritative role lives on the SuperadminAccount row and is re-read on
 // every call, so role changes and suspensions apply to live sessions
-// instantly. Backup-code access is the owner's recovery path → OWNER.
+// instantly.
 async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIdentity | null> {
   const token = typeof body.token === "string" ? body.token : "";
   if (token.startsWith("sas_")) {
@@ -80,11 +79,8 @@ async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIden
       return { role: "OWNER", email: session.email || SUPERADMIN_EMAIL, accountId: null, token };
     }
   }
-  const supplied = typeof body.code === "string" ? body.code.trim() : "";
-  // SEC-19: the backup code is compared constant-time, not with `===`.
-  if (SUPERADMIN_CODE && safeEqual(supplied, SUPERADMIN_CODE.trim())) {
-    return { role: "OWNER", email: SUPERADMIN_EMAIL || "owner", accountId: null, token: null };
-  }
+  // OD-01: no static code is honored — every identity comes from an emailed
+  // OTP session. Anything else falls through to unauthorized upstream.
   return null;
 }
 
@@ -305,7 +301,7 @@ export async function POST(req: NextRequest) {
       await logAudit({ actorType: "SYSTEM", action: "ADMIN_OTP_REQUESTED", entity: "superAdminOtp", entityId: result.id, detail: { status: result.status } });
       const masked = target.replace(/^(.{2}).*(@.*)$/, "$1•••$2");
       if (result.status === "FAILED") {
-        return NextResponse.json({ ok: false, error: "Email delivery failed — use the backup access code." });
+        return NextResponse.json({ ok: false, error: "Email delivery failed — please try requesting a new code in a minute." });
       }
       return NextResponse.json({ ok: true, sentTo: masked, simulated: result.status === "SIMULATED" });
     }

@@ -11,6 +11,12 @@ Statuses below were verified against actual git history at the time of writing �
   View-as read-only dossiers, security center (password resets + temp passwords + failed-login counters), session revocation incl. platform-wide, shared-links oversight, email delivery health, CSV exports, `/?reset` portal flow.
 - [x] **Phase 3 — RBAC, fraud tuning, cloning**
   3-tier RBAC (OWNER / ADMIN / SUPPORT, per-member OTP login, live role changes, session kill on suspend, owner-only commands), fraud detection tuning from the console (per-rule switches + thresholds in PlatformConfig, no redeploy), and checklist set cloning (copy any Profession+JobTitle+Specialty set to a new key).
+- [x] **OD-01 — static access codes retired** (2026-10-18)
+  Superadmin console is OTP-only (no static recovery code anywhere in code or tests); recruiter legacy code path was already gone (CH-07). Source + behavior regression gates in `secCodes.test.ts`.
+- [x] **OD-04 — production clean slate** (2026-10-18)
+  All prod accounts/transactional data deleted (480 rows backed up first to `download/prod-backup-*`, kept out of git); 55 builtin templates preserved. Demo seed already gated out of production (CH-02).
+- [x] **EMAIL-EXCLUSIVITY — one email, one identity type** (2026-10-18)
+  A recruiter-registered email cannot register as candidate (and vice versa, including candidate profile rows). Shared guard `src/lib/bts/emailExclusivity.ts` used by both signup roles + the reference claim flow; gates in `tests/emailExclusivity.test.ts`.
 
 ## Rejected from blueprint — do not resurrect
 
@@ -18,7 +24,9 @@ Statuses below were verified against actual git history at the time of writing �
 - Force-complete checklists — violates candidate attestation integrity.
 - Redis / DLQ / SMTP-interceptor items — not applicable to the current stack.
 
-## Operational follow-ups (user-side)
+## Operational follow-ups (user-side) — refreshed 2026-10-18
 
-- [ ] Vercel: paste environment variables (generated list), redeploy, confirm signup end-to-end.
-- [ ] Brevo: verify the sender so verification/invite emails deliver for real instead of being simulated.
+- [ ] **Supabase: reset the DB password** (Settings → Database → Reset database password). The old value is burned (git history since ~Oct 4 + chat). Use Supabase's generator; do not store it anywhere except the two places below.
+- [ ] **Vercel env, after the reset**: (1) update `DATABASE_URL` with the new password; (2) add `APP_ORIGIN=https://vaultverify.vercel.app` (pins emailed-link origin, anti-poisoning); (3) delete `SUPERADMIN_CODE` and `RECRUITER_CODE` (paths retired in code — the values are dead weight). Then redeploy.
+- [ ] **Brevo: buy the domain, then authenticate the sender** (SPF + DKIM + DMARC) so verification/invite emails stop landing in spam.
+- [ ] **Live validation**: re-send one skills-checklist invite and watch the row move Sent → Opened → In progress % → Completed (UX-F3 tracking is live but has never run against a real invite).

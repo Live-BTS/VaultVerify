@@ -79,3 +79,5 @@ server.log
 .vv-git-credentials
 
 .vv-prod-dsn
+
+/download/

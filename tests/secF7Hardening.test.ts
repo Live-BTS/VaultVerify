@@ -2,7 +2,9 @@ import { beforeAll, describe, it, expect, vi } from "vitest";
 
 // ── SEC-F7: hardening tail batch ─────────────────────────────────
 // One owner-directed push closing the remaining code-side register items:
-//   SEC-19 — superadmin backup code compared constant-time (safeEqual)
+//   SEC-19 — safeEqual stays the constant-time compare for secret material
+//            (sessions/OTP); the static recovery-code path itself was retired
+//            by owner decision (OD-01) — see secCodes + secF7SourceGates.
 //   SEC-14 — durable per-IP throttle on unauthenticated onboarding + a
 //            CONSENT_CAPTURED audit stamp (version + content hash + digest)
 //   SEC-16 — terms version/hash module backing the consent stamp
@@ -75,7 +77,7 @@ beforeAll(async () => {
   RK_COOKIE = sid;
 });
 
-describe("SEC-19 — constant-time backup-code compare", () => {
+describe("SEC-19 — constant-time string compare (session/OTP secrets)", () => {
   it("equal strings match; same-length mismatches and length mismatches do not", () => {
     expect(safeEqual("abc123", "abc123")).toBe(true);
     expect(safeEqual("abc123", "abc124")).toBe(false);
