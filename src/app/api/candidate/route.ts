@@ -196,7 +196,10 @@ export async function POST(req: NextRequest) {
       link,
       expiryDays: LINK_EXPIRY_DAYS,
     }, { requestId: r.id });
-    await logAudit({ actorType: "SYSTEM", action: "REQUEST_SENT", entity: "reference_request", entityId: r.id, detail: { ref: r.refEmail }, ip: clientIp(req) });
+    // SEC-17: the audit detail carries no referee email — the event links to
+    // the request row (entityId), which holds contact data behind access
+    // control; duplicating it here expanded the log-breach blast radius.
+    await logAudit({ actorType: "SYSTEM", action: "REQUEST_SENT", entity: "reference_request", entityId: r.id, ip: clientIp(req) });
   }
   await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "PROFILE_CREATED", entity: "candidate", entityId: candidate.id, detail: { specialty: specialtyLabel(body.specialty), refs: candidate.requests.length }, ip: clientIp(req) });
   // Meter: 1 credit per outbound verification (one batch = one request here).

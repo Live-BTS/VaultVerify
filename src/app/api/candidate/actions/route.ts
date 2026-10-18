@@ -206,7 +206,9 @@ export async function POST(req: NextRequest) {
       candidateName: request.candidate.fullName,
       refName: old.refName,
     }, { requestId: old.id });
-    await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "REFERENCE_SWAPPED", entity: "reference_request", entityId: created.id, detail: { oldId: old.id, oldEmail: old.refEmail }, ip: clientIp(req) });
+    // SEC-17: oldId keeps the audit trail correlatable; the old referee's
+    // email stays only in the access-controlled request row, not in logs.
+    await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "REFERENCE_SWAPPED", entity: "reference_request", entityId: created.id, detail: { oldId: old.id }, ip: clientIp(req) });
     await creditSpend(agency.id, `Reference swap — ${request.candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", request.candidateId);
     return NextResponse.json({ ok: true, message: `New request sent to ${created.refName}` });
   }
