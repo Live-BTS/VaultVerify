@@ -48,24 +48,72 @@ describe("CH-01: burned access-code literals absent from source tree", () => {
   });
 });
 
-// ── OD-01 (owner decision): the static superadmin recovery code is retired ──
-// The emailed-OTP session is the only console entry; any `code` field is
-// ignored and fail-closed. These gates keep it that way.
-describe("OD-01 — static superadmin code path is gone", () => {
-  it("source gate: the superadmin route never reads a static-code env", () => {
-    const src = readFileSync(path.join(ROOT, "src", "app", "api", "superadmin", "route.ts"), "utf8");
-    expect(src).not.toContain("SUPERADMIN_CODE");
+// ── OD-01, AMENDED by the owner (2026-10-18) ──
+// 1. The superadmin console backup code lives ONLY in the SUPERADMIN_CODE env
+//    var (Vercel). No hardcoded literal anywhere; fail-closed when unset.
+//    Emailed OTP remains the primary entry.
+// 2. The recruiter code is retired ENTIRELY — no code path reads
+//    process.env.RECRUITER_CODE, and the owner deletes the env var.
+describe("OD-01 amended — backup code is env-only; recruiter code fully retired", () => {
+  it("source gate: no code path reads process.env.RECRUITER_CODE in src/", () => {
+    const files = listFiles(path.join(ROOT, "src"));
+    const offenders = files.filter((f) => readFileSync(f, "utf8").includes("process.env.RECRUITER_CODE"));
+    expect(offenders).toEqual([]);
   });
 
-  it("behavior gate: a static code no longer authenticates the console", async () => {
+  it("source gate: the superadmin route reads SUPERADMIN_CODE from env, never a literal", () => {
+    const src = readFileSync(path.join(ROOT, "src", "app", "api", "superadmin", "route.ts"), "utf8");
+    expect(src).toContain("process.env.SUPERADMIN_CODE");
+    for (const code of burnedAccessCodes) expect(src).not.toContain(code);
+  });
+
+  it("behavior gate: the correct env backup code unlocks the OWNER console", async () => {
+    const gateCode = "env-backup-" + "gate-9137";
+    process.env.SUPERADMIN_CODE = gateCode;
+    try {
+      const req = new NextRequest("http://localhost:3000/api/superadmin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "auth", code: gateCode }),
+      });
+      const res = await superadminPost(req);
+      expect(res.status).toBe(200);
+      const d = await res.json();
+      expect(d.ok).toBe(true);
+      expect(d.identity.role).toBe("OWNER");
+    } finally {
+      delete process.env.SUPERADMIN_CODE;
+    }
+  });
+
+  it("behavior gate: a wrong code is rejected even when the env is set", async () => {
+    process.env.SUPERADMIN_CODE = "env-backup-" + "gate-9137";
+    try {
+      const req = new NextRequest("http://localhost:3000/api/superadmin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "auth", code: "not-the-code" }),
+      });
+      const res = await superadminPost(req);
+      expect(res.status).toBe(401);
+      const d = await res.json();
+      expect(d.ok).toBe(false);
+    } finally {
+      delete process.env.SUPERADMIN_CODE;
+    }
+  });
+
+  it("behavior gate: unset env — honest fail-closed message (no silent fallback)", async () => {
+    delete process.env.SUPERADMIN_CODE;
     const req = new NextRequest("http://localhost:3000/api/superadmin", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "auth", code: "any-static-code-ever-published" }),
+      body: JSON.stringify({ action: "auth", code: "anything-at-all" }),
     });
     const res = await superadminPost(req);
     expect(res.status).toBe(401);
     const d = await res.json();
     expect(d.ok).toBe(false);
+    expect(d.error).toContain("No backup code is configured");
   });
 });

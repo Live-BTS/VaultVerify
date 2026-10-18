@@ -5,7 +5,7 @@ import { logAudit } from "@/lib/bts/audit";
 import { originFor } from "@/lib/bts/origin";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
-import { sha256, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES } from "@/lib/bts/auth";
+import { sha256, safeEqual, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES } from "@/lib/bts/auth";
 import { sendTemplatedEmail, listTemplates, renderEmail, TEMPLATE_INDEX } from "@/lib/bts/emailTemplates";
 import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
@@ -13,15 +13,17 @@ import { getPlatformFlag, setPlatformFlag, deletePlatformFlag, MAINTENANCE_KEY }
 import { getFraudConfig, setFraudConfig, normalizeFraudConfig } from "@/lib/bts/fraudConfig";
 import { maybePruneExpiredAuthRows, maybePruneOldLogs, pruneOldLogs, countAuditEventsBeyondRetention, configuredNotificationRetentionDays, AUDIT_RETENTION_DAYS } from "@/lib/bts/hygiene";
 
-// ── POST /api/superadmin — platform administration (OTP-only) ──
+// ── POST /api/superadmin — platform administration (OTP primary + env-only backup) ──
 // Auth model:
-//   Emailed OTP: `request_otp` emails a 6-digit code to the OWNER address
-//   (SUPERADMIN_EMAIL) or to an ACTIVE team member's address (Phase 3 RBAC);
-//   `verify_otp` exchanges it for an 8h session token that authenticates
-//   every subsequent call. This is the ONLY way in — the static recovery
-//   code path was retired by owner decision (OD-01); any `code` field is
-//   ignored and fail-closed. If email delivery is down, wait and re-request
-//   a code.
+//   1. PRIMARY — emailed OTP: `request_otp` emails a 6-digit code to the OWNER
+//      address (SUPERADMIN_EMAIL) or to an ACTIVE team member's address (Phase 3
+//      RBAC); `verify_otp` exchanges it for an 8h session token.
+//   2. BACKUP — the SUPERADMIN_CODE env var (OD-01, amended by the owner
+//      2026-10-18): the ONLY place a backup code may live is the deployment
+//      environment. No hardcoded value exists anywhere in the tree; the path is
+//      fail-closed when the env is unset. The recruiter code is retired
+//      entirely (CH-07): RECRUITER_CODE is read by no code path, and the owner
+//      deletes that env from Vercel.
 // Roles (Phase 3):
 //   OWNER   — everything, incl. team management, maintenance, breach nuke.
 //   ADMIN   — everything except those owner-only commands.
@@ -45,7 +47,7 @@ type AdminRole = "OWNER" | "ADMIN" | "SUPPORT";
 interface AdminIdentity {
   role: AdminRole;
   email: string;
-  accountId: string | null; // null = legacy owner access → OWNER
+  accountId: string | null; // null = env backup-code owner access → OWNER
   token: string | null;
 }
 
@@ -79,8 +81,18 @@ async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIden
       return { role: "OWNER", email: session.email || SUPERADMIN_EMAIL, accountId: null, token };
     }
   }
-  // OD-01: no static code is honored — every identity comes from an emailed
-  // OTP session. Anything else falls through to unauthorized upstream.
+  // OD-01, amended (owner, 2026-10-18): the backup code lives ONLY in the
+  // SUPERADMIN_CODE env var — read lazily per request so tests can inject it
+  // and a redeploy picks up a new value. No hardcoded literal anywhere.
+  // Constant-time compare (SEC-19); fail-closed when the env is unset; the
+  // recruiter code is gone entirely — no other static source exists.
+  const backupCode = (process.env.SUPERADMIN_CODE ?? "").trim();
+  if (backupCode) {
+    const supplied = typeof body.code === "string" ? body.code.trim() : "";
+    if (supplied && safeEqual(supplied, backupCode)) {
+      return { role: "OWNER", email: SUPERADMIN_EMAIL || "owner", accountId: null, token: null };
+    }
+  }
   return null;
 }
 
@@ -348,9 +360,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, token, identity: { email: account.email, role }, ...(await overview()) });
     }
 
-    // Every other action requires a live session token or the backup code.
+    // Every other action requires a live session token or the env backup code.
     const identity = await resolveIdentity(body);
-    if (!identity) return unauthorized();
+    if (!identity) {
+      // Honest fail-closed copy when the owner has not set a backup code yet.
+      const suppliedCode = typeof body.code === "string" ? body.code.trim() : "";
+      if (suppliedCode && !(process.env.SUPERADMIN_CODE ?? "").trim()) {
+        return unauthorized("No backup code is configured on this deployment — use the emailed login code.");
+      }
+      return unauthorized();
+    }
     // Opportunistic hygiene (both throttled internally to once per 10 min).
     await maybePruneExpiredAuthRows();
     await maybePruneOldLogs();
@@ -365,6 +384,12 @@ export async function POST(req: NextRequest) {
 
     switch (body.action) {
       case "auth": {
+        // Audit the backup-code entry point (OTP logins log ADMIN_OTP_LOGIN;
+        // token:null here marks the env-backup identity). Refresh calls with
+        // a live session token skip this.
+        if (identity.token === null) {
+          await logAudit({ actorType: "SYSTEM", actorId: identity.email, action: "ADMIN_BACKUP_LOGIN", entity: "superAdminSession", detail: { role: identity.role } });
+        }
         return NextResponse.json({ ok: true, identity: { email: identity.email, role: identity.role }, ...(await overview()) });
       }
 

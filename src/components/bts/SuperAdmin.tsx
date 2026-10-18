@@ -15,7 +15,10 @@ import {
   Check, X, Users, BookUser, Wallet, LayoutDashboard, PlusCircle, MessagesSquare, ToggleLeft, Pencil, Server, Mail,
   ScrollText, Activity, Link2, Eye, KeyRound, LogOut, Ban, UserCog, Copy, FileCode,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+// NOTE: `xlsx` is NOT statically imported — SheetJS is ~1MB of JS and was the
+// single largest chunk of this console's initial bundle (slow first paint on
+// /SuperAdmin). It is lazy-imported inside parseWorkbook(), i.e. only when an
+// admin actually selects a spreadsheet to import.
 
 // ── Super Admin — platform console with sidebar navigation ─────────
 // Sections: Requests (approval queue) · User management · Company management ·
@@ -123,6 +126,7 @@ const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skil
 
 async function parseWorkbook(file: File): Promise<{ rows: ImportRow[]; sheetName: string; headerFound: boolean }> {
   const buf = await file.arrayBuffer();
+  const XLSX = await import("xlsx"); // lazy — keeps SheetJS out of the initial console bundle
   const wb = XLSX.read(buf, { type: "array" });
   const sheetName = wb.SheetNames.find((n) => /skill/i.test(n)) ?? wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];

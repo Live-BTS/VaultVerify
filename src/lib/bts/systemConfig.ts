@@ -49,18 +49,10 @@ export const SYSTEM_ITEMS: SystemItem[] = [
   },
   {
     key: "superadmin_code",
-    label: "Superadmin console gate",
+    label: "Superadmin console backup code",
     envVar: "SUPERADMIN_CODE",
     provider: "Vercel",
-    purpose: "Access code for this console; fail-closed when unset",
-    critical: true,
-  },
-  {
-    key: "recruiter_code",
-    label: "Recruiter console gate",
-    envVar: "RECRUITER_CODE",
-    provider: "Vercel",
-    purpose: "Access code for the recruiter pipeline + PDF packet; fail-closed when unset",
+    purpose: "Backup login code for this console — lives ONLY in this env var, never hard-coded; OTP email is the primary path; fail-closed when unset",
     critical: true,
   },
   {

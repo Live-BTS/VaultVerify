@@ -176,4 +176,8 @@ export async function destroyRecruiterSession(): Promise<void> {
 // CH-07: the legacy agency access code path (`recruiterAuthed`) is retired.
 // Recruiter-facing routes now authenticate exclusively via
 // `getRecruiterSessionAccount()` and require emailVerified + onboardingComplete.
-// The RECRUITER_CODE env value remains owner-side rotation cleanup only.
+// OD-01 amended (owner, 2026-10-18): the recruiter backup code is retired
+// ENTIRELY — RECRUITER_CODE is read by no code path anywhere; the owner
+// deletes the env var from Vercel. (The superadmin console's backup code is
+// the one exception to full static-code retirement: it lives only in the
+// SUPERADMIN_CODE env var — see src/app/api/superadmin/route.ts.)
