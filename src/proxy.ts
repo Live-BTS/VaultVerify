@@ -21,6 +21,20 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(new URL("/SuperAdmin", req.url));
   }
 
+  // PERF: the three pure-static marketing pages are prerendered at build and
+  // served from the CDN edge (each declares `force-static`). A per-request
+  // nonce CANNOT be stamped into prerendered HTML — the strict-dynamic policy
+  // below would block their frozen bootstrap scripts. They therefore run on
+  // the static fallback CSP from next.config ('self' + 'unsafe-inline'),
+  // which still covers all other security headers (frame-ancestors, nosniff,
+  // connect-src 'self', …). Documented residual: bare inline-script injection
+  // is theoretically possible on exactly these three pages — acceptable
+  // because no user-controlled content is ever rendered into them. Every app
+  // page (dashboard, portals, console) keeps the strict nonce policy.
+  if (path === "/" || path === "/privacy" || path === "/terms") {
+    return NextResponse.next();
+  }
+
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const isDev = process.env.NODE_ENV === "development";
   const csp = buildDocumentCsp(nonce, isDev);

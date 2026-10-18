@@ -1,18 +1,54 @@
 "use client";
 
+// PERF: force-static — the landing is prerendered at build and served from
+// the CDN edge (the proxy exempts this path from the nonce CSP; see
+// src/proxy.ts). All dynamic behavior (deep links, session swap, branding)
+// is client-side and unblocked by this.
+export const dynamic = "force-static";
+
+import dynamicImport from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { LandingView, type AgencyInfo, type Role } from "@/components/bts/LandingView";
-import { CandidateWizard, type CreatedCandidate } from "@/components/bts/CandidateWizard";
-import { CandidateDashboard } from "@/components/bts/CandidateDashboard";
-import { RecruiterDashboard } from "@/components/bts/RecruiterDashboard";
-import { ReferenceFlow } from "@/components/bts/ReferenceFlow";
-import { ChecklistPortal } from "@/components/bts/checklist/ChecklistPortal";
-import { ShareView } from "@/components/bts/checklist/ShareView";
-import { ReferenceShareView } from "@/components/bts/checklist/ReferenceShareView";
+// PERF: the deep views are code-split — they only ship to the browser when a
+// deep link or role switch actually opens them. Previously ALL of them
+// (wizard, both dashboards, reference flow, portal, both share views) were
+// statically imported here, so the landing page paid for the entire app's
+// client bundle on first load. Each boundary shows the branded splash while
+// its chunk streams in.
+import type { CreatedCandidate } from "@/components/bts/CandidateWizard";
 import { Spinner, SplashLoader, VaultMark } from "@/components/bts/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+const CandidateWizard = dynamicImport(
+  () => import("@/components/bts/CandidateWizard").then((m) => m.CandidateWizard),
+  { loading: () => <SplashLoader label="Loading the wizard…" /> },
+);
+const CandidateDashboard = dynamicImport(
+  () => import("@/components/bts/CandidateDashboard").then((m) => m.CandidateDashboard),
+  { loading: () => <SplashLoader label="Loading your dashboard…" /> },
+);
+const RecruiterDashboard = dynamicImport(
+  () => import("@/components/bts/RecruiterDashboard").then((m) => m.RecruiterDashboard),
+  { loading: () => <SplashLoader label="Loading your dashboard…" /> },
+);
+const ReferenceFlow = dynamicImport(
+  () => import("@/components/bts/ReferenceFlow").then((m) => m.ReferenceFlow),
+  { loading: () => <SplashLoader label="Loading the reference form…" /> },
+);
+const ChecklistPortal = dynamicImport(
+  () => import("@/components/bts/checklist/ChecklistPortal").then((m) => m.ChecklistPortal),
+  { loading: () => <SplashLoader label="Loading your checklist…" /> },
+);
+const ShareView = dynamicImport(
+  () => import("@/components/bts/checklist/ShareView").then((m) => m.ShareView),
+  { loading: () => <SplashLoader label="Loading the shared report…" /> },
+);
+const ReferenceShareView = dynamicImport(
+  () => import("@/components/bts/checklist/ReferenceShareView").then((m) => m.ReferenceShareView),
+  { loading: () => <SplashLoader label="Loading the shared reference…" /> },
+);
 
 type View = "home" | "wizard" | "candidate" | "recruiter" | "checklist" | "share" | "refshare";
 
@@ -111,40 +147,14 @@ export default function Page() {
         setBooted(true);
         return;
       }
-      try {
-        const res = await fetch("/api/bootstrap");
-        const d = await res.json();
-        if (!cancelled && d.agency) setAgency(d.agency);
-      } catch {
-        /* fall back to default branding */
-      }
-      if (cancelled) return;
-      // ── Email-verification deep link (/?verify=<token>) ──
-      if (verifyToken) {
-        setVerify({ status: "pending" });
-        try {
-          const res = await fetch("/api/auth", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "verify", token: verifyToken }),
-          });
-          const d = await res.json();
-          if (d.ok) {
-            setVerify({ status: "ok", role: d.role, onboardingComplete: d.onboardingComplete });
-            setTimeout(() => {
-              if (cancelled) return;
-              setVerify(null);
-              setView(d.role === "RECRUITER" ? "recruiter" : "checklist");
-            }, 1600);
-          } else {
-            setVerify({ status: "error", message: d.error ?? "This link is invalid or has expired." });
-          }
-        } catch {
-          setVerify({ status: "error", message: "Could not reach the server — try the link again." });
-        }
-        if (window.history?.replaceState) window.history.replaceState({}, "", "/");
-        setBooted(true);
-        return;
-      }
+
+      // PERF (boot path): deep-link routing is pure URL state — resolved
+      // SYNCHRONOUSLY so the target view paints without waiting on any
+      // network round-trip. The two remaining fetches (branding, session
+      // portal swap) are independent and run in PARALLEL in the background;
+      // neither blocks first paint anymore (previously they chained
+      // sequentially and the whole page sat behind a splash until both
+      // finished — the "irritating load" the owner reported).
       if (r) setRefToken(r);
       if (s) setShareToken(s);
       if (rs) setRefShareToken(rs);
@@ -153,20 +163,48 @@ export default function Page() {
       if (view === "recruiter") setView("recruiter");
       if (s) setView("share");
       if (rs) setView("refshare");
-      // ── Signed-in users land directly in their portal ──
-      if (!r && !s && !rs && !invite && !view && !verifyToken) {
-        try {
-          const res = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
-          const d = await res.json();
-          if (!cancelled && d.ok && d.account) {
-            setView(d.role === "RECRUITER" ? "recruiter" : "checklist");
-          }
-        } catch { /* landing stays */ }
-      }
       setBooted(true);
       if ((r || s || rs) && window.history?.replaceState) {
         window.history.replaceState({}, "", "/");
       }
+
+      const brand = fetch("/api/bootstrap")
+        .then((res) => res.json())
+        .then((d) => { if (!cancelled && d.agency) setAgency(d.agency); })
+        .catch(() => { /* fall back to default branding */ });
+
+      let session: Promise<void> = Promise.resolve();
+      if (verifyToken) {
+        // ── Email-verification deep link (/?verify=<token>) ──
+        setVerify({ status: "pending" });
+        session = fetch("/api/auth", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "verify", token: verifyToken }),
+        })
+          .then((res) => res.json())
+          .then((d) => {
+            if (cancelled) return;
+            if (d.ok) {
+              setVerify({ status: "ok", role: d.role, onboardingComplete: d.onboardingComplete });
+              setTimeout(() => {
+                if (cancelled) return;
+                setVerify(null);
+                setView(d.role === "RECRUITER" ? "recruiter" : "checklist");
+              }, 1600);
+            } else {
+              setVerify({ status: "error", message: d.error ?? "This link is invalid or has expired." });
+            }
+          })
+          .catch(() => { if (!cancelled) setVerify({ status: "error", message: "Could not reach the server — try the link again." }); });
+        if (window.history?.replaceState) window.history.replaceState({}, "", "/");
+      } else if (!r && !s && !rs && !invite && !view) {
+        // ── Signed-in users land directly in their portal (background swap) ──
+        session = fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) })
+          .then((res) => res.json())
+          .then((d) => { if (!cancelled && d.ok && d.account) setView(d.role === "RECRUITER" ? "recruiter" : "checklist"); })
+          .catch(() => { /* landing stays */ });
+      }
+      void Promise.allSettled([brand, session]);
     };
     init();
     return () => {
