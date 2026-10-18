@@ -32,7 +32,7 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { sha256, createVerification, consumeVerification, createPasswordReset, consumePasswordReset, createRecruiterSession, getRecruiterSessionAccount, destroyRecruiterSession } from "@/lib/bts/auth";
 import { hashPassword, createSession, getAccount, destroySession } from "@/lib/bts/checklistAuth";
-import { loginLockedFor, pruneExpiredAuthRows, pruneOldLogs } from "@/lib/bts/hygiene";
+import { loginLockedFor, pruneExpiredAuthRows, pruneOldLogs, PURGED_BODY_TOMBSTONE } from "@/lib/bts/hygiene";
 import { POST as authPost } from "@/app/api/auth/route";
 
 const LOCK_EMAIL = "lockout@phased.local";
@@ -205,10 +205,12 @@ describe("Phase D: expired auth rows are pruned, live rows survive", () => {
   });
 });
 
-// ── 4. Log retention ─────────────────────────────────────────────
+// ── 4. Log retention (OD-11 semantics) ───────────────────────────
+// Supersedes the Phase D whole-row deleteMany: NotificationLog rows keep
+// metadata with body/html purged; AuditEvent rows are NEVER auto-deleted.
 
-describe("Phase D: log retention pruning", () => {
-  it("removes audit + notification rows past the retention window, keeps fresh ones", async () => {
+describe("Phase D: log retention (OD-11)", () => {
+  it("purges notification body/html past the window but retains metadata rows; audit rows are never deleted", async () => {
     const oldAudit = await db.auditEvent.create({
       data: { actorType: "SYSTEM", action: "PHASE_D_OLD", createdAt: new Date(Date.now() - 200 * 86400_000) },
     });
@@ -216,17 +218,29 @@ describe("Phase D: log retention pruning", () => {
       data: { actorType: "SYSTEM", action: "PHASE_D_NEW", createdAt: new Date() },
     });
     const oldNote = await db.notificationLog.create({
-      data: { channel: "EMAIL", kind: "AUTH", to: "old@phased.local", body: "old", createdAt: new Date(Date.now() - 200 * 86400_000) },
+      data: { channel: "EMAIL", kind: "OTP", to: "old@phased.local", subject: "VaultVerify admin login code", body: "Your code is 481902", html: "<p>Your code is 481902</p>", createdAt: new Date(Date.now() - 200 * 86400_000) },
     });
     const newNote = await db.notificationLog.create({
       data: { channel: "EMAIL", kind: "AUTH", to: "new@phased.local", body: "new", createdAt: new Date() },
     });
 
-    await pruneOldLogs(90);
+    const result = await pruneOldLogs(90);
 
-    expect(await db.auditEvent.findUnique({ where: { id: oldAudit.id } })).toBeNull();
+    // NotificationLog: the row survives as metadata; the content does not.
+    const oldAfter = await db.notificationLog.findUnique({ where: { id: oldNote.id } });
+    expect(oldAfter).not.toBeNull();
+    expect(oldAfter?.body).toBe(PURGED_BODY_TOMBSTONE);
+    expect(oldAfter?.html).toBeNull();
+    expect(oldAfter?.to).toBe("old@phased.local");
+    expect(oldAfter?.subject).toBe("VaultVerify admin login code");
+    expect(oldAfter?.kind).toBe("OTP");
+    expect(JSON.stringify(oldAfter)).not.toContain("481902");
+    const newAfter = await db.notificationLog.findUnique({ where: { id: newNote.id } });
+    expect(newAfter?.body).toBe("new");
+
+    // AuditEvent: never auto-deleted; the 180-day window is informational.
+    expect(await db.auditEvent.findUnique({ where: { id: oldAudit.id } })).not.toBeNull();
     expect(await db.auditEvent.findUnique({ where: { id: newAudit.id } })).not.toBeNull();
-    expect(await db.notificationLog.findUnique({ where: { id: oldNote.id } })).toBeNull();
-    expect(await db.notificationLog.findUnique({ where: { id: newNote.id } })).not.toBeNull();
+    expect(result.auditBeyondRetention).toBeGreaterThanOrEqual(1);
   });
 });

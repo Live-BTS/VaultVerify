@@ -10,7 +10,7 @@ import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { getPlatformFlag, setPlatformFlag, deletePlatformFlag, MAINTENANCE_KEY } from "@/lib/bts/platform";
 import { getFraudConfig, setFraudConfig, normalizeFraudConfig } from "@/lib/bts/fraudConfig";
-import { maybePruneExpiredAuthRows, maybePruneOldLogs } from "@/lib/bts/hygiene";
+import { maybePruneExpiredAuthRows, maybePruneOldLogs, pruneOldLogs, countAuditEventsBeyondRetention, configuredNotificationRetentionDays, AUDIT_RETENTION_DAYS } from "@/lib/bts/hygiene";
 
 // ── POST /api/superadmin — platform administration (OTP + backup code) ──
 // Auth model:
@@ -92,12 +92,12 @@ async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIden
 //   SUPPORT — read-only set only.
 const OWNER_ONLY = new Set([
   "team_list", "team_invite", "team_set_role", "team_set_status", "team_remove",
-  "set_platform", "revoke_all_sessions",
+  "set_platform", "revoke_all_sessions", "retention_sweep",
 ]);
 const READ_ONLY = new Set([
   "auth", "system_config", "requests", "impersonate_view", "audit_query",
   "ledger_query", "shares_list", "notifications_list", "ping", "fraud_config_get",
-  "templates_list", "template_get",
+  "templates_list", "template_get", "retention_status",
 ]);
 
 function roleAllowed(role: AdminRole, action: string): boolean {
@@ -676,6 +676,27 @@ export async function POST(req: NextRequest) {
           stats: { sent, simulated, failed },
           notifications: rows.map((n) => ({ id: n.id, at: n.createdAt, channel: n.channel, kind: n.kind, to: n.to, subject: n.subject, status: n.status, provider: n.provider })),
         });
+      }
+
+      case "retention_status": {
+        // OD-11: aggregate counts only — no row content, no PII.
+        return NextResponse.json({
+          ok: true,
+          notificationRetentionDays: await configuredNotificationRetentionDays(),
+          notificationPurge: "body+html tombstoned past the window; metadata rows retained (OTP included, no exemption)",
+          auditRetentionDays: AUDIT_RETENTION_DAYS,
+          auditDeletion: "DISABLED — AuditEvent auto-deletion stays off until compliance/contractual review confirms the proposed 180-day window",
+          auditBeyondRetention: await countAuditEventsBeyondRetention(),
+        });
+      }
+
+      case "retention_sweep": {
+        // Owner-only: force a retention pass outside the 10-minute
+        // opportunistic throttle. Counts only in the response and the audit
+        // detail — never row content.
+        const sweep = await pruneOldLogs(await configuredNotificationRetentionDays());
+        await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "RETENTION_SWEEP", detail: { purged: sweep.purgedNotificationBodies, auditBeyondRetention: sweep.auditBeyondRetention } });
+        return NextResponse.json({ ok: true, ...sweep });
       }
 
       case "export_csv": {

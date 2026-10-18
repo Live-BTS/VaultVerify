@@ -11,17 +11,28 @@ import { getPlatformFlag } from "@/lib/bts/platform";
 //      Pruned opportunistically (sign-in, console reads), throttled to at
 //      most once per 10 minutes per process; every delete is expiry-scoped
 //      so nothing live is ever touched.
-//   3. LOG RETENTION — AuditEvent and NotificationLog grow unbounded.
-//      Pruned on the same opportunistic schedule against a configurable
-//      retention window (PlatformConfig LOG_RETENTION_DAYS, default 90).
-// All deletes are plain deleteMany — identical SQL on SQLite and Postgres.
+//   3. LOG RETENTION (OD-11, owner-approved) — NotificationLog rows past the
+//      retention window (PlatformConfig LOG_RETENTION_DAYS, default 90) keep
+//      METADATA ONLY: body is replaced with a tombstone and html is nulled;
+//      the row itself survives for delivery audit (channel, kind, to, subject,
+//      status, provider, timestamps). OTP emails are NOT exempt — the 6-digit
+//      code is disposable minutes after send, so it goes with the body.
+//      AuditEvent rows are NEVER deleted here: the owner set a PROPOSED
+//      180-day window (AUDIT_RETENTION_DAYS) but auto-deletion stays disabled
+//      until applicable compliance and contractual requirements are confirmed;
+//      the window is surfaced as an informational count only
+//      (countAuditEventsBeyondRetention). This supersedes the Phase D
+//      behavior of whole-row deleteMany on both tables. All writes are plain
+//      updateMany — identical SQL on SQLite and Postgres.
 
 const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 const authGate = { last: 0 };
 const logGate = { last: 0 };
 
-export const DEFAULT_LOG_RETENTION_DAYS = 90;
+export const DEFAULT_LOG_RETENTION_DAYS = 90; // owner-set (OD-11): NotificationLog body/html purge window
 export const LOG_RETENTION_KEY = "LOG_RETENTION_DAYS";
+export const AUDIT_RETENTION_DAYS = 180; // owner-PROPOSED (OD-11) — NOT enforced; deletion pending compliance verification
+export const PURGED_BODY_TOMBSTONE = "[purged: retention policy]";
 export const LOGIN_LOCKOUT_THRESHOLD = 5;
 export const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 export const RESEND_MAX_PER_WINDOW = 3;
@@ -99,28 +110,60 @@ export async function maybePruneExpiredAuthRows(): Promise<void> {
   }
 }
 
-function clampRetentionDays(raw: string | null): number {
+function clampRetentionDays(raw: string | number | null): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return DEFAULT_LOG_RETENTION_DAYS;
   return Math.min(3650, Math.max(7, Math.round(n)));
 }
 
-export async function pruneOldLogs(retentionDays: number = DEFAULT_LOG_RETENTION_DAYS): Promise<number> {
-  const days = Math.min(3650, Math.max(7, Math.round(retentionDays)));
-  const cutoff = new Date(Date.now() - days * 86400_000);
-  const [audit, notifications] = await Promise.all([
-    db.auditEvent.deleteMany({ where: { createdAt: { lt: cutoff } } }),
-    db.notificationLog.deleteMany({ where: { createdAt: { lt: cutoff } } }),
+// Effective NotificationLog purge window: the platform flag if set, else the
+// owner-set default — always clamped to the 7..3650 range so a stray flag
+// value can neither purge everything nor disable the purge.
+export async function configuredNotificationRetentionDays(): Promise<number> {
+  return clampRetentionDays(await getPlatformFlag(LOG_RETENTION_KEY));
+}
+
+// OD-11: NotificationLog rows past the window keep metadata only — body is
+// tombstoned and html nulled. The OR guard makes the sweep idempotent: a row
+// already fully purged (tombstone body AND null html) never matches again.
+export async function purgeExpiredNotificationBodies(retentionDays: number = DEFAULT_LOG_RETENTION_DAYS): Promise<number> {
+  const cutoff = new Date(Date.now() - clampRetentionDays(retentionDays) * 86400_000);
+  const res = await db.notificationLog.updateMany({
+    where: {
+      createdAt: { lt: cutoff },
+      OR: [{ body: { not: PURGED_BODY_TOMBSTONE } }, { html: { not: null } }],
+    },
+    data: { body: PURGED_BODY_TOMBSTONE, html: null },
+  });
+  return res.count;
+}
+
+// OD-11 caveat: INFORMATIONAL ONLY — returns how many AuditEvent rows sit
+// beyond the proposed 180-day window. Nothing is deleted or updated until the
+// retention policy is confirmed against compliance/contractual requirements.
+export async function countAuditEventsBeyondRetention(now = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - AUDIT_RETENTION_DAYS * 86400_000);
+  return db.auditEvent.count({ where: { createdAt: { lt: cutoff } } });
+}
+
+export interface RetentionSweepResult {
+  purgedNotificationBodies: number;
+  auditBeyondRetention: number; // informational — these rows are NOT deleted
+}
+
+export async function pruneOldLogs(retentionDays?: number): Promise<RetentionSweepResult> {
+  const [purgedNotificationBodies, auditBeyondRetention] = await Promise.all([
+    purgeExpiredNotificationBodies(retentionDays),
+    countAuditEventsBeyondRetention(),
   ]);
-  return audit.count + notifications.count;
+  return { purgedNotificationBodies, auditBeyondRetention };
 }
 
 export async function maybePruneOldLogs(): Promise<void> {
   if (Date.now() - logGate.last < PRUNE_INTERVAL_MS) return;
   logGate.last = Date.now();
   try {
-    const raw = await getPlatformFlag(LOG_RETENTION_KEY);
-    await pruneOldLogs(clampRetentionDays(raw));
+    await pruneOldLogs(await configuredNotificationRetentionDays());
   } catch {
     // hygiene is best-effort — never block the calling flow
   }
