@@ -26,7 +26,15 @@ export async function GET() {
       await seedBuiltinTemplates();
     }
 
-    const agency = await db.agency.findUnique({ where: { slug: "vaultverify" } });
+    const row = await db.agency.findUnique({ where: { slug: "vaultverify" } });
+    // SEC-01(a): projected fields only — billing/trust state columns never
+    // reach the anonymous landing page.
+    const agency = row
+      ? {
+          id: row.id, name: row.name, slug: row.slug, logoText: row.logoText,
+          tagline: row.tagline, primaryColor: row.primaryColor, accentColor: row.accentColor,
+        }
+      : null;
     return NextResponse.json({ ok: true, agency });
   } catch (e) {
     console.error("[bootstrap]", e);

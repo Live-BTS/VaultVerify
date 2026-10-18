@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
@@ -16,7 +14,7 @@ import { AuthPanel } from "./AuthPanel";
 import { RecruiterOnboarding } from "./RecruiterOnboarding";
 import { PortalShell } from "./shell/PortalShell";
 import { cn } from "@/lib/utils";
-import { LogIn, RefreshCcw, ShieldAlert, Activity, Inbox, Users, Clock3, Star, Flag, Database, LayoutDashboard, ClipboardList, BellRing, FileSearch } from "lucide-react";
+import { RefreshCcw, ShieldAlert, Inbox, Users, Clock3, Star, Flag, LayoutDashboard, ClipboardList, FileSearch } from "lucide-react";
 
 interface ReqRow {
   id: string;
@@ -34,11 +32,9 @@ interface ReqRow {
   shares: { accessType: string; expiresAt: string | null; viewedAt: string | null; revoked: boolean }[];
   candidate: {
     id: string; fullName: string; role: string; specialty: string; city: string; state: string; email: string;
-    agency: { name: string; logoText: string };
     skills: { skillName: string; proficiency: string; highRisk: boolean }[];
   };
   response: {
-    id: string;
     identityMethod: string;
     overallRating: number | null;
     q8Discipline: boolean;
@@ -47,7 +43,6 @@ interface ReqRow {
     signatureName: string;
     signedAt: string;
     durationSeconds: number;
-    skillsVerified: boolean;
     answers: string;
     skillChecks: { skillName: string; nurseProficiency: string; confirmed: boolean; refProficiency: string | null }[];
   } | null;
@@ -60,8 +55,6 @@ interface RecruiterData {
     flaggedCount: number; pendingCount: number; medianCompletionSeconds: number | null; avgRating: number | null;
   };
   requests: ReqRow[];
-  notifications: { id: string; channel: string; kind: string; to: string; body: string; status: string; createdAt: string }[];
-  audit: { id: string; actorType: string; action: string; entity: string; entityId: string; ip: string; createdAt: string }[];
 }
 
 const IDENTITY_LABEL: Record<string, string> = {
@@ -79,9 +72,8 @@ const identityLabel = (m: string) => IDENTITY_LABEL[m] ?? m;
 
 export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   const { toast } = useToast();
-  const [code, setCode] = useState("");
+  // (legacy agency access-code state removed — account session is the only path)
   const [me, setMe] = useState<{ name: string; email: string; onboardingComplete: boolean } | null>(null);
-  const [showLegacy, setShowLegacy] = useState(false);
   const [data, setData] = useState<RecruiterData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,16 +81,14 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   const [sweeping, setSweeping] = useState(false);
   const [section, setSection] = useState<"dashboard" | "references" | "checklists" | "notifications" | "audit">("dashboard");
 
-  const load = useCallback(async (c: string) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // c === "" → account session (cookie); a code uses the legacy path.
-      const res = await fetch(`/api/recruiter?code=${encodeURIComponent(c)}`);
+      const res = await fetch("/api/recruiter");
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? "Sign-in failed");
       setData(d);
-      if (c) sessionStorage.setItem("bts_recruiter_code", c);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sign-in failed");
     } finally {
@@ -109,21 +99,14 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      // 1) Legacy agency-code path (demo / previously issued codes).
-      const stored = sessionStorage.getItem("bts_recruiter_code");
-      if (stored) {
-        setCode(stored);
-        load(stored);
-        return;
-      }
-      // 2) Account session probe — verified recruiters land straight on the dashboard.
+      // Account session probe — verified recruiters land straight on the dashboard.
       try {
         const res = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
         const d = await res.json();
         if (alive && d.ok && d.account && d.role === "RECRUITER") {
           const account = d.account;
           setMe(account);
-          if (account.onboardingComplete) load("");
+          if (account.onboardingComplete) load();
         }
       } catch { /* gate renders */ }
     })();
@@ -141,7 +124,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
       const d = await res.json();
       if (res.ok) {
         toast({ title: d.message });
-        if (code) load(code);
+        await load(); // session path — keep day counters and statuses fresh
       } else toast({ title: d.error ?? "Sweep failed", variant: "destructive" });
     } finally {
       setSweeping(false);
@@ -150,10 +133,8 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
 
   const signOut = async () => {
     try { await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "signout" }) }); } catch { /* session may already be gone */ }
-    sessionStorage.removeItem("bts_recruiter_code");
     setMe(null);
     setData(null);
-    setCode("");
     onSignOut();
   };
 
@@ -163,61 +144,23 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
     return (
       <RecruiterOnboarding
         me={{ name: me.name, email: me.email }}
-        onSaved={async () => { setMe({ ...me, onboardingComplete: true }); await load(""); }}
+        onSaved={async () => { setMe({ ...me, onboardingComplete: true }); await load(); }}
         onSignOut={signOut}
       />
     );
-  } else if (!showLegacy) {
+  } else {
+    // Account auth is the only door: the static agency access code is retired
+    // server-side (the API 401s without an account session), so the legacy
+    // code form was removed rather than left as a dead end.
     return (
       <AuthPanel
         onAuthenticated={(info) => {
           const account = { name: info.name, email: info.email, onboardingComplete: info.onboardingComplete };
           setMe(account);
-          if (account.onboardingComplete) load("");
+          if (account.onboardingComplete) load();
         }}
         onExit={onSignOut}
-        footer={
-          <div className="space-y-2">
-            <button type="button" onClick={() => setShowLegacy(true)} className="text-xs text-slate-500 underline hover:text-teal-700">
-              Have an agency access code instead?
-            </button>
-          </div>
-        }
       />
-    );
-  } else {
-    return (
-      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-12">
-        <Card className="border-slate-200">
-          <CardContent className="p-8">
-            <div className="flex items-center gap-2 text-teal-700">
-              <Database className="h-5 w-5" />
-              <span className="text-sm font-semibold uppercase tracking-wide">Recruiter access</span>
-            </div>
-            <h1 className="mt-3 text-2xl font-bold text-slate-900">Agency access code</h1>
-            <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              Enter the access code issued by VaultVerify.
-              {process.env.NODE_ENV === "development" && (
-                <> Sandbox access code: set via RECRUITER_CODE in your sandbox .env (never hard-coded here).</>
-              )}
-            </p>
-            <form className="mt-6 space-y-4" onSubmit={(e) => { e.preventDefault(); if (code.trim()) load(code.trim()); }}>
-              <div>
-                <Label htmlFor="code">Access code</Label>
-                <Input id="code" type="password" value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} className="mt-1.5" required />
-              </div>
-              {error && <p className="text-sm text-rose-600">{error}</p>}
-              <Button type="submit" disabled={loading} className="w-full bg-teal-700 hover:bg-teal-800">
-                {loading ? <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <LogIn className="mr-1.5 h-4 w-4" />}
-                Enter dashboard
-              </Button>
-            </form>
-            <button type="button" onClick={() => setShowLegacy(false)} className="mt-4 w-full text-center text-xs text-slate-500 underline hover:text-teal-700">
-              Sign up or sign in with an account instead
-            </button>
-          </CardContent>
-        </Card>
-      </div>
     );
   }
 
@@ -229,10 +172,10 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
       badge="Recruiter console"
       brandOverride={
         <div className="px-4 pb-4 pt-6">
-          <AgencyLogo logoText={data.agency.logoText} name={data.agency.name} />
+          <AgencyLogo logoText={data.agency?.logoText ?? "VV"} name={data.agency?.name ?? "VaultVerify"} />
         </div>
       }
-      userName={me ? me.name : `Recruiter · ${data.agency.name}`}
+      userName={me ? me.name : `Recruiter · ${data.agency?.name ?? "VaultVerify"}`}
       userEmail={me ? me.email : "Access-code sign-in"}
       wide
       active={section}
@@ -247,8 +190,6 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
         { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
         { key: "references", label: "References", icon: FileSearch, badge: awaitingRequests.length || undefined },
         { key: "checklists", label: "Skill checklists", icon: ClipboardList },
-        { key: "notifications", label: "Notifications", icon: BellRing, badge: data.notifications.length },
-        { key: "audit", label: "Audit trail", icon: Activity },
       ]}
     >
       {/* ── Dashboard ── */}
@@ -368,44 +309,11 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
 
       {/* ── Checklists (self-assessments — separate from references) ── */}
       {section === "checklists" && (
-        <RecruiterChecklists recruiterName={me ? me.name : `Recruiter · ${data.agency.name}`} />
+        <RecruiterChecklists recruiterName={me ? me.name : `Recruiter · ${data.agency?.name ?? "VaultVerify"}`} />
       )}
-
-      {/* ── Notifications ── */}
-      {section === "notifications" && (
-            <Card className="border-slate-200">
-              <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
-                {data.notifications.map((n) => (
-                  <div key={n.id} className="flex items-start gap-3 p-4">
-                    <span className={cn("mt-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase", n.channel === "SMS" ? "bg-teal-100 text-teal-800" : "bg-amber-100 text-amber-800")}>{n.channel}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-slate-800">{n.body}</p>
-                      <p className="mt-1 text-xs text-slate-400">to {n.to} · {n.kind.toLowerCase()} · {new Date(n.createdAt).toLocaleString("en-US")} · {n.status}</p>
-                    </div>
-                  </div>
-                ))}
-                {data.notifications.length === 0 && <p className="p-6 text-sm text-slate-400">No notifications yet.</p>}
-              </CardContent>
-            </Card>
-      )}
-
-      {/* ── Audit ── */}
-      {section === "audit" && (
-            <Card className="border-slate-200">
-              <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0 font-mono text-xs">
-                {data.audit.map((a) => (
-                  <div key={a.id} className="flex items-center gap-3 p-3">
-                    <Activity className="h-3 w-3 shrink-0 text-slate-300" />
-                    <span className="w-36 shrink-0 text-slate-400">{new Date(a.createdAt).toLocaleString("en-US")}</span>
-                    <span className="w-24 shrink-0 font-semibold text-teal-800">{a.actorType}</span>
-                    <span className="font-semibold text-slate-800">{a.action}</span>
-                    <span className="truncate text-slate-400">{a.entity}{a.entityId ? `:${a.entityId.slice(0, 8)}` : ""} {a.ip && a.ip !== "sandbox" ? `· ${a.ip}` : ""}</span>
-                  </div>
-                ))}
-                {data.audit.length === 0 && <p className="p-6 font-sans text-sm text-slate-400">No audit events yet.</p>}
-              </CardContent>
-            </Card>
-      )}
+      {/* Notifications and audit tails were removed with the payload
+          minimization (server sends no such rows to recruiters) — the nav
+          items rendered permanent dead ends. */}
 
       {/* ── Detail dialog ── */}
       <Dialog open={!!detail} onOpenChange={(v) => !v && setDetail(null)}>
@@ -454,7 +362,10 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Answers</p>
                       <div className="mt-2 max-h-60 space-y-2 overflow-y-auto pr-1">
-                        {(JSON.parse(detail.response.answers || "[]") as { key: string; type: string; value: string | number | boolean | null; unableToObserve?: boolean }[]).map((a) => {
+                        {((() => {
+                          try { return JSON.parse(detail.response.answers || "[]"); }
+                          catch { return []; } // corrupt/legacy row — render an empty table, not a crash
+                        })() as { key: string; type: string; value: string | number | boolean | null; unableToObserve?: boolean }[]).map((a) => {
                           const q = QUESTIONS.find((qq) => qq.key === a.key);
                           let val = String(a.value ?? "");
                           if (a.unableToObserve) val = "Unable to observe";

@@ -12,6 +12,7 @@ import { assertPlatformWritable } from "@/lib/bts/platform";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
 import { createSession, destroySession, getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
+import { originFor } from "@/lib/bts/origin";
 
 // ── POST /api/auth — signup / verify / signin / signout / me / onboard ──
 // Unified portal auth for candidates and recruiters:
@@ -25,10 +26,11 @@ import { logAudit } from "@/lib/bts/audit";
 
 type Role = "CANDIDATE" | "RECRUITER";
 
+// Delegates to the shared helper: APP_ORIGIN wins when configured, headers
+// are only a fallback (SEC: forged Host made emailed verification links point
+// at an attacker origin).
 function originOf(req: NextRequest): string {
-  const proto = req.headers.get("x-forwarded-proto") ?? "http";
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "localhost:3000";
-  return `${proto}://${host}`;
+  return originFor(req);
 }
 
 function bad(error: string, status = 400, extra: Record<string, unknown> = {}) {
@@ -119,12 +121,12 @@ export async function POST(req: NextRequest) {
       if (hit.role === "CANDIDATE") {
         const account = await db.checklistAccount.update({ where: { email }, data: { emailVerified: true } });
         await createSession(account.id);
-        return NextResponse.json({ ok: true, role: "CANDIDATE", onboardingComplete: account.onboardingComplete });
+        return NextResponse.json({ ok: true, role: "CANDIDATE", onboardingComplete: account.onboardingComplete, accountName: account.name });
       }
       const account = await db.recruiterAccount.update({ where: { email }, data: { emailVerified: true } });
       await createRecruiterSession(account.id);
       await logAudit({ actorType: "RECRUITER", actorId: email, action: "EMAIL_VERIFIED", entity: "recruiterAccount", entityId: account.id });
-      return NextResponse.json({ ok: true, role: "RECRUITER", onboardingComplete: account.onboardingComplete });
+      return NextResponse.json({ ok: true, role: "RECRUITER", onboardingComplete: account.onboardingComplete, accountName: account.name });
     }
 
     // ── signin ────────────────────────────────────────────────────
@@ -177,7 +179,7 @@ export async function POST(req: NextRequest) {
       await logAudit({ actorType: role, actorId: email, action: "SIGNIN", entity: role === "CANDIDATE" ? "checklistAccount" : "recruiterAccount", entityId: account.id });
       // Opportunistic hygiene (throttled internally to once per 10 min).
       await maybePruneExpiredAuthRows();
-      return NextResponse.json({ ok: true, role, onboardingComplete: account.onboardingComplete });
+      return NextResponse.json({ ok: true, role, onboardingComplete: account.onboardingComplete, accountName: account.name });
     }
 
     // ── resend verification ───────────────────────────────────────

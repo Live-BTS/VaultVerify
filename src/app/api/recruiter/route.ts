@@ -3,10 +3,11 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { sendNotification, reminderBody } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
-import { REMINDER_DAYS, LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
+import { REMINDER_DAYS } from "@/lib/bts/constants";
 import { getRecruiterSessionAccount } from "@/lib/bts/auth";
 import { viewerAllowedByRecipient } from "@/lib/bts/sharePolicy";
 import { refLinkFor } from "@/lib/bts/refTokenCrypto";
+import { originFor } from "@/lib/bts/origin";
 
 // ── GET/POST /api/recruiter — recruiter dashboard (SESSION REQUIRED) ──
 // Authorization model (PO decision Q3 + CH-06): recruiters see ONLY reference
@@ -23,10 +24,10 @@ function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
 }
 
+// Delegates to the shared helper — APP_ORIGIN wins when configured; raw
+// client headers are only a fallback (SEC: forged Host poisons emailed links).
 function baseUrl(req: NextRequest): string {
-  const host = req.headers.get("host") ?? "localhost:3000";
-  const proto = req.headers.get("x-forwarded-proto") ?? "http";
-  return `${proto}://${host}`;
+  return originFor(req);
 }
 
 function linkIsActive(l: { revoked: boolean; accessType: string; viewedAt: Date | null; expiresAt: Date | null }): boolean {
@@ -43,6 +44,11 @@ export async function GET(req: NextRequest) {
       { error: "Recruiter access now requires a VaultVerify account. Sign in, or ask the candidate for a secure share link." },
       { status: 401 },
     );
+  }
+  // CH-07: same verified+onboarded gate the invite/PDF routes enforce — a
+  // verify-link session alone must not reach pipeline data or sweeps.
+  if (!recruiter.emailVerified || !recruiter.onboardingComplete) {
+    return NextResponse.json({ error: "Recruiter access requires a verified VaultVerify account. Finish onboarding first." }, { status: 401 });
   }
 
   // Explicitly shared requests only, and only bindings that admit THIS
@@ -116,8 +122,34 @@ export async function GET(req: NextRequest) {
 
   await logAudit({ actorType: "RECRUITER", actorId: recruiter.id, action: "DASHBOARD_VIEWED", entity: "recruiter", ip: clientIp(req) });
 
+  // CH-06: a recruiter with zero admitted shares has no candidate agency to
+  // brand from. The dashboard shell renders the agency unconditionally, so
+  // returning null here crashed the client (prod incident 2026-10-18 —
+  // "Cannot read properties of null (reading 'logoText')"). Return the
+  // platform brand as the safe default instead.
+  // SEC-01(a): agency fields are projected explicitly — billing and trust
+  // state columns never leave the admin console.
+  const firstAdmitted = all.find((r) => r.shares.some(admitted))?.candidate.agency;
+  const agency = firstAdmitted
+    ? {
+        name: firstAdmitted.name,
+        slug: firstAdmitted.slug,
+        logoText: firstAdmitted.logoText,
+        tagline: firstAdmitted.tagline,
+        primaryColor: firstAdmitted.primaryColor,
+        accentColor: firstAdmitted.accentColor,
+      }
+    : {
+        name: "VaultVerify",
+        slug: "vaultverify",
+        logoText: "VV",
+        tagline: "Honest references. Clearly labeled skills.",
+        primaryColor: "#03363d",
+        accentColor: "#7cc118",
+      };
+
   return NextResponse.json({
-    agency: all.find((r) => r.shares.some(admitted))?.candidate.agency ?? null,
+    agency,
     stats: {
       totalRequests: requests.length,
       completedCount: completed.length,
@@ -156,6 +188,10 @@ export async function POST(req: NextRequest) {
       { status: 401 },
     );
   }
+  // CH-07: verified+onboarded gate (matches GET and the invite/PDF routes).
+  if (!recruiter.emailVerified || !recruiter.onboardingComplete) {
+    return NextResponse.json({ error: "Recruiter access requires a verified VaultVerify account. Finish onboarding first." }, { status: 401 });
+  }
 
   // Fraud-flag resolution belongs to the superadmin console (least privilege).
   if (body.action === "resolve_flag" || body.action === "unflag_request") {
@@ -177,7 +213,10 @@ export async function POST(req: NextRequest) {
     let skippedCount = 0;
     for (const r of active) {
       const daysOpen = Math.floor((Date.now() - new Date(r.sentAt).getTime()) / 86400000);
-      if (daysOpen > LINK_EXPIRY_DAYS) {
+      // Expire on the SAME boundary the referee link enforces (expiresAt),
+      // not a day-count — otherwise day-14 sweeps email reminders whose
+      // links are already dead.
+      if (r.expiresAt && r.expiresAt <= new Date()) {
         await db.referenceRequest.update({ where: { id: r.id }, data: { status: "EXPIRED" } });
         await logAudit({ actorType: "SYSTEM", action: "LINK_EXPIRED", entity: "reference_request", entityId: r.id });
         expiredCount++;

@@ -215,7 +215,10 @@ export async function POST(req: NextRequest) {
     } catch {
       emailDelivery = "FAILED"; // invite row survives; the recruiter can resend from the dashboard
     }
-    await creditSpend(outbound.agencyId ?? (await primaryAgencyId()) ?? "", `Checklist invite — ${candidateName}`, 1, "RECRUITER", invite.recruiterName);
+    // Billing fairness: no spend when the provider failed outright.
+    if (emailDelivery !== "FAILED") {
+      await creditSpend(outbound.agencyId ?? (await primaryAgencyId()) ?? "", `Checklist invite — ${candidateName}`, 1, "RECRUITER", invite.recruiterName);
+    }
     await logAudit({
       actorType: "RECRUITER", actorId: recruiter.id, action: "CHECKLIST_INVITE_SENT",
       entity: "checklistInvite", entityId: invite.id,

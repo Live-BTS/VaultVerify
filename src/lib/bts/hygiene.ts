@@ -191,24 +191,35 @@ export async function purgeExpiredNotificationBodies(retentionDays: number = DEF
 // Candidate selection over-matches on purpose ("?r=", "?verify=", "invite="
 // hints; scrubLogText is the precise filter and a no-op on non-token text).
 export async function scrubRetainedNotificationBodies(): Promise<number> {
-  const candidates = await db.notificationLog.findMany({
-    where: {
-      OR: [
-        { body: { contains: "?r=" } }, { body: { contains: "?verify=" } }, { body: { contains: "invite=" } },
-        { html: { contains: "?r=" } }, { html: { contains: "?verify=" } }, { html: { contains: "invite=" } },
-      ],
-    },
-    select: { id: true, body: true, html: true, subject: true },
-  });
+  // Cursor-paginated in bounded batches: the over-broad hint filter can match
+  // a large retained set, and an unbounded findMany would spike memory on the
+  // cron once the table grows.
+  const BATCH = 500;
   let scrubbed = 0;
-  for (const row of candidates) {
-    const body = scrubLogText(row.body);
-    const html = row.html === null ? null : scrubLogText(row.html);
-    const subject = scrubLogText(row.subject);
-    if (body !== row.body || html !== row.html || subject !== row.subject) {
-      await db.notificationLog.update({ where: { id: row.id }, data: { body, html, subject } });
-      scrubbed++;
+  let cursor: string | undefined;
+  for (;;) {
+    const candidates = await db.notificationLog.findMany({
+      where: {
+        OR: [
+          { body: { contains: "?r=" } }, { body: { contains: "?verify=" } }, { body: { contains: "invite=" } },
+          { html: { contains: "?r=" } }, { html: { contains: "?verify=" } }, { html: { contains: "invite=" } },
+        ],
+      },
+      select: { id: true, body: true, html: true, subject: true },
+      take: BATCH,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    });
+    if (candidates.length === 0) break;
+    for (const row of candidates) {
+      const body = scrubLogText(row.body);
+      const html = row.html === null ? null : scrubLogText(row.html);
+      const subject = scrubLogText(row.subject);
+      if (body !== row.body || html !== row.html || subject !== row.subject) {
+        await db.notificationLog.update({ where: { id: row.id }, data: { body, html, subject } });
+        scrubbed++;
+      }
     }
+    cursor = candidates[candidates.length - 1].id;
   }
   return scrubbed;
 }

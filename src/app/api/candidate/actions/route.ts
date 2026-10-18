@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAccount } from "@/lib/bts/checklistAuth";
 import { logAudit } from "@/lib/bts/audit";
+import { originFor } from "@/lib/bts/origin";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { LINK_EXPIRY_DAYS } from "@/lib/bts/constants";
@@ -18,10 +19,10 @@ function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
 }
 
+// Delegates to the shared helper — APP_ORIGIN wins when configured; raw
+// client headers are only a fallback (SEC: forged Host poisons emailed links).
 function baseUrl(req: NextRequest): string {
-  const host = req.headers.get("host") ?? "localhost:3000";
-  const proto = req.headers.get("x-forwarded-proto") ?? "http";
-  return `${proto}://${host}`;
+  return originFor(req);
 }
 
 interface ActionPayload {
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest) {
     const link = `${baseUrl(req)}/?r=${raw}`;
     const bodyText = inviteBody(candidate.agency.name, candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
-    await sendTemplatedEmail("reference_invite", created.refEmail, {
+    const sent = await sendTemplatedEmail("reference_invite", created.refEmail, {
       agencyName: candidate.agency.name,
       candidateName: candidate.fullName,
       refName: created.refName,
@@ -106,7 +107,10 @@ export async function POST(req: NextRequest) {
       expiryDays: LINK_EXPIRY_DAYS,
     }, { requestId: created.id });
     await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "REFERENCE_ADDED", entity: "reference_request", entityId: created.id, detail: { ref: created.refEmail }, ip: clientIp(req) });
-    await creditSpend(candidate.agencyId, `Reference request — ${candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", candidate.id);
+    // Billing fairness: no spend when the provider failed outright.
+    if (sent && sent.status !== "FAILED") {
+      await creditSpend(candidate.agencyId, `Reference request — ${candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", candidate.id);
+    }
     return NextResponse.json({ ok: true, message: `Request sent to ${created.refName}` });
   }
 
@@ -132,7 +136,20 @@ export async function POST(req: NextRequest) {
   const outbound = await guardOutbound(agency.id);
   if (!outbound.ok) return NextResponse.json({ error: outbound.error }, { status: outbound.status });
 
+  const OPEN_STATUSES = ["SENT", "OPENED", "IN_PROGRESS"];
+  const isTerminal = (st: string) => st === "COMPLETED" || st === "FLAGGED" || st === "EXPIRED";
+
   if (body.action === "nudge") {
+    // Status guard: a nudge re-sends the referee link — pointless (and a
+    // confusing email) for an already-signed, flagged, or expired request.
+    if (!OPEN_STATUSES.includes(request.status)) {
+      return NextResponse.json({ error: "This request is no longer active — a reminder isn't needed." }, { status: 409 });
+    }
+    // Expiry guard: don't email a link that is already dead.
+    if (request.expiresAt && request.expiresAt <= new Date()) {
+      await db.referenceRequest.update({ where: { id: request.id }, data: { status: "EXPIRED" } });
+      return NextResponse.json({ error: "This reference link has expired — use Swap to request a fresh one." }, { status: 409 });
+    }
     // Cooldown: at most one candidate-initiated reminder per 12h window.
     const last = request.lastReminderAt ? new Date(request.lastReminderAt).getTime() : 0;
     if (last && Date.now() - last < NUDGE_COOLDOWN_HOURS * 3600 * 1000) {
@@ -170,6 +187,15 @@ export async function POST(req: NextRequest) {
     if (!repl?.refName || !repl?.refEmail || !repl?.refTitle || !repl?.facilityName) {
       return NextResponse.json({ error: "Replacement reference needs name, title, email and facility" }, { status: 400 });
     }
+    // Guard: a signed (or flagged) report is the candidate's deliverable —
+    // retiring it via swap would silently destroy a completed reference.
+    if (isTerminal(request.status) && request.status !== "EXPIRED") {
+      return NextResponse.json({ error: "This reference was already completed — it can't be swapped." }, { status: 409 });
+    }
+    // Duplicate guard (same rule add_reference enforces): don't email a
+    // second open request to a referee who already has one.
+    const dup = await db.referenceRequest.findFirst({ where: { candidateId: request.candidateId, refEmail: repl.refEmail.toLowerCase().trim(), status: { notIn: ["EXPIRED"] }, id: { not: request.id } } });
+    if (dup) return NextResponse.json({ error: `${dup.refName} already has an open request` }, { status: 409 });
     const old = await db.referenceRequest.update({ where: { id: request.id }, data: { status: "EXPIRED" } });
     // D4b: digest + envelope at rest; raw only in memory for the invite email.
     const raw = newToken();
@@ -195,7 +221,7 @@ export async function POST(req: NextRequest) {
     const link = `${baseUrl(req)}/?r=${raw}`;
     const bodyText = inviteBody(agency.name, request.candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: created.refPhone || created.refEmail, body: bodyText, requestId: created.id });
-    await sendTemplatedEmail("reference_invite", created.refEmail, {
+    const inviteSent = await sendTemplatedEmail("reference_invite", created.refEmail, {
       agencyName: agency.name,
       candidateName: request.candidate.fullName,
       refName: created.refName,
@@ -209,7 +235,10 @@ export async function POST(req: NextRequest) {
     // SEC-17: oldId keeps the audit trail correlatable; the old referee's
     // email stays only in the access-controlled request row, not in logs.
     await logAudit({ actorType: "CANDIDATE", actorId: request.candidateId, action: "REFERENCE_SWAPPED", entity: "reference_request", entityId: created.id, detail: { oldId: old.id }, ip: clientIp(req) });
-    await creditSpend(agency.id, `Reference swap — ${request.candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", request.candidateId);
+    // Billing fairness: no spend when the provider failed outright.
+    if (inviteSent && inviteSent.status !== "FAILED") {
+      await creditSpend(agency.id, `Reference swap — ${request.candidate.fullName} → ${created.refName}`, 1, "CANDIDATE", request.candidateId);
+    }
     return NextResponse.json({ ok: true, message: `New request sent to ${created.refName}` });
   }
 

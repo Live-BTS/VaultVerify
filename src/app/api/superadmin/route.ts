@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomInt, randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
+import { originFor } from "@/lib/bts/origin";
 import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
 import { sha256, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES, safeEqual } from "@/lib/bts/auth";
@@ -142,10 +143,10 @@ function yearsFrom(manual: number, start: Date | null): number {
   return manual;
 }
 
+// Delegates to the shared helper — APP_ORIGIN wins when configured; raw
+// client headers are only a fallback (SEC: forged Host poisons emailed links).
 function originOf(req: NextRequest): string {
-  const proto = req.headers.get("x-forwarded-proto") ?? "http";
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "localhost:3000";
-  return `${proto}://${host}`;
+  return originFor(req);
 }
 
 const tempPassword = () => randomBytes(9).toString("base64url"); // ~12 URL-safe chars
@@ -525,7 +526,10 @@ export async function POST(req: NextRequest) {
           });
           if (!r) return NextResponse.json({ ok: false, error: "Recruiter not found" }, { status: 404 });
           await logAudit({ actorType: "SYSTEM", actorId: auditActor, action: "IMPERSONATION_VIEWED", entity: "recruiterAccount", entityId: r.id, detail: { email: r.email } });
-          const invites = await db.checklistInvite.findMany({ where: { recruiterName: r.name }, orderBy: { createdAt: "desc" }, take: 25 });
+          const invites = await db.checklistInvite.findMany({
+            where: { OR: [{ recruiterAccountId: r.id }, { recruiterAccountId: null, recruiterName: r.name }] },
+            orderBy: { createdAt: "desc" }, take: 25,
+          });
           return NextResponse.json({
             ok: true,
             view: {
@@ -760,7 +764,10 @@ export async function POST(req: NextRequest) {
       }
 
       case "toggle": {
-        const t = await db.skillTemplate.update({ where: { id: body.id }, data: { active: !!body.active } });
+        const tid = String(body.id ?? "");
+        const existing = await db.skillTemplate.findUnique({ where: { id: tid } });
+        if (!existing) return NextResponse.json({ ok: false, error: "Template not found" }, { status: 404 });
+        const t = await db.skillTemplate.update({ where: { id: tid }, data: { active: !!body.active } });
         return NextResponse.json({ ok: true, template: t });
       }
 
@@ -806,7 +813,11 @@ export async function POST(req: NextRequest) {
 
       case "deleteSet": {
         const del = await db.skillTemplate.deleteMany({
-          where: { profession: body.profession, jobTitle: body.jobTitle, specialty: body.specialty },
+          where: {
+            profession: String(body.profession ?? ""),
+            jobTitle: String(body.jobTitle ?? ""),
+            specialty: String(body.specialty ?? ""),
+          },
         });
         await logAudit({
           actorType: "RECRUITER",
@@ -1089,8 +1100,11 @@ export async function POST(req: NextRequest) {
     } else if (/P2021|P2022|does not exist|Unknown argument/i.test(flat)) {
       hint = " The deployment's Prisma client is out of date with the schema — the build must run `prisma generate`; then redeploy.";
     }
+    // SEC: the raw detail (DB host, query text) must not reach the client —
+    // this catch-all is reachable pre-auth via request_otp on a DB failure.
+    // The full exception is already in the server log above.
     return NextResponse.json(
-      { ok: false, error: `Superadmin request failed — ${name}: ${detail || "unknown error"}.${hint}` },
+      { ok: false, error: `Superadmin request failed (${name}).${hint}` },
       { status: 500 }
     );
   }

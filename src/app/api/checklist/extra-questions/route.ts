@@ -7,7 +7,7 @@ import { DEFAULT_EXTRA_QUESTIONS } from "@/lib/bts/checklistShared";
 // Auth: signed-in candidate. Idempotently seeds the PDF's default question set once,
 // then returns the active set (global rows + any rows pinned to the candidate's specialty).
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const account = await getAccount();
     if (!account) return NextResponse.json({ ok: false, error: "Sign in first" }, { status: 401 });
@@ -20,7 +20,12 @@ export async function GET(_req: NextRequest) {
       });
     }
 
-    const spec = account.specialty ?? "";
+    // Filter by the specialty of the checklist BEING FILLED, not the
+    // account's profile specialty — completion validation pins questions to
+    // the fill spec, so that is the set the fill form must render. The
+    // account specialty remains the fallback for legacy / profile flows.
+    const fillSpec = (req.nextUrl.searchParams.get("spec") ?? "").trim();
+    const spec = fillSpec || account.specialty || "";
     const questions = await db.checklistExtraQuestion.findMany({
       where: { active: true, OR: [{ specialty: "" }, ...(spec ? [{ specialty: spec }] : [])] },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],

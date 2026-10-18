@@ -126,7 +126,7 @@ export async function GET(req: NextRequest) {
     let completion: ChecklistCompletion | null = null;
     let accessClause = "Access was granted through a VaultVerify share link; sharing rules (one-time or duration) are logged by platform.";
 
-    const shareToken = sp.get("share");
+    const shareToken = sp.get("share")?.trim() ?? "";
     const completionId = sp.get("completion");
     const inviteId = sp.get("invite");
 
@@ -160,6 +160,10 @@ export async function GET(req: NextRequest) {
         });
         if (claimed.count === 1) {
           await logAudit({ actorType: "RECRUITER", actorId: "share-link", action: "SHARE_LINK_VIEWED", entity: "checklistShareLink", entityId: link.id, detail: { oneTime: true, via: "pdf" } });
+        } else {
+          // A concurrent request won the claim between our read and this
+          // conditional UPDATE — the loser must not receive the report.
+          return new NextResponse("This one-time link was already viewed", { status: 403 });
         }
       }
       completion = link.completion;

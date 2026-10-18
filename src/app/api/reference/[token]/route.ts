@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
+import { originFor } from "@/lib/bts/origin";
 import { runFraudChecks } from "@/lib/bts/fraud";
 import { tokenLookups, isTokenHashed, sha256Hex, deriveCallbackCode, newToken } from "@/lib/bts/tokens";
 import { encryptRefToken, rawTokenFor } from "@/lib/bts/refTokenCrypto";
@@ -62,8 +63,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     await logAudit({ actorType: "SYSTEM", action: "LINK_EXPIRED", entity: "reference_request", entityId: request.id });
   }
 
-  // mark opened
-  if (request.status === "SENT") {
+  // mark opened — never for a request we just expired above (the local copy
+  // of status is stale; re-checking `expired` prevents resurrecting dead rows
+  // as OPENED, which re-added them to active dashboard filters and sweeps).
+  if (request.status === "SENT" && !expired) {
     await db.referenceRequest.update({ where: { id: request.id }, data: { status: "OPENED", openedAt: new Date() } });
     await logAudit({ actorType: "REFERENCE", action: "FORM_OPENED", entity: "reference_request", entityId: request.id, ip: clientIp(req), detail: { ref: request.refEmail } });
     request.status = "OPENED";
@@ -79,8 +82,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const responseForReferee = request.response
     ? { ...request.response, signerIp: "", signerUserAgent: "" }
     : null;
+  // SEC-01(a): projected fields only — the full row carries console-only
+  // billing and trust state that must never reach an anonymous caller.
+  const agencyForReferee = {
+    name: candidate.agency.name,
+    slug: candidate.agency.slug,
+    logoText: candidate.agency.logoText,
+    tagline: candidate.agency.tagline,
+    primaryColor: candidate.agency.primaryColor,
+    accentColor: candidate.agency.accentColor,
+  };
   return NextResponse.json({
-    agency: candidate.agency,
+    agency: agencyForReferee,
     candidate: {
       fullName: candidate.fullName,
       role: candidate.role,
@@ -349,9 +362,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       // powers (CH-09 gates already hold).
       try {
         const verificationToken = await createVerification("CANDIDATE", refEmail);
-        const proto = req.headers.get("x-forwarded-proto") ?? "http";
-        const host = req.headers.get("host") ?? "localhost:3000";
-        await sendVerificationEmail("CANDIDATE", refEmail, verificationToken, `${proto}://${host}`);
+        await sendVerificationEmail("CANDIDATE", refEmail, verificationToken, originFor(req));
         verificationEmailSent = true;
       } catch {
         verificationEmailSent = false; // reference stays saved; they can request the link from the portal
@@ -377,7 +388,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     ip,
   });
 
-  return NextResponse.json({ ok: true, status: finalStatus, responseId: response.id, flags, accountCreated, verificationEmailSent });
+  // Screening metadata stays server-side (admin console). The referee client
+  // renders nothing from this list; high-severity outcomes already surface
+  // through `status`.
+  return NextResponse.json({ ok: true, status: finalStatus, responseId: response.id, flags: [], accountCreated, verificationEmailSent });
   } catch (e) {
     // Concurrent double-submit hits the requestId @unique guard (P2002) — return
     // a clean 409 instead of an unstyled 500. Data integrity is preserved.

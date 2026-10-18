@@ -109,13 +109,15 @@ export function ChecklistFill({ spec, sets, onDone, onExit }: {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/checklist/extra-questions");
+        // Ask for the fill spec's specialty — validation on submit is keyed
+        // to this checklist's specialty, not the profile's.
+        const res = await fetch(`/api/checklist/extra-questions?spec=${encodeURIComponent(effSpec.specialty || "")}`);
         const d = await res.json();
         if (!cancelled && d.ok) setExtras(d.questions ?? []);
       } catch { /* non-fatal — the section hides if the fetch fails */ }
     })();
     return () => { cancelled = true; };
-  }, [stage]);
+  }, [stage, effSpec.specialty]);
 
   // ── Attestation state ──
   const [attAgreed, setAttAgreed] = useState(false);

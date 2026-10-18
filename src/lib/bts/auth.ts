@@ -157,7 +157,7 @@ export async function getRecruiterSessionAccount() {
   const account = await db.recruiterAccount.findUnique({ where: { id: session.accountId } });
   // Defense-in-depth: suspended recruiters are dead even if a session row survived.
   if (!account || account.status === "SUSPENDED") {
-    await db.recruiterSession.deleteMany({ where: { id } }).catch(() => undefined);
+    await db.recruiterSession.deleteMany({ where: { id: sha256(id) } }).catch(() => undefined); // rows are keyed by the hashed cookie, not the raw value
     try { jar.delete(RECRUITER_COOKIE); } catch { /* read-only context */ }
     return null;
   }

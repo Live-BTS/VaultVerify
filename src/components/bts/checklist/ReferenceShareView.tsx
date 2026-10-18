@@ -33,7 +33,7 @@ interface ReportPayload {
   };
 }
 
-type FailReason = "invalid" | "used" | "expired";
+type FailReason = "invalid" | "used" | "expired" | "reserved";
 
 const fmt = (d: string | Date | null) =>
   d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
@@ -64,11 +64,19 @@ export function ReferenceShareView({ token, onExit }: { token: string; onExit: (
   }
 
   if (state !== "ok" || !payload) {
-    const meta = {
+    // `reserved` is a first-class server outcome (CH-06: a candidate can bind
+    // a reference share to a specific recruiter) — without an entry here the
+    // meta lookup returned undefined and the shell white-screened. The final
+    // ?? fallback keeps ANY future server reason from crashing this screen.
+    const meta = ({
       invalid: { title: "This link isn't valid", body: "The share link was revoked or never existed. Ask the candidate for a fresh one." },
       used: { title: "This one-time link was already viewed", body: "One-time links open exactly once. Ask the candidate to share a new link." },
       expired: { title: "This link has expired", body: "The access window closed. Ask the candidate to extend it or send a fresh link." },
-    }[state as FailReason];
+      reserved: { title: "This link is reserved for a specific recruiter", body: "The candidate shared this reference with a named recruiter. Sign in to VaultVerify with that account to open it." },
+    } as Record<FailReason, { title: string; body: string }>)[state as FailReason] ?? {
+      title: "This link isn't valid",
+      body: "The share link can't be opened right now. Ask the candidate for a fresh one.",
+    };
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5] px-4">
         <div className="w-full max-w-md rounded-2xl border border-vault-border bg-white vv-card-shadow p-8 text-center">

@@ -66,8 +66,13 @@ export function AuthPanel({
     setBusy(true);
     try {
       const { data } = await call("resend", { email: pendingEmail });
-      setSentTo(data.sentTo ?? sentTo);
-      toast({ title: "Verification email sent", description: `Check ${data.sentTo ?? sentTo} — the link expires in 24 hours.` });
+      if (data.ok === false) {
+        // Throttled or failed server-side — never claim success.
+        toast({ title: data.error ?? "Could not resend — try again in a minute.", variant: "destructive" });
+      } else {
+        setSentTo(data.sentTo ?? sentTo);
+        toast({ title: "Verification email sent", description: `Check ${data.sentTo ?? sentTo} — the link expires in 24 hours.` });
+      }
     } catch {
       toast({ title: "Could not resend — try again in a minute.", variant: "destructive" });
     } finally {

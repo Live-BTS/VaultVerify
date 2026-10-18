@@ -60,7 +60,7 @@ export async function getAccount() {
   // Defense-in-depth: a suspended account is dead everywhere, even if a live
   // session row survived (the console kills sessions, but never trust that).
   if (!account || account.status === "SUSPENDED") {
-    await db.checklistSession.deleteMany({ where: { id } }).catch(() => undefined);
+    await db.checklistSession.deleteMany({ where: { id: sha256(id) } }).catch(() => undefined); // rows are keyed by the hashed cookie, not the raw value
     try { jar.delete(COOKIE); } catch { /* read-only context */ }
     return null;
   }

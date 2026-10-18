@@ -136,9 +136,13 @@ export function CandidateWizard({ agency, onDone, onBack, initial }: { agency: A
                   <p className="text-sm font-semibold text-slate-900">{created.requests.length > 1 ? `Reference ${i + 1}: ` : ""}{r.refName}</p>
                   <p className="mt-1 break-all text-xs text-slate-500">Secure link: {r.refLink}</p>
                   <p className="mt-0.5 text-xs text-slate-500">Phone callback code: <span className="font-mono font-semibold text-teal-700">{r.callbackCode}</span></p>
-                  <Button asChild variant="outline" size="sm" className="mt-3">
-                    <a href={`/?r=${r.refLink.split("r=")[1]}`}>Open reference form (demo)</a>
-                  </Button>
+                  {r.refLink.includes("r=") ? (
+                    <Button asChild variant="outline" size="sm" className="mt-3">
+                      <a href={`/?r=${r.refLink.split("r=")[1]}`}>Open reference form (demo)</a>
+                    </Button>
+                  ) : (
+                    <p className="mt-3 text-xs text-slate-400">The reference form link was emailed to the referee.</p>
+                  )}
                 </div>
               ))}
             </div>

@@ -732,7 +732,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
                   className="bg-verify-green text-vault-dark hover:bg-verify-green/90">Complete now</Button>
               </div>
             ))}
-            {requests.map((r) => (
+            {requests.filter((r) => !approvedRequests.some((a) => a.id === r.id)).map((r) => (
               <div key={r.id + r.status} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-vault-border bg-white vv-card-shadow p-5">
                 <div>
                   <p className="text-sm font-semibold text-jade-ink">{specialtyLabel(r.specialty)} · {r.jobTitle} <span className="ml-1 text-xs font-normal text-jade-muted">{r.profession}</span></p>

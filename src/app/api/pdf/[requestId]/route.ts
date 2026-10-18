@@ -20,7 +20,7 @@ import { QUESTIONS } from "@/lib/bts/questions";
 // Anything else returns 401: requestIds alone must never grant access.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ requestId: string }> }) {
   const { requestId } = await params;
-  const shareToken = req.nextUrl.searchParams.get("share") ?? "";
+  const shareToken = req.nextUrl.searchParams.get("share")?.trim() ?? "";
 
   const request = await db.referenceRequest.findUnique({
     where: { id: requestId },
@@ -64,6 +64,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ requ
       });
       if (claimed.count === 1) {
         await logAudit({ actorType: "RECRUITER", actorId: "ref-share-link", action: "REFERENCE_SHARE_VIEWED", entity: "referenceShareLink", entityId: link.id, detail: { oneTime: true, via: "pdf" } });
+      } else {
+        // A concurrent request won the claim between our read and this
+        // conditional UPDATE — the loser must not receive the report.
+        return NextResponse.json({ error: "This one-time link was already viewed" }, { status: 403 });
       }
     }
     actor = `share:${link.id}`;

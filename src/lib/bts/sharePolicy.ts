@@ -6,7 +6,7 @@ import { CHECKLIST_VALIDITY_DAYS } from "@/lib/bts/constants";
 // order: revoked → one-time-used → link-expired → report-expired.
 // The 30-day report validity is server-enforced here, not just displayed.
 
-export type ShareRejectReason = "invalid" | "used" | "expired" | "checklist_expired";
+export type ShareRejectReason = "invalid" | "used" | "expired" | "checklist_expired" | "reserved";
 
 export interface ShareDecision {
   ok: boolean;
@@ -38,7 +38,10 @@ export function evaluateChecklistShare(
 ): ShareDecision {
   if (!link || !completion || link.revoked) return { ok: false, status: 404, reason: "invalid" };
   if (link.accessType === "ONE_TIME" && link.viewedAt) return { ok: false, status: 403, reason: "used" };
-  if (link.expiresAt && link.expiresAt < now) return { ok: false, status: 403, reason: "expired" };
+  // Boundary matches isChecklistExpired: a link is dead AT its expiresAt
+  // (previously `<` here vs `<=` for the report — the same instant reported
+  // "valid link, expired report").
+  if (link.expiresAt && link.expiresAt <= now) return { ok: false, status: 403, reason: "expired" };
   if (isChecklistExpired(completion, now)) return { ok: false, status: 403, reason: "checklist_expired" };
   return { ok: true, status: 200 };
 }

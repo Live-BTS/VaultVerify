@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { AgencyLogo, StatusBadge, SkillBadge, Spinner } from "./brand";
-import { specialtyLabel, PROFICIENCY_META, candidateStatusText } from "@/lib/bts/constants";
+import { specialtyLabel, PROFICIENCY_META, candidateStatusText, SWAP_PROMPT_DAY } from "@/lib/bts/constants";
 import { cn } from "@/lib/utils";
 import { LogIn, Copy, ExternalLink, BellRing, RefreshCcw, Clock3, ShieldCheck } from "lucide-react";
 
@@ -217,7 +217,7 @@ export function CandidateDashboard({ initialEmail, onSignOut, onOpenReference }:
                     </p>
                   )}
 
-                  {!done && open >= 10 && (
+                  {!done && open >= SWAP_PROMPT_DAY && (
                     <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                       It&apos;s been {open} days. Consider nudging {r.refName.split(" ")[0]} or swapping in a different reference.
                     </div>
@@ -242,9 +242,13 @@ export function CandidateDashboard({ initialEmail, onSignOut, onOpenReference }:
                     >
                       <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy link
                     </Button>
+                    {r.refLink.includes("r=") ? (
                     <Button size="sm" variant="ghost" className="text-teal-700" onClick={() => onOpenReference(r.refLink.split("r=")[1])}>
                       <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Open form (demo as reference)
                     </Button>
+                    ) : (
+                      <span className="text-xs text-slate-400">Link unavailable — the referee received it by email.</span>
+                    )}
                     {!done && (
                       <span className="ml-auto rounded-md bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-600" title="Reference uses this over the phone for identity verification">
                         Callback code: {r.callbackCode}

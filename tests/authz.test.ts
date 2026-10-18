@@ -182,9 +182,17 @@ describe("POST /api/candidate/actions — session-gated + ownership (C2)", () =>
     expect(res.status).toBe(403);
   });
 
+  it("409 nudging a COMPLETED request — nudges only apply to active requests", async () => {
+    SESSION_COOKIE = sessionId;
+    const res = await candidateActionsPost(jsonReq("/api/candidate/actions", { action: "nudge", requestId }));
+    expect(res.status).toBe(409);
+  });
+
   it("429 when the 12h nudge cooldown is active (no outbound send)", async () => {
     SESSION_COOKIE = sessionId;
-    await db.referenceRequest.update({ where: { id: requestId }, data: { lastReminderAt: new Date() } });
+    // The nudge status guard requires an active request; put the seeded row
+    // back into SENT for this cooldown scenario.
+    await db.referenceRequest.update({ where: { id: requestId }, data: { status: "SENT", expiresAt: new Date(Date.now() + 86400_000), lastReminderAt: new Date() } });
     const res = await candidateActionsPost(jsonReq("/api/candidate/actions", { action: "nudge", requestId }));
     expect(res.status).toBe(429);
   });

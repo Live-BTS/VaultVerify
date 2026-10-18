@@ -4,6 +4,7 @@ import { getAccount } from "@/lib/bts/checklistAuth";
 import { guardOutbound } from "@/lib/bts/guard";
 import { creditSpend } from "@/lib/bts/credits";
 import { logAudit } from "@/lib/bts/audit";
+import { originFor } from "@/lib/bts/origin";
 import { sendNotification, inviteBody } from "@/lib/bts/notifications";
 import { sendTemplatedEmail } from "@/lib/bts/emailTemplates";
 import { LINK_EXPIRY_DAYS, specialtyLabel } from "@/lib/bts/constants";
@@ -18,10 +19,10 @@ function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sandbox";
 }
 
+// Delegates to the shared helper — APP_ORIGIN wins when configured; raw
+// client headers are only a fallback (SEC: forged Host poisons emailed links).
 function baseUrl(req: NextRequest): string {
-  const host = req.headers.get("host") ?? "localhost:3000";
-  const proto = req.headers.get("x-forwarded-proto") ?? "http";
-  return `${proto}://${host}`;
+  return originFor(req);
 }
 
 // ── GET /api/candidate?email=... — candidate dashboard data (SESSION REQUIRED) ──
@@ -108,8 +109,20 @@ export async function POST(req: NextRequest) {
   }
   // References are requested ONE AT A TIME — a single referee is enough to
   // onboard; candidates add as many as they like from the portal afterward.
-  if (!body.references || body.references.length < 1) {
+  // Type guards: non-array payloads previously crashed .map with a 500 on
+  // this unauthenticated funnel endpoint.
+  if (!Array.isArray(body.references) || body.references.length < 1) {
     return NextResponse.json({ error: "At least 1 reference is required" }, { status: 400 });
+  }
+  if (body.skills !== undefined && !Array.isArray(body.skills)) {
+    return NextResponse.json({ error: "Invalid skills payload" }, { status: 400 });
+  }
+  const emailOk = (v: unknown) => typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+  if (!emailOk(body.email)) {
+    return NextResponse.json({ error: "A valid email is required" }, { status: 400 });
+  }
+  if (body.references.some((r) => !r || typeof r !== "object" || !emailOk((r as { refEmail?: unknown }).refEmail))) {
+    return NextResponse.json({ error: "Each reference needs a valid referee email" }, { status: 400 });
   }
   // NOTE: the skills checklist is a SEPARATE, self-reported feature — it is NOT
   // required for (or verified by) reference verification. Optional self-reported
@@ -198,17 +211,19 @@ export async function POST(req: NextRequest) {
   // invite notifications: SMS first, email fallback per reference.
   // The raw token is rebuilt server-side from the stored envelope
   // (refLinkFor → decryptRefToken). The email IS the delivery channel.
+  let delivered = 0; // emails that left with status SENT/SIMULATED
   for (const r of candidate.requests) {
     const link = refLinkFor(r, baseUrl(req)) ?? "";
     const bodyText = inviteBody(agency.name, candidate.fullName, link, LINK_EXPIRY_DAYS);
     await sendNotification({ channel: "SMS", kind: "INVITE", to: r.refPhone || r.refEmail, body: bodyText, requestId: r.id });
-    await sendTemplatedEmail("reference_invite", r.refEmail, {
+    const sent = await sendTemplatedEmail("reference_invite", r.refEmail, {
       agencyName: agency.name,
       candidateName: candidate.fullName,
       refName: r.refName,
       link,
       expiryDays: LINK_EXPIRY_DAYS,
     }, { requestId: r.id });
+    if (sent && sent.status !== "FAILED") delivered++;
     // SEC-17: the audit detail carries no referee email — the event links to
     // the request row (entityId), which holds contact data behind access
     // control; duplicating it here expanded the log-breach blast radius.
@@ -226,7 +241,10 @@ export async function POST(req: NextRequest) {
   });
   await logAudit({ actorType: "CANDIDATE", actorId: candidate.id, action: "PROFILE_CREATED", entity: "candidate", entityId: candidate.id, detail: { specialty: specialtyLabel(body.specialty), refs: candidate.requests.length }, ip: clientIp(req) });
   // Meter: 1 credit per outbound verification (one batch = one request here).
-  await creditSpend(agency.id, `Reference request — ${candidate.fullName}`, 1, "CANDIDATE", candidate.id);
+  // Billing fairness: a provider outage (all FAILED) costs the company nothing.
+  if (delivered > 0) {
+    await creditSpend(agency.id, `Reference request — ${candidate.fullName}`, 1, "CANDIDATE", candidate.id);
+  }
 
   // D4b: creation response — the rebuilt link + callback code (raw delivered
   // here and in the invite email), stored digest/envelope stripped.

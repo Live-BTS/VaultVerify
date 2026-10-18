@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { specialtyLabel } from "@/lib/bts/checklistShared";
 import { createSession, destroySession, getAccount, hashPassword, verifyPassword } from "@/lib/bts/checklistAuth";
 import { createVerification, sendVerificationEmail, maskEmail, dbConfigured } from "@/lib/bts/auth";
 import { assertPlatformWritable } from "@/lib/bts/platform";
 import { logAudit } from "@/lib/bts/audit";
+import { originFor } from "@/lib/bts/origin";
 import { isTokenHashed } from "@/lib/bts/tokens";
-import { resendThrottleSecondsRemaining } from "@/lib/bts/hygiene";
+import { resendThrottleSecondsRemaining, loginLockedFor } from "@/lib/bts/hygiene";
 
 // ── /api/checklist/account — candidate account for the skills checklist ──
 // actions: signup | login | logout | me | profile | resend
@@ -15,10 +17,11 @@ import { resendThrottleSecondsRemaining } from "@/lib/bts/hygiene";
 
 const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
+// Delegates to the shared helper: APP_ORIGIN wins when configured, headers
+// are only a fallback (SEC: forged Host made emailed verification links point
+// at an attacker origin).
 function originOf(req: NextRequest): string {
-  const proto = req.headers.get("x-forwarded-proto") ?? "http";
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "localhost:3000";
-  return `${proto}://${host}`;
+  return originFor(req);
 }
 
 // Derived years of experience: calendar start dates win over manual entry,
@@ -118,6 +121,14 @@ export async function POST(req: NextRequest) {
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
       const account = await db.checklistAccount.findUnique({ where: { email } });
+      // Phase D lockout — this surface previously incremented failedLogins but
+      // never enforced the lock, leaving an unlimited brute-force path that
+      // /api/auth already blocks. Rejected BEFORE the password check: no
+      // scrypt work, same neutral message shape.
+      if (account && loginLockedFor(account) > 0) {
+        await logAudit({ actorType: "SYSTEM", actorId: email, action: "SIGNIN_LOCKED_OUT", entity: "checklistAccount", entityId: account.id, ip: req.headers.get("x-forwarded-for")?.split(",")[0] ?? "" });
+        return NextResponse.json({ ok: false, error: "Too many failed attempts — try again in a few minutes." }, { status: 429 });
+      }
       if (!account || !verifyPassword(password, account.passwordHash)) {
         if (account) {
           await db.checklistAccount.update({ where: { id: account.id }, data: { failedLogins: { increment: 1 }, lastFailedLogin: new Date() } });
@@ -243,7 +254,7 @@ export async function POST(req: NextRequest) {
         },
         invites: invites.map((i) => ({
           id: i.id, recruiterName: i.recruiterName, facilityName: i.facilityName, agencyName: i.agencyName,
-          profession: i.profession, jobTitle: i.jobTitle, specialty: i.specialty,
+          profession: i.profession, jobTitle: i.jobTitle, specialty: i.specialty, specialtyLabel: specialtyLabel(i.specialty),
           status: i.status, createdAt: i.createdAt, completionId: i.completionId, message: i.message,
         })),
         requests: requests.map((r) => ({

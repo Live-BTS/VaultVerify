@@ -24,33 +24,16 @@ interface ResolveOk {
     yearsExperience: number; completedAt: string; expiresAt: string;
   };
 }
-interface RefResolveOk {
-  ok: true;
-  link: ResolveOk["link"];
-  reference: {
-    candidateName: string; candidateTitle: string;
-    refName: string; refTitle: string; facility: string;
-    relationship: string; yearsKnown: number | null; wouldRehire: string;
-    overallRating: number | null; signatureName: string; completedAt: string | null;
-    ratings: Record<string, number>; strengths: string; comments: string;
-  };
-}
 type ResolveFail = { ok: false; reason: "invalid" | "used" | "expired" | "checklist_expired" };
 
 type Answer = SkillAnswer;
 
 const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-const REHIRE_LABEL: Record<string, string> = {
-  YES: "Would rehire — without hesitation",
-  WITH_RESERVATION: "Would rehire — with reservation",
-  NO: "Would not rehire",
-};
 
 export function ShareView({ token, onExit }: { token: string; onExit: () => void }) {
-  const [state, setState] = useState<"loading" | "ok" | "ref" | ResolveFail["reason"]>("loading");
+  const [state, setState] = useState<"loading" | "ok" | ResolveFail["reason"]>("loading");
   const [payload, setPayload] = useState<ResolveOk | null>(null);
-  const [refPayload, setRefPayload] = useState<RefResolveOk | null>(null);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [additional, setAdditional] = useState<AdditionalAnswer[]>([]);
   const [attestation, setAttestation] = useState<AttestationData | null>(null);
@@ -82,15 +65,8 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
         }
         const firstReason = (d as ResolveFail).reason ?? "invalid";
         if (firstReason !== "invalid") { setState(firstReason); return; }
-        // not a checklist link — try a reference share
-        const rres = await fetch("/api/checklist/share", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "resolveRef", token }),
-        });
-        const rd = (await rres.json()) as RefResolveOk | ResolveFail;
-        if (cancelled) return;
-        if (rd.ok) { setRefPayload(rd); setState("ref"); return; }
-        setState((rd as ResolveFail).reason ?? "invalid");
+        // Reference share tokens resolve on /?rs= (ReferenceShareView) — a
+        // reference token pasted into /?s= falls through to "Link not found".
       } catch { if (!cancelled) setState("invalid"); }
     })();
     return () => { cancelled = true; };
@@ -101,91 +77,6 @@ export function ShareView({ token, onExit }: { token: string; onExit: () => void
 
   if (state === "loading") {
     return <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]"><Spinner label="Opening the shared item…" /></div>;
-  }
-
-  // ── reference share mode ──
-  if (state === "ref" && refPayload) {
-    const { link, reference: rf } = refPayload;
-    return (
-      <div className="vv-page min-h-screen">
-        <header className="sticky top-0 z-40 border-b border-vault-border/70 bg-white/85 backdrop-blur-xl">
-          <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-4 sm:px-6">
-            <div className="flex items-center gap-3">
-              <VaultMark size={30} />
-              <div className="leading-tight">
-                <p className="text-sm font-semibold text-jade-ink">Vault<span className="text-verify-ink">Verify</span> <span className="ml-1 rounded bg-verify-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-verify-ink">Shared reference</span></p>
-                <p className="text-[11px] text-jade-muted">Professional reference · collected & e-signed by the referee</p>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main className="mx-auto max-w-3xl px-4 pb-16 pt-8 sm:px-6">
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className={cn("flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4",
-              link.accessType === "ONE_TIME" ? "border-amber-400/40 bg-amber-400/10" : "border-verify-green/30 bg-verify-green/10")}>
-            <div className="flex items-center gap-3">
-              {link.accessType === "ONE_TIME" ? <Eye className="h-5 w-5 text-amber-600" /> : <Timer className="h-5 w-5 text-verify-ink" />}
-              <div>
-                <p className="text-sm font-semibold text-jade-ink">
-                  {link.accessType === "ONE_TIME" ? "One-time access — this view is the only one" : `${link.durationDays}-day access`}
-                </p>
-                <p className="text-xs text-jade-muted">
-                  {link.accessType === "ONE_TIME"
-                    ? (link.justConsumed ? "This link is now burned — screenshot or print this page." : "Opening this page consumes the link.")
-                    : `Valid until ${link.expiresAt ? fmt(link.expiresAt) : "—"}`}
-                  {link.label ? ` · ${link.label}` : ""}
-                </p>
-              </div>
-            </div>
-          </motion.div>
-
-          <div className="mt-6 rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
-            <p className="text-xs font-bold uppercase tracking-widest text-verify-ink/90">Candidate</p>
-            <p className="mt-1 text-xl font-semibold text-jade-ink">{rf.candidateName}</p>
-            <p className="mt-0.5 text-sm text-jade-muted">{rf.candidateTitle}</p>
-            <div className="mt-4 border-t border-vault-border/60 pt-4">
-              <p className="text-xs font-bold uppercase tracking-widest text-verify-ink/90">Referee</p>
-              <p className="mt-1 text-lg font-semibold text-jade-ink">{rf.refName} <span className="text-sm font-normal text-jade-muted">· {rf.refTitle}</span></p>
-              <p className="mt-0.5 text-sm text-jade-muted">
-                {rf.facility ? `${rf.facility} · ` : ""}Relationship: {rf.relationship || "—"} · worked together {rf.yearsKnown ?? "—"} yr(s)
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs font-bold uppercase tracking-widest text-verify-ink/90">Competency ratings</p>
-              {rf.overallRating != null && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-verify-green/50 bg-verify-green/10 px-3 py-1 font-mono text-xs font-bold text-verify-ink">
-                  Overall {rf.overallRating.toFixed(1)}/5
-                </span>
-              )}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {Object.entries(rf.ratings).map(([k, v]) => (
-                <span key={k} className="inline-flex items-center gap-1 rounded-full border border-vault-border bg-white px-3 py-1.5 text-xs text-jade-muted">
-                  {k} <strong className="text-jade-ink">{v}/5</strong>
-                </span>
-              ))}
-            </div>
-            <p className={cn("mt-4 rounded-xl border px-3.5 py-2.5 text-sm font-medium",
-              rf.wouldRehire === "NO" ? "border-rose-200 bg-rose-50 text-rose-700" : rf.wouldRehire === "WITH_RESERVATION" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-verify-green/40 bg-verify-green/[0.08] text-verify-ink")}>
-              {REHIRE_LABEL[rf.wouldRehire] ?? "Rehire intent not stated"}
-            </p>
-            {rf.strengths && <p className="mt-3 text-sm text-jade-muted"><span className="font-medium text-jade-ink">Strengths:</span> {rf.strengths}</p>}
-            {rf.comments && <p className="mt-1.5 text-sm text-jade-muted"><span className="font-medium text-jade-ink">Comments:</span> {rf.comments}</p>}
-            <p className="mt-4 font-mono text-[10px] uppercase tracking-wider text-jade-muted/80">
-              E-signed: {rf.signatureName || "—"}{rf.completedAt ? ` · ${fmt(rf.completedAt)}` : ""} · immutable audit trail
-            </p>
-          </div>
-
-          <p className="mt-8 flex items-center justify-center gap-2 text-[11px] text-[#8aa29c]">
-            <ShieldCheck className="h-3.5 w-3.5" /> Shared through VaultVerify — access rules and views are logged for the candidate.
-          </p>
-        </main>
-      </div>
-    );
   }
 
   if (state !== "ok" || !payload) {

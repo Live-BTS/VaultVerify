@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     if (body.action === "resolve") {
       // D4: try the SHA-256 digest first (post-cutover rows), then the raw
       // value (legacy rows). At most one row can match — the column is unique.
-      const token = String(body.token ?? "");
+      const token = String(body.token ?? "").trim();
       const link = await db.checklistShareLink.findFirst({ where: { token: { in: tokenLookups(token) } }, include: { completion: true } });
       const decision = evaluateChecklistShare(link, link?.completion);
       if (!decision.ok) {

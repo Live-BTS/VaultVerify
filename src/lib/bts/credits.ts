@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 
 // ── Credit ledger — the money layer ────────────────────────────────
 // Every outbound verification (reference request, checklist invite)
@@ -17,6 +18,12 @@ export async function creditBalance(agencyId: string): Promise<number> {
     where: { agencyId },
     _sum: { delta: true },
   });
+  return agg._sum.delta ?? 0;
+}
+
+// Sum inside an interactive transaction (shared by the atomic spend below).
+async function balanceInTx(tx: Prisma.TransactionClient, agencyId: string): Promise<number> {
+  const agg = await tx.creditLedger.aggregate({ where: { agencyId }, _sum: { delta: true } });
   return agg._sum.delta ?? 0;
 }
 
@@ -42,7 +49,9 @@ export async function assertCanVerify(agencyId: string): Promise<LedgerResult> {
 }
 
 // Spend 1 credit (or any amount) — caller MUST have passed assertCanVerify
-// first. Writes the ledger row with the running balance.
+// first. The balance read and the ledger insert run inside ONE interactive
+// transaction: concurrent spends can no longer both observe the same balance
+// and write colliding `balanceAfter` rows (ledger stays reconstructible).
 export async function creditSpend(
   agencyId: string,
   reason: string,
@@ -50,10 +59,13 @@ export async function creditSpend(
   actorType = "SYSTEM",
   actorId = "",
 ): Promise<LedgerResult> {
-  const balance = await creditBalance(agencyId);
-  const balanceAfter = balance - amount;
-  await db.creditLedger.create({
-    data: { agencyId, delta: -amount, reason, actorType, actorId, balanceAfter },
+  const balanceAfter = await db.$transaction(async (tx) => {
+    const balance = await balanceInTx(tx, agencyId);
+    const next = balance - amount;
+    await tx.creditLedger.create({
+      data: { agencyId, delta: -amount, reason, actorType, actorId, balanceAfter: next },
+    });
+    return next;
   });
   return { ok: true, balance: balanceAfter };
 }
@@ -66,8 +78,10 @@ export async function creditAdjust(
   reason: string,
   actorId = "superadmin",
 ): Promise<LedgerResult> {
-  if (!Number.isFinite(delta) || delta === 0) {
-    return { ok: false, balance: await creditBalance(agencyId), error: "Credit adjustment must be a non-zero number" };
+  // Reject fractional deltas: Math.trunc would silently write a 0-delta row
+  // into the immutable ledger while reporting success.
+  if (!Number.isFinite(delta) || Math.trunc(delta) !== delta) {
+    return { ok: false, balance: await creditBalance(agencyId), error: "Credit adjustment must be a non-zero whole number" };
   }
   const balance = await creditBalance(agencyId);
   const balanceAfter = balance + Math.trunc(delta);
