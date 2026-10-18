@@ -76,3 +76,4 @@ server.log
 /worklog.md
 /agent-ctx/
 /prompt*
+.vv-git-credentials
