@@ -195,3 +195,39 @@ reminder sweep and nudge NEVER send a link that could not be rebuilt — they
 skip and report `skippedCount` instead.
 
 ---
+
+## 8 · Git push credentials in disposable sandboxes (credential-storage workflow)
+
+The dev sandbox is disposable: every recycle wipes `~/.git-credentials` **and**
+`git config credential.helper`, which has stranded approved pushes more than
+once (the gate itself is intentional — every push needs your explicit approval
+AND a valid credential). The fix is a workflow, not a new token each time.
+
+**8.1 Durable home (owner, one time):** create ONE fine-grained PAT —
+github.com → Settings → Developer settings → Fine-grained tokens:
+Repository access = Only select repositories → `Live-BTS/VaultVerify`;
+Permissions = Contents: Read and write (Metadata read-only is automatic).
+Expiry up to 1 year. Store it in your password manager — that is its only
+durable home. Treat any token that ever sat in a recycled sandbox as
+disposable: rotating is cheap because the token is re-provisioned, never
+recreated.
+
+**8.2 Per-sandbox provisioning (whenever a recycle wiped access):**
+
+```bash
+bash scripts/setup-git-auth.sh
+```
+
+It prompts for the token with hidden input, replaces any stale `github.com`
+entry in `~/.git-credentials`, writes the file with `chmod 600`, restores
+`credential.helper=store`, and verifies with a READ-ONLY `git ls-remote`
+(it never pushes). The token is never echoed, never logged, never committed.
+
+**8.3 Rules that never change:** the token lives in your password manager and
+in `~/.git-credentials` only — never in source code, logs, chat messages, or
+committed files. If it was ever pasted into chat, rotate it immediately.
+Provisioning restores the ABILITY to push; every push still waits for your
+explicit per-delivery approval.
+
+---
+
