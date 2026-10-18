@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { AgencyLogo, StatusBadge, SkillBadge, FlagChip, RatingPips, Spinner } from "./brand";
-import { specialtyLabel, STATUS_META } from "@/lib/bts/constants";
+import { specialtyLabel } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { RecruiterChecklists } from "./checklist/RecruiterChecklists";
 import { AuthPanel } from "./AuthPanel";
@@ -523,7 +523,7 @@ export function RecruiterDashboard({ onSignOut }: { onSignOut: () => void }) {
                   <div className="rounded-lg border border-dashed p-4 text-center text-sm text-slate-500">
                     Awaiting response — currently <StatusBadge status={detail.status} /> on day {detail.daysOpen}.
                     <br />
-                    <span className="text-xs">Auto-reminders at day 2 · 5 · 9, link expires day {STATUS_META.EXPIRED ? "14" : "14"}.</span>
+                    <span className="text-xs">Auto-reminders at day 2 · 5 · 9, link expires day 14.</span>
                   </div>
                 )}
               </div>
