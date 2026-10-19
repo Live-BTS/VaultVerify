@@ -69,10 +69,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Maintenance mode pauses all account writes (superadmin bypasses).
-  const writable = await assertPlatformWritable();
-  if (!writable.ok) {
-    return NextResponse.json({ ok: false, error: writable.error ?? "Platform is in maintenance mode." }, { status: 503 });
+  // Maintenance mode pauses account writes (superadmin bypasses) — but never
+  // the read-only "me" probe and never "logout". DEEP AUDIT: a 503 on "me"
+  // made the candidate portal flash its sign-in gate while the session cookie
+  // was still live, and a 503 on "logout" would have silently kept the session
+  // row + cookie alive after the client cleared its state. Users must always
+  // be able to sign out, even mid-incident.
+  if (action !== "me" && action !== "logout") {
+    const writable = await assertPlatformWritable();
+    if (!writable.ok) {
+      return NextResponse.json({ ok: false, error: writable.error ?? "Platform is in maintenance mode." }, { status: 503 });
+    }
   }
 
   try {

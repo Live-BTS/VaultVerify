@@ -200,28 +200,42 @@ export default function Page() {
         if (window.history?.replaceState) window.history.replaceState({}, "", "/");
       } else if (!r && !s && !rs && !invite && !view) {
         // ── Signed-in users land directly in their portal ──
-        // SESSION-RESTORE (owner bug: "refresh shows the index page, then
-        // logs me in again"): for a RETURNING user (vv_last_role marker
-        // present) the landing must NOT paint while the probe runs — a
-        // branded splash covers the round trip and the portal swap is the
-        // first thing they see. First-time visitors (no marker) skip the
-        // probe entirely and get the instant landing — nothing to restore,
-        // and signing out clears the marker so post-logout refreshes are
-        // instant too.
-        const last = readLastRole();
-        if (!last) {
+        // DEEP AUDIT (owner: "index → sign-in → auto-login cycle"): the probe
+        // now runs on EVERY plain homepage load — not only when the
+        // vv_last_role marker exists. The marker can vanish (Safari storage
+        // eviction, cleared site data) while the session cookie lives, and the
+        // old marker-gate then painted the landing, let the user click the
+        // sign-in CTA, and only the portal's own probe found the live cookie
+        // seconds later — the mysterious auto-login. The branded splash now
+        // covers this single round-trip on every load; the probe is free for
+        // signed-out browsers (no cookie → no DB query server-side).
+        // Failure policy (the other half of the cycle): a 503/500/timeout is
+        // NOT a logout — the marker survives and the landing paints without a
+        // swap; ONLY a definitive ok:null answer (server says no session)
+        // clears the marker. A late response after the timeout never swaps
+        // the view either — no "landing suddenly becomes the portal" motion.
+        let settled = false;
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => {
+          settled = true;
+          ctrl.abort();
           if (!cancelled) setBooted(true);
-        } else {
-          session = fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me", role: last }) })
-            .then((res) => res.json())
-            .then((d) => {
-              if (cancelled) return;
-              if (d.ok && d.account) { markLastRole(d.role); setView(d.role === "RECRUITER" ? "recruiter" : "checklist"); }
-              else clearLastRole(); // session gone — stop treating this browser as returning
-            })
-            .catch(() => { /* landing stays */ })
-            .finally(() => { if (!cancelled) setBooted(true); });
-        }
+        }, 3000);
+        const hint = readLastRole();
+        session = fetch("/api/auth", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "me", ...(hint ? { role: hint } : {}) }),
+          signal: ctrl.signal,
+        })
+          .then((res) => res.json())
+          .then((d) => {
+            if (cancelled || settled) return;
+            if (d?.ok && d.account) { markLastRole(d.role); setView(d.role === "RECRUITER" ? "recruiter" : "checklist"); }
+            else if (d?.ok) clearLastRole(); // definitive signed-out — the marker is now truthful
+            // d.ok false (maintenance 503, 5xx): keep the marker, show the landing
+          })
+          .catch(() => { /* timeout or network error — landing stays, marker untouched */ })
+          .finally(() => { clearTimeout(timeout); if (!cancelled && !settled) setBooted(true); });
       } else {
         // Deep links / shared views never wait on the session probe.
         if (!cancelled) setBooted(true);

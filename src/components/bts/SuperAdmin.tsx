@@ -260,10 +260,18 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const exitConsole = useCallback(() => {
-    // Best-effort server logout: kills the cookie-bound session row and
-    // clears vv_sa so a reload after exit shows the gate, not the console.
-    void fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) }).catch(() => undefined);
+  const exitConsole = useCallback(async () => {
+    // Server logout is AWAITED before the console unmounts: a fire-and-forget
+    // fetch can be aborted by the very navigation it triggers, leaving the
+    // vv_sa cookie's session row alive — the next reload then "auto-logged in"
+    // after an exit. The race keeps the exit instant even if the server hangs;
+    // keepalive lets the request finish server-side regardless.
+    try {
+      await Promise.race([
+        fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }), keepalive: true }),
+        new Promise((r) => setTimeout(r, 1500)),
+      ]);
+    } catch { /* best-effort — the 8h session TTL is the backstop */ }
     clearLastRole(); // signed out — the next homepage visit paints the landing instantly, no probe
     onExit();
   }, [onExit]);

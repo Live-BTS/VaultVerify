@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ensureAgency, ensureSeed, demoSeedingAllowed } from "@/lib/bts/seed";
 import { logAudit } from "@/lib/bts/audit";
-import { seedBuiltinTemplates } from "@/lib/bts/skillTemplates";
 import { seedChecklistDemo } from "@/lib/bts/checklistDemo";
 
-// ── GET /api/bootstrap — agency branding + idempotent seeding ──
+// ── GET /api/bootstrap — agency branding + (non-prod only) demo data ──
 // SEC-07 / CH-02: DEMO seeding (demo candidates, demo checklist account and
-// its completions/requests) never runs in production. Agency branding and the
-// built-in skill-template catalog are product data and are seeded everywhere.
+// its completions/requests) never runs in production. Agency branding is
+// product data and is ensured everywhere.
+//
+// OWNER DIRECTIVE (2026-10-20): the built-in skill-template catalog is GONE.
+// The skills library starts EMPTY — the owner imports their own workbook via
+// the SuperAdmin console and manages it there. No code path seeds templates
+// anymore; /api/checklists simply returns whatever the owner has published.
 export async function GET() {
   try {
     await ensureAgency();
@@ -18,13 +22,9 @@ export async function GET() {
       if (result.seeded) {
         await logAudit({ actorType: "SYSTEM", action: "SEED_CREATED", entity: "agency", entityId: result.agencyId });
       }
-      // Idempotent: keeps built-in Med-Surg / ICU / General skill templates fresh.
-      await seedBuiltinTemplates();
       await seedChecklistDemo();
-    } else {
-      // Production: product catalog only — no demo accounts, no demo rows.
-      await seedBuiltinTemplates();
     }
+    // Production: branding only — no demo accounts, no demo rows, no template seeding.
 
     const row = await db.agency.findUnique({ where: { slug: "vaultverify" } });
     // SEC-01(a): projected fields only — billing/trust state columns never

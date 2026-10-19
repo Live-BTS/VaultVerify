@@ -53,9 +53,19 @@ export async function POST(req: NextRequest) {
     return bad("Server not configured: DATABASE_URL is missing. Add the environment variables in Vercel → Settings → Environment Variables, then redeploy.", 503);
   }
 
-  // Maintenance mode pauses all account writes (superadmin bypasses).
-  const writable = await assertPlatformWritable();
-  if (!writable.ok) return bad(writable.error ?? "Platform is in maintenance mode.", 503);
+  // Maintenance mode pauses account writes (superadmin bypasses). Two actions
+  // are EXEMPT — they are safe (and too important to fail) during an incident:
+  //   me      — the read-only session probe. A 503 here made the homepage boot
+  //             treat a signed-in browser as signed-out and evict its last-role
+  //             marker, producing the owner's "index → sign-in → auto-login"
+  //             cycle the moment the DB hiccup cleared.
+  //   signout — a user must ALWAYS be able to end their session. A 503 here
+  //             silently no-oped the client's logout (state cleared, cookie
+  //             survived), so the next visit "auto-logged in" after logout.
+  if (action !== "me" && action !== "signout") {
+    const writable = await assertPlatformWritable();
+    if (!writable.ok) return bad(writable.error ?? "Platform is in maintenance mode.", 503);
+  }
 
   try {
     // ── signup ────────────────────────────────────────────────────

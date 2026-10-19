@@ -198,15 +198,42 @@ describe("session restore — client halves", () => {
     expect(src.indexOf("if (booting)")).toBeLessThan(src.indexOf("if (!data)"));
   });
 
-  it("homepage boots marker-gated: no landing flash for returning users, instant landing for first visits", () => {
+  it("homepage probes on EVERY plain load — no marker gate, splash covers the round trip", () => {
     const home = read("src/app/page.tsx");
     expect(home).toContain("readLastRole()");
-    // the probe only runs when the marker exists…
-    expect(home).toMatch(/if \(!last\) \{\s*\n\s*if \(!cancelled\) setBooted\(true\);/);
-    // …and the splash (not the landing) covers the probe for returning users
-    expect(home).toMatch(/clearLastRole\(\); \/\/ session gone/);
+    // DEEP AUDIT: the probe must NOT be gated on the marker — an evicted
+    // marker (Safari, cleared storage) with a live cookie was the "landing →
+    // sign-in → auto-login" cycle. The probe now always runs; the marker is
+    // only the role hint.
+    expect(home).toMatch(/const hint = readLastRole\(\);/);
+    expect(home).toMatch(/AbortController/); // bounded probe — no infinite splash
+    expect(home).toMatch(/settled/); // a late response after the timeout never swaps the view
     // verify deep link still paints immediately (no hang behind the splash)
     expect(home).toMatch(/setBooted\(true\); \/\/ the interstitial renders below/);
+  });
+
+  it("homepage probe clears the marker ONLY on a definitive ok:null — never on 503/timeout", () => {
+    const home = read("src/app/page.tsx");
+    // clearLastRole must be reachable only behind `d?.ok` (definitive answer);
+    // a bare `else clearLastRole()` after `if (d.ok && d.account)` would evict
+    // the marker on maintenance 503s and DB hiccups — the auto-login cycle.
+    expect(home).toMatch(/else if \(d\?\.ok\) clearLastRole\(\)/);
+    expect(home).not.toMatch(/else clearLastRole\(\)/);
+  });
+
+  it("'me' and 'signout' bypass the maintenance/DB-failure gate (logout must always work)", () => {
+    const auth = read("src/app/api/auth/route.ts");
+    expect(auth).toMatch(/if \(action !== "me" && action !== "signout"\) \{\s*\n\s*const writable = await assertPlatformWritable\(\);/);
+    const checklist = read("src/app/api/checklist/account/route.ts");
+    expect(checklist).toMatch(/if \(action !== "me" && action !== "logout"\) \{\s*\n\s*const writable = await assertPlatformWritable\(\);/);
+  });
+
+  it("SuperAdmin exit awaits the server logout (keepalive) before navigating away", () => {
+    const src = read("src/components/bts/SuperAdmin.tsx");
+    // fire-and-forget logout + immediate router push could abort the request,
+    // leaving the vv_sa session alive → "auto-logged in after exit".
+    expect(src).toMatch(/exitConsole = useCallback\(async/);
+    expect(src).toContain("keepalive: true");
   });
 
   it("every signout path ends the returning-user treatment (clearLastRole)", () => {
