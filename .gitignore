@@ -81,3 +81,6 @@ server.log
 .vv-prod-dsn
 
 /download/
+
+# Local reference clones (never commit embedded repos)
+reference/MyZipVault/
