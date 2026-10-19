@@ -10,6 +10,7 @@ import { AgencyLogo, StatusBadge, SkillBadge, FlagChip, RatingPips, Spinner } fr
 import { specialtyLabel } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { RecruiterChecklists } from "./checklist/RecruiterChecklists";
+import { markLastRole } from "@/lib/lastRole";
 import { AuthPanel } from "./AuthPanel";
 import { RecruiterOnboarding } from "./RecruiterOnboarding";
 import { PortalShell } from "./shell/PortalShell";
@@ -94,6 +95,11 @@ export function RecruiterDashboard({ onSignOut, initialSection = "dashboard" }: 
   // (legacy agency access-code state removed — account session is the only path)
   const [me, setMe] = useState<{ name: string; email: string; onboardingComplete: boolean } | null>(null);
   const [data, setData] = useState<RecruiterData | null>(null);
+  // SESSION-RESTORE: the mount probe below restores a live vv_rc cookie on
+  // refresh. While it is in flight we must show a splash, NOT the login gate —
+  // otherwise every refresh paints the AuthPanel for a beat and reads as
+  // "it logged me out" even when the session restores a moment later.
+  const [booting, setBooting] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReqRow | null>(null);
@@ -144,16 +150,23 @@ export function RecruiterDashboard({ onSignOut, initialSection = "dashboard" }: 
   useEffect(() => {
     let alive = true;
     (async () => {
-      // Account session probe — verified recruiters land straight on the dashboard.
+      // Account session probe — verified recruiters land straight on the
+      // dashboard. The role hint biases the server's identity check to THIS
+      // portal: a browser that also holds a candidate cookie (vv_ck) used to
+      // get role CANDIDATE back here, which bounced the refresh to the login
+      // gate even though the recruiter cookie was perfectly live.
       try {
-        const res = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
+        const res = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me", role: "RECRUITER" }) });
         const d = await res.json();
         if (alive && d.ok && d.account && d.role === "RECRUITER") {
           const account = d.account;
+          markLastRole("RECRUITER");
           setMe(account);
           if (account.onboardingComplete) load();
         }
-      } catch { /* gate renders */ }
+      } catch { /* gate renders */ } finally {
+        if (alive) setBooting(false);
+      }
     })();
     return () => { alive = false; };
   }, [load]);
@@ -183,6 +196,11 @@ export function RecruiterDashboard({ onSignOut, initialSection = "dashboard" }: 
     onSignOut();
   };
 
+  if (booting) {
+    // Probe in flight — never flash the login gate on a plain refresh.
+    return <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]"><Spinner label="Opening your console…" /></div>;
+  }
+
   if (data) {
     // (dashboard renders below)
   } else if (me && !me.onboardingComplete) {
@@ -201,6 +219,7 @@ export function RecruiterDashboard({ onSignOut, initialSection = "dashboard" }: 
       <AuthPanel
         onAuthenticated={(info) => {
           const account = { name: info.name, email: info.email, onboardingComplete: info.onboardingComplete };
+          markLastRole("RECRUITER");
           setMe(account);
           if (account.onboardingComplete) load();
         }}

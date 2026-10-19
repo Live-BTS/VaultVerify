@@ -16,6 +16,7 @@ import { LandingView, type AgencyInfo, type Role } from "@/components/bts/Landin
 // client bundle on first load. Each boundary shows the branded splash while
 // its chunk streams in.
 import type { CreatedCandidate } from "@/components/bts/CandidateWizard";
+import { readLastRole, markLastRole } from "@/lib/lastRole";
 import { Spinner, SplashLoader, VaultMark } from "@/components/bts/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -199,9 +200,14 @@ export default function Page() {
         if (window.history?.replaceState) window.history.replaceState({}, "", "/");
       } else if (!r && !s && !rs && !invite && !view) {
         // ── Signed-in users land directly in their portal (background swap) ──
-        session = fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) })
+        // SESSION-RESTORE: bias the probe to the portal this browser last
+        // signed into. With both cookies live, the server's default order
+        // (candidate-first) used to yank recruiters into the candidate
+        // portal on every homepage refresh — reading as "it logged me out".
+        const last = readLastRole();
+        session = fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me", ...(last ? { role: last } : {}) }) })
           .then((res) => res.json())
-          .then((d) => { if (!cancelled && d.ok && d.account) setView(d.role === "RECRUITER" ? "recruiter" : "checklist"); })
+          .then((d) => { if (!cancelled && d.ok && d.account) { markLastRole(d.role); setView(d.role === "RECRUITER" ? "recruiter" : "checklist"); } })
           .catch(() => { /* landing stays */ });
       }
       void Promise.allSettled([brand, session]);

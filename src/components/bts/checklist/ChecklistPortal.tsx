@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
+import { markLastRole } from "@/lib/lastRole";
 import { RATING_META, specialtyLabel, summarizeAnswers, type SkillAnswer } from "@/lib/bts/checklistShared";
 import { VaultMark, Spinner } from "../brand";
 import { ReferencesPanel } from "./ReferencesPanel";
@@ -194,6 +195,10 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
     const res = await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me" }) });
     const d: MeData & { ok: boolean } = await res.json();
     setMe({ account: d.account ?? null, invites: d.invites, requests: d.requests, completions: d.completions });
+    // SESSION-RESTORE: record the portal this browser last used so the
+    // homepage boot probe restores the candidate vault (not whichever
+    // identity the server's default order prefers when both cookies exist).
+    if (d.account) markLastRole("CANDIDATE");
     return d.account;
   }, []);
 

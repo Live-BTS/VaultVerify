@@ -215,28 +215,45 @@ export async function POST(req: NextRequest) {
 
     // ── me ────────────────────────────────────────────────────────
     if (action === "me") {
-      const candidate = await getAccount();
-      if (candidate?.emailVerified) {
-        // Suspended sessions die on the next probe — the portal sees a clean logout.
-        if (candidate.status === "SUSPENDED") {
-          await destroySession();
-          return NextResponse.json({ ok: true, account: null, suspended: true });
+      // SESSION-RESTORE (owner-reported refresh logout): a browser that has
+      // used BOTH portals carries vv_ck AND vv_rc. The probe answered
+      // candidate-first unconditionally, so the recruiter dashboard's mount
+      // probe saw role CANDIDATE and bounced to the login gate even though
+      // the recruiter cookie was live. An explicit role hint (sent by the
+      // portal doing the probing) now jumps that identity's check to the
+      // front; the other identity remains the graceful fallback. No hint
+      // (homepage on a fresh browser) keeps the historical candidate-first
+      // order, so existing clients are unaffected.
+      const order: ("CANDIDATE" | "RECRUITER")[] = role
+        ? [role, role === "CANDIDATE" ? "RECRUITER" : "CANDIDATE"]
+        : ["CANDIDATE", "RECRUITER"];
+      for (const kind of order) {
+        if (kind === "CANDIDATE") {
+          const candidate = await getAccount();
+          if (candidate?.emailVerified) {
+            // Suspended sessions die on the next probe — the portal sees a clean logout.
+            if (candidate.status === "SUSPENDED") {
+              await destroySession();
+              return NextResponse.json({ ok: true, account: null, suspended: true });
+            }
+            return NextResponse.json({
+              ok: true, role: "CANDIDATE",
+              account: { id: candidate.id, name: candidate.name, email: candidate.email, onboardingComplete: candidate.onboardingComplete },
+            });
+          }
+        } else {
+          const recruiter = await getRecruiterSessionAccount();
+          if (recruiter?.emailVerified) {
+            if (recruiter.status === "SUSPENDED") {
+              await destroyRecruiterSession();
+              return NextResponse.json({ ok: true, account: null, suspended: true });
+            }
+            return NextResponse.json({
+              ok: true, role: "RECRUITER",
+              account: { id: recruiter.id, name: recruiter.name, email: recruiter.email, onboardingComplete: recruiter.onboardingComplete },
+            });
+          }
         }
-        return NextResponse.json({
-          ok: true, role: "CANDIDATE",
-          account: { id: candidate.id, name: candidate.name, email: candidate.email, onboardingComplete: candidate.onboardingComplete },
-        });
-      }
-      const recruiter = await getRecruiterSessionAccount();
-      if (recruiter?.emailVerified) {
-        if (recruiter.status === "SUSPENDED") {
-          await destroyRecruiterSession();
-          return NextResponse.json({ ok: true, account: null, suspended: true });
-        }
-        return NextResponse.json({
-          ok: true, role: "RECRUITER",
-          account: { id: recruiter.id, name: recruiter.name, email: recruiter.email, onboardingComplete: recruiter.onboardingComplete },
-        });
       }
       return NextResponse.json({ ok: true, account: null });
     }
