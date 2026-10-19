@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { validateRows, type ImportRow, type ValidatedRow } from "@/lib/bts/importValidate";
+import { validateRows, MAX_IMPORT_ROWS, type ImportRow, type ValidatedRow } from "@/lib/bts/importValidate";
+import { extractRowsFromWorkbook, WORKBOOK_HEADERS } from "@/lib/bts/workbookParse";
 import { specialtyLabel } from "@/lib/bts/checklistShared";
 import { professionLabel, disciplineLabel } from "@/lib/bts/catalog";
 import { AgencyLogo, VaultMark, Spinner } from "./brand";
@@ -122,34 +123,7 @@ interface SystemStatus { items: SystemItemView[]; protections: { label: string; 
 interface TemplateListItem { key: string; name: string; kind: string; description: string; customized: boolean; updatedAt: string | null; updatedBy: string | null }
 interface TplEdit { key: string; name: string; subject: string; html: string; description: string; customized: boolean }
 
-const REQUIRED_COLS = ["Profession", "Job Title", "Specialty", "Category", "Skill Name", "Question Type", "Has N/A Option"];
-
-async function parseWorkbook(file: File): Promise<{ rows: ImportRow[]; sheetName: string; headerFound: boolean }> {
-  const buf = await file.arrayBuffer();
-  const XLSX = await import("xlsx"); // lazy — keeps SheetJS out of the initial console bundle
-  const wb = XLSX.read(buf, { type: "array" });
-  const sheetName = wb.SheetNames.find((n) => /skill/i.test(n)) ?? wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  const aoa: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
-  // locate header row within the first 12 rows
-  let headerIdx = -1;
-  for (let i = 0; i < Math.min(aoa.length, 12); i++) {
-    const cells = (aoa[i] ?? []).map((c) => String(c ?? "").trim().toLowerCase());
-    if (cells.includes("skill name") && cells.includes("profession")) { headerIdx = i; break; }
-  }
-  if (headerIdx === -1) return { rows: [], sheetName, headerFound: false };
-  const headers = (aoa[headerIdx] ?? []).map((c) => String(c ?? "").trim());
-  const idx = (name: string) => headers.findIndex((h) => h.toLowerCase() === name.toLowerCase());
-  const colMap = { profession: idx("Profession"), jobTitle: idx("Job Title"), specialty: idx("Specialty"), category: idx("Category"), skillName: idx("Skill Name"), questionType: idx("Question Type"), hasNA: idx("Has N/A Option") };
-  const rows: ImportRow[] = [];
-  for (const cells of aoa.slice(headerIdx + 1)) {
-    const get = (i: number) => (i >= 0 ? String(cells[i] ?? "").trim() : "");
-    const r = { profession: get(colMap.profession), jobTitle: get(colMap.jobTitle), specialty: get(colMap.specialty), category: get(colMap.category), skillName: get(colMap.skillName), questionType: get(colMap.questionType), hasNA: get(colMap.hasNA).toLowerCase() === "yes" };
-    if (!r.profession && !r.jobTitle && !r.specialty && !r.category && !r.skillName) continue; // skip fully blank rows
-    rows.push(r);
-  }
-  return { rows, sheetName, headerFound: true };
-}
+const REQUIRED_COLS = [...WORKBOOK_HEADERS];
 
 const NAV: [Section, string, typeof Users][] = [
   ["requests", "Requests", Hourglass],
@@ -190,7 +164,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const [sys, setSys] = useState<SystemStatus | null>(null);
   const [liveSessions, setLiveSessions] = useState<{ candidate: number; recruiter: number; superadmin: number } | null>(null);
   const [openSet, setOpenSet] = useState<string | null>(null);
-  const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string } | null>(null);
+  const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string; mode: "header" | "positional" } | null>(null);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -313,15 +287,32 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const onFile = async (f: File | null) => {
     if (!f) return;
     try {
-      const { rows, sheetName, headerFound } = await parseWorkbook(f);
-      if (!headerFound) {
+      const { rows, sheetName, mode } = await extractRowsFromWorkbook(f);
+      if (!rows.length || !mode) {
         setPending(null);
-        return toast({ title: "Headers not found", description: `Sheet "${sheetName}" must contain the 7 MyZipVault columns (Profession … Has N/A Option).`, variant: "destructive" });
+        return toast({
+          title: "No importable rows found",
+          description: `Sheet "${sheetName}" must be the Skills Data sheet — either carry the 7 column headers (Profession … Has N/A Option) or hold data in the standard column order.`,
+          variant: "destructive",
+        });
+      }
+      if (rows.length > MAX_IMPORT_ROWS) {
+        setPending(null);
+        return toast({
+          title: "Workbook too large",
+          description: `${rows.length.toLocaleString("en-US")} rows — the limit is ${MAX_IMPORT_ROWS.toLocaleString("en-US")}. Split the file and import in batches.`,
+          variant: "destructive",
+        });
       }
       const { errors, clean } = validateRows(rows);
-      setPending({ rows, clean, errors, fileName: f.name });
-    } catch {
-      toast({ title: "Could not read that file", description: "Save the workbook as .xlsx and try again.", variant: "destructive" });
+      setPending({ rows, clean, errors, fileName: f.name, mode });
+    } catch (e) {
+      const notXlsx = e instanceof Error && e.message === "NOT_XLSX";
+      toast({
+        title: notXlsx ? "That file is not a real .xlsx" : "Could not read that file",
+        description: notXlsx ? "Renaming a .csv or .xls to .xlsx doesn't convert it — save it as Excel Workbook (.xlsx) and try again." : "Save the workbook as .xlsx and try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -330,7 +321,15 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
     setImporting(true);
     try {
       const d = await call({ action: "import", rows: pending.rows });
-      toast({ title: `Imported ${d.created} new · updated ${d.updated}`, description: d.errors?.length ? `${d.errors.length} row(s) rejected — see report.` : "All rows passed validation." });
+      // All-or-nothing: the server writes everything in one transaction or
+      // nothing at all, so a successful response is a fully applied import.
+      toast({
+        title: `Imported ${d.created} new · updated ${d.updated}${d.unchanged ? ` · unchanged ${d.unchanged}` : ""}`,
+        description: [
+          d.duplicates ? `${d.duplicates} duplicate row(s) within the file were collapsed.` : null,
+          d.errors?.length ? `${d.errors.length} row(s) rejected — see report.` : "All rows passed validation.",
+        ].filter(Boolean).join(" ") || undefined,
+      });
       setPending(null);
       if (fileRef.current) fileRef.current.value = "";
       await refresh();
@@ -338,6 +337,37 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
       toast({ title: e instanceof Error ? e.message : "Import failed", variant: "destructive" });
     } finally {
       setImporting(false);
+    }
+  };
+
+  // ── Skills workbook downloads (Export Template · Export Data) ──
+  // Cookie-authenticated GET endpoints — the console's httpOnly vv_sa cookie
+  // rides along, so a plain fetch works and no bearer token ever touches a URL.
+  const [downloading, setDownloading] = useState<null | "template" | "export">(null);
+  const downloadWorkbook = async (kind: "template" | "export") => {
+    setDownloading(kind);
+    try {
+      const res = await fetch(`/api/superadmin/skills/${kind}`, { credentials: "same-origin" });
+      if (res.status === 401) {
+        toast({ title: "Session expired", description: "Sign in to the console again, then retry the download.", variant: "destructive" });
+        return;
+      }
+      if (!res.ok) throw new Error("The server could not generate the workbook.");
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const name = /filename="?([^";]+)"?/i.exec(cd)?.[1] ?? `VaultVerify_Skills_${kind}.xlsx`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      toast({ title: kind === "template" ? "Template downloaded" : "Library exported", description: kind === "template" ? name : `${name} — re-importable as-is.` });
+    } catch (e) {
+      toast({ title: "Download failed", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -1489,24 +1519,31 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
                 </div>
               </div>
 
-              {/* Import panel */}
+              {/* Import / export panel */}
               <div className="rounded-2xl border border-vault-border bg-white vv-card-shadow p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-base font-semibold text-jade-ink">Import skills checklist</h2>
-                    <p className="mt-1 text-sm text-jade-muted">Upload a MyZipVault import workbook (.xlsx). Rows upsert by Profession + Job Title + Specialty + Skill Name — re-uploading is safe.</p>
+                    <h2 className="text-base font-semibold text-jade-ink">Skills workbook — import &amp; export</h2>
+                    <p className="mt-1 text-sm text-jade-muted">Rows upsert by Profession + Job Title + Specialty + Skill Name — re-uploading is safe. Valid rows commit atomically; rejected rows are reported with their exact row number and skipped.</p>
                   </div>
-                  <a href="/MyZipVault-Skills-Checklist-Import-Template.xlsx" download>
-                    <Button variant="ghost" className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
-                      <FileDown className="h-4 w-4" /> Download template
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="ghost" disabled={downloading !== null} onClick={() => downloadWorkbook("template")} className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                      <FileDown className="h-4 w-4" /> {downloading === "template" ? "Preparing…" : "Export template"}
                     </Button>
-                  </a>
+                    <Button variant="ghost" disabled={downloading !== null} onClick={() => downloadWorkbook("export")} className="border border-vault-border text-verify-ink hover:bg-verify-green/10">
+                      <FileDown className="h-4 w-4" /> {downloading === "export" ? "Preparing…" : "Export data"}
+                    </Button>
+                  </div>
                 </div>
 
                 <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-vault-border bg-[#f2f7f4] px-6 py-8 text-center transition hover:border-verify-green/60">
                   <Upload className="h-6 w-6 text-verify-ink" />
                   <p className="mt-2 text-sm font-medium text-jade-ink">{pending ? pending.fileName : "Choose .xlsx workbook"}</p>
-                  <p className="mt-0.5 text-xs text-jade-muted">Sheets scanned automatically for the 7-column Skills Data header</p>
+                  <p className="mt-0.5 text-xs text-jade-muted">
+                    {pending?.mode === "positional"
+                      ? "Read positionally — no header row, standard column order detected"
+                      : "Headered or headerless — sheets are scanned automatically for the 7-column Skills Data layout"}
+                  </p>
                   <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                 </label>
 

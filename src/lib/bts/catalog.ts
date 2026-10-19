@@ -7,14 +7,23 @@
 
 export interface Option { key: string; label: string }
 
+// Owner directive (2026-10-19): the platform offers exactly THREE professions —
+// Providers, Nursing, Allied. This matches the owner's import workbook
+// (Nursing x10,240 / Allied x6,131 / Provider x522; "Provider" normalizes to
+// the canonical plural "Providers" on import). Legacy Pharmacy/Locums data
+// still validates on import for round-trip safety (see importValidate.ts) but
+// is no longer offered in any dropdown.
 export const PROFESSIONS: Option[] = [
   { key: "Nursing", label: "Nursing" },
   { key: "Allied", label: "Allied" },
-  { key: "Pharmacy", label: "Pharmacy" },
-  { key: "Locums", label: "Locums" },
+  { key: "Providers", label: "Providers" },
 ];
 
-// Disciplines per profession (the MyZipVault "Job Title" column)
+// Disciplines per profession (the MyZipVault "Job Title" column).
+// These are the SUGGESTED universes — the recruiter cascade unions them with
+// the published library's actual job titles (the owner's workbook uses full
+// labels like "Surgical Tech", "Nurse Practitioner", "Radiology Tech" — 132
+// distinct values), so imported checklists are always reachable.
 export const DISCIPLINES: Record<string, Option[]> = {
   Nursing: [
     { key: "RN", label: "Registered Nurse (RN)" },
@@ -30,15 +39,13 @@ export const DISCIPLINES: Record<string, Option[]> = {
     { key: "SLP", label: "Speech-Language Pathologist (SLP)" },
     { key: "RT", label: "Respiratory Therapist (RT)" },
   ],
-  Pharmacy: [
-    { key: "PharmD", label: "Pharmacist (PharmD)" },
-    { key: "PharmTech", label: "Pharmacy Technician" },
-  ],
-  Locums: [
-    { key: "MD", label: "Physician (MD/DO)" },
-    { key: "NP", label: "Nurse Practitioner (NP)" },
-    { key: "PA", label: "Physician Assistant (PA)" },
+  Providers: [
+    { key: "Nurse Practitioner", label: "Nurse Practitioner" },
+    { key: "Physician Assistant", label: "Physician Assistant" },
     { key: "CRNA", label: "Nurse Anesthetist (CRNA)" },
+    { key: "APRN", label: "APRN" },
+    { key: "Psychologist", label: "Psychologist" },
+    { key: "MD", label: "Physician (MD/DO)" },
   ],
 };
 

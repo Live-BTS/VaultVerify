@@ -3,9 +3,10 @@ import { randomInt, randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/bts/audit";
 import { originFor } from "@/lib/bts/origin";
-import { validateRows, upsertTemplates, type ImportRow } from "@/lib/bts/skillTemplates";
+import { validateRows, upsertTemplates, MAX_IMPORT_ROWS, type ImportRow } from "@/lib/bts/skillTemplates";
 import { buildSystemStatus } from "@/lib/bts/systemConfig";
 import { sha256, safeEqual, hashPassword, createPasswordReset, maskEmail, RESET_TTL_MINUTES } from "@/lib/bts/auth";
+import { SA_COOKIE, saCookieOptions, sessionFromToken, SESSION_HOURS, type AdminRole, type SaIdentity as AdminIdentity } from "@/lib/bts/saSession";
 import { sendTemplatedEmail, listTemplates, renderEmail, TEMPLATE_INDEX } from "@/lib/bts/emailTemplates";
 import { creditAdjust, creditBalance } from "@/lib/bts/credits";
 import { killCandidateSessions, killRecruiterSessions } from "@/lib/bts/guard";
@@ -40,7 +41,6 @@ import { maybePruneExpiredAuthRows, maybePruneOldLogs, pruneOldLogs, countAuditE
 const SUPERADMIN_EMAIL = (process.env.SUPERADMIN_EMAIL ?? "").trim().toLowerCase();
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
-const SESSION_HOURS = 8;
 
 // Refresh-persistence (owner report, 2026-10-19): the console bearer used to
 // live ONLY in React state (SEC-20), so every reload hit the gate again. The
@@ -48,26 +48,9 @@ const SESSION_HOURS = 8;
 // payload, but the browser re-sends it on reload and the console restores
 // itself with a single probe. The backup code is no longer held in client
 // state either: backup-code logins mint a real session (see case "auth").
-const SA_COOKIE = "vv_sa";
-
-function saCookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
-    maxAge: SESSION_HOURS * 3600,
-    path: "/",
-  };
-}
-
-type AdminRole = "OWNER" | "ADMIN" | "SUPPORT";
-
-interface AdminIdentity {
-  role: AdminRole;
-  email: string;
-  accountId: string | null; // null = env backup-code owner access → OWNER
-  token: string | null;
-}
+// The cookie name/options/session lookup live in ./saSession — shared with
+// the GET workbook downloads (/api/superadmin/skills/*), which are
+// cookie-only because bearer tokens must never appear in URLs.
 
 function unauthorized(msg = "Invalid superadmin code") {
   return NextResponse.json({ ok: false, error: msg }, { status: 401 });
@@ -85,24 +68,16 @@ async function resolveIdentity(req: NextRequest, body: Record<string, unknown>):
   // Bearer precedence: explicit body token (existing clients/tests) first,
   // then the httpOnly console cookie. The cookie carries the same sas_ token
   // issued at login, so session lookup and revocation are unchanged.
+  // Session tokens are hashed at rest (Phase D) — the lookup digests the
+  // presented raw value; the DB never stores a usable bearer value.
   const token = typeof body.token === "string" && body.token
     ? body.token
     : req.cookies.get(SA_COOKIE)?.value ?? "";
-  if (token.startsWith("sas_")) {
-    // Session tokens are hashed at rest (Phase D) — the presented raw token is
-    // digested for lookup; the DB never stores a usable bearer value.
-    const session = await db.superAdminSession.findUnique({ where: { token: sha256(token) } });
-    if (session && session.expiresAt > new Date()) {
-      if (session.accountId) {
-        const account = await db.superadminAccount.findUnique({ where: { id: session.accountId } });
-        if (!account || account.status === "SUSPENDED") return null;
-        const role: AdminRole = ["OWNER", "ADMIN", "SUPPORT"].includes(account.role)
-          ? (account.role as AdminRole)
-          : "SUPPORT";
-        return { role, email: account.email, accountId: account.id, token };
-      }
-      return { role: "OWNER", email: session.email || SUPERADMIN_EMAIL, accountId: null, token };
-    }
+  const sessionIdentity = token ? await sessionFromToken(token) : null;
+  if (sessionIdentity) {
+    // Preserve the owner-email fallback the route historically returned for
+    // session rows without an account binding.
+    return sessionIdentity.email ? sessionIdentity : { ...sessionIdentity, email: SUPERADMIN_EMAIL };
   }
   // OD-01, amended (owner, 2026-10-18): the backup code lives ONLY in the
   // SUPERADMIN_CODE env var — read lazily per request so tests can inject it
@@ -816,15 +791,30 @@ export async function POST(req: NextRequest) {
       case "import": {
         const rows: ImportRow[] = Array.isArray(body.rows) ? body.rows : [];
         if (!rows.length) return NextResponse.json({ ok: false, error: "No rows to import" }, { status: 400 });
+        // Row cap: protects the serverless function from runaway workbooks and
+        // keeps the all-or-nothing transaction bounded. The owner's real
+        // workbook (~17k rows) sits comfortably below this ceiling.
+        if (rows.length > MAX_IMPORT_ROWS) {
+          return NextResponse.json(
+            { ok: false, error: `That workbook has ${rows.length.toLocaleString("en-US")} rows — the limit is ${MAX_IMPORT_ROWS.toLocaleString("en-US")}. Split the file and import in batches.` },
+            { status: 400 },
+          );
+        }
         const { errors, clean } = validateRows(rows);
-        let result = { created: 0, updated: 0 };
+        // Atomic commit: upsertTemplates runs in ONE transaction, so the
+        // valid remainder is written fully or not at all. Rejected rows are
+        // reported to the caller with their workbook row number.
+        let result = { created: 0, updated: 0, unchanged: 0, duplicates: 0 };
         if (clean.length) result = await upsertTemplates(clean, "IMPORT");
         await logAudit({
           actorType: "RECRUITER",
           actorId: auditActor,
           action: "SKILL_TEMPLATES_IMPORTED",
           entity: "skillTemplate",
-          detail: { submitted: rows.length, created: result.created, updated: result.updated, rejected: errors.length },
+          detail: {
+            submitted: rows.length, created: result.created, updated: result.updated,
+            unchanged: result.unchanged, duplicates: result.duplicates, rejected: errors.length,
+          },
         });
         return NextResponse.json({ ok: true, ...result, errors });
       }

@@ -6,15 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { DISCIPLINES, PROFESSIONS } from "@/lib/bts/catalog";
+import { DISCIPLINES, PROFESSIONS, professionLabel } from "@/lib/bts/catalog";
 import { specialtyLabel } from "@/lib/bts/checklistShared";
+import { SearchableSelect } from "./SearchableSelect";
 import { Spinner } from "../brand";
 import { ArrowLeft, ArrowRight, Check, ClipboardList, Download, Eye, Send, UserRoundCheck, UserRoundX, Wand2 } from "lucide-react";
 
 // ── Recruiter "Checklists" panel — two-step send flow ────────────
-// Step 1: pick the checklist from cascading dropdowns
-//         Profession (Nursing / Allied / Pharmacy / Locums)
-//         → Discipline (RN, LPN, PT, …) → Specialty (Med-Surg, ICU, …)
+// Step 1: pick the checklist from cascading SEARCHABLE dropdowns (owner ask,
+// 2026-10-19: "just add a search button so they can search directly"):
+//         Profession (Nursing / Allied / Providers)
+//         → Discipline (RN, LPN, Surgical Tech, … — unioned with the
+//           published library so imported job titles are always reachable)
+//         → Specialty (Med-Surg, ICU, … — searchable, the workbook brings 150+)
 // Step 2: candidate details — Name*, Phone*, Email* are required; anything
 //         else the candidate completes (auto-fetched if they already have
 //         an account). Completed checklists are reusable for 30 days.
@@ -44,8 +48,6 @@ function rel(d: string | Date): string {
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
-
-const selectCls = "mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600/30";
 
 export function RecruiterChecklists({ recruiterName }: { recruiterName: string }) {
   const [rows, setRows] = useState<InviteRow[] | null>(null);
@@ -98,12 +100,52 @@ export function RecruiterChecklists({ recruiterName }: { recruiterName: string }
     () => catalog.filter((s) => s.profession === profession && s.jobTitle === jobTitle),
     [catalog, profession, jobTitle]
   );
-  const disciplineOptions = DISCIPLINES[profession] ?? [];
+  // Searchable cascade: the static DISCIPLINES universe is the suggestion
+  // list; imported job titles (the workbook uses full labels like "Surgical
+  // Tech", "Radiology Tech" — 132 distinct values) are unioned in from the
+  // published catalog so nothing the superadmin imports is unreachable.
+  const disciplineOptions = useMemo(() => {
+    const opts: { key: string; label: string }[] = [...(DISCIPLINES[profession] ?? [])];
+    const seen = new Set(opts.map((o) => o.key));
+    for (const c of catalog) {
+      if (c.profession === profession && !seen.has(c.jobTitle)) {
+        seen.add(c.jobTitle);
+        opts.push({ key: c.jobTitle, label: c.jobTitle });
+      }
+    }
+    return opts;
+  }, [catalog, profession]);
+  // Professions: the three canonical options + any legacy published values
+  // (e.g. data imported before the three-profession model) so old checklists
+  // stay reachable without being offered for new data.
+  const professionOptions = useMemo(() => {
+    const opts = PROFESSIONS.map((p) => ({ key: p.key, label: p.label }));
+    const seen = new Set(opts.map((o) => o.key));
+    for (const c of catalog) {
+      if (!seen.has(c.profession)) {
+        seen.add(c.profession);
+        opts.push({ key: c.profession, label: professionLabel(c.profession) });
+      }
+    }
+    return opts;
+  }, [catalog]);
+  const specialtyOptions = useMemo(
+    () =>
+      published.map((s) => ({
+        key: s.specialty,
+        label: `${specialtyLabel(s.specialty)} · ${s.skills.length} skill${s.skills.length === 1 ? "" : "s"}`,
+      })),
+    [published]
+  );
 
   const pickProfession = (p: string) => {
     setProfession(p);
     const discs = DISCIPLINES[p] ?? [];
-    setJobTitle(discs[0]?.key ?? "");
+    // Prefer a discipline that actually has published checklists, else the
+    // first suggested one.
+    const staticHit = discs.find((d) => catalog.some((c) => c.profession === p && c.jobTitle === d.key));
+    const firstPublished = catalog.find((c) => c.profession === p);
+    setJobTitle(staticHit?.key ?? firstPublished?.jobTitle ?? discs[0]?.key ?? "");
     setSpecialty("");
   };
 
@@ -168,26 +210,40 @@ export function RecruiterChecklists({ recruiterName }: { recruiterName: string }
             <div className="mt-4 space-y-3.5">
               <div>
                 <Label htmlFor="cs-prof">Profession</Label>
-                <select id="cs-prof" value={profession} onChange={(e) => pickProfession(e.target.value)} className={selectCls}>
-                  {PROFESSIONS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-                </select>
+                <SearchableSelect
+                  id="cs-prof"
+                  value={profession}
+                  options={professionOptions}
+                  onChange={pickProfession}
+                  placeholder="Search profession…"
+                  emptyText="No profession matches"
+                />
               </div>
               <div>
                 <Label htmlFor="cs-disc">Discipline</Label>
-                <select id="cs-disc" value={jobTitle} onChange={(e) => { setJobTitle(e.target.value); setSpecialty(""); }} className={selectCls} disabled={!profession}>
-                  {disciplineOptions.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
-                </select>
+                <SearchableSelect
+                  id="cs-disc"
+                  value={jobTitle}
+                  options={disciplineOptions}
+                  onChange={(k) => { setJobTitle(k); setSpecialty(""); }}
+                  placeholder={profession ? "Search discipline…" : "Pick a profession first"}
+                  emptyText="No discipline matches"
+                  disabled={!profession}
+                />
               </div>
               <div>
                 <Label htmlFor="cs-spec">Specialty</Label>
-                <select id="cs-spec" value={specialty} onChange={(e) => setSpecialty(e.target.value)} className={selectCls} disabled={!jobTitle}>
-                  <option value="">{published.length ? "Select specialty…" : "No published checklists yet"}</option>
-                  {published.map((s) => (
-                    <option key={s.key} value={s.specialty}>{specialtyLabel(s.specialty)} · {s.skills.length} skills</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  id="cs-spec"
+                  value={specialty}
+                  options={specialtyOptions}
+                  onChange={setSpecialty}
+                  placeholder={published.length ? "Search specialty…" : "No published checklists yet"}
+                  emptyText="No specialty matches"
+                  disabled={!jobTitle}
+                />
                 {profession && jobTitle && published.length === 0 && (
-                  <p className="mt-1.5 text-[11px] text-amber-600">No checklist published for this combination yet — a superadmin can import one via the MyZipVault template.</p>
+                  <p className="mt-1.5 text-[11px] text-amber-600">No checklist published for this combination yet — a superadmin can import one via the skills workbook.</p>
                 )}
               </div>
             </div>
