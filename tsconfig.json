@@ -40,6 +40,10 @@
     "node_modules",
     "scripts",
     "examples",
-    "skills"
+    "skills",
+    "reference",
+    "db",
+    "download",
+    "upload"
   ]
 }

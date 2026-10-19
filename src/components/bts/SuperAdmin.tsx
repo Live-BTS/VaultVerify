@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -205,10 +205,29 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
     return d;
   }, [token, code]);
 
-  // SEC-20: the console bearer and backup code live ONLY in React state —
-  // never in browser web storage, which any XSS payload can read.
-  // Deliberate trade-off: a full page reload signs the console out and the
-  // gate is shown again; OTP re-issue is one click away.
+  // SEC-20 (amended, 2026-10-19): the console bearer rides an httpOnly cookie
+  // (vv_sa) — unreadable to any XSS payload — while React state keeps an
+  // in-memory mirror for the current render. A reload re-sends the cookie, the
+  // mount probe below restores the console, and backup-code logins mint a real
+  // session so the code itself is accepted once and never stored client-side.
+
+  // Refresh-persistence probe: a live vv_sa cookie (OTP or backup login)
+  // re-opens the console without a second login. 401 → the gate stays up.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth" }) });
+        if (!alive || !res.ok) return;
+        const d = await res.json();
+        if (alive && d.ok) {
+          if (typeof d.token === "string" && d.token) setToken(d.token);
+          setData(d);
+        }
+      } catch { /* gate stays up */ }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const requestOtp = async () => {
     setLoading(true);
@@ -249,13 +268,23 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
       const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", code: useCode }) });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error ?? "Invalid code");
-      setCode(useCode); setToken(""); setData(d);
+      // The route mints a real session (token + httpOnly cookie) — the backup
+      // code is accepted exactly once and is NOT kept in client state.
+      if (typeof d.token === "string" && d.token) setToken(d.token);
+      setCode(""); setData(d);
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Sign-in failed", variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
+
+  const exitConsole = useCallback(() => {
+    // Best-effort server logout: kills the cookie-bound session row and
+    // clears vv_sa so a reload after exit shows the gate, not the console.
+    void fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) }).catch(() => undefined);
+    onExit();
+  }, [onExit]);
 
   const refresh = async () => {
     try { setData(await call({ action: "auth" })); } catch { /* keep old data */ }
@@ -746,9 +775,9 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
             {gateMode === "otp" ? "Use backup access code instead" : "Email me a login code instead"}
           </button>
           <p className="mt-3 text-center text-[11px] leading-relaxed text-jade-muted/80">
-            For security, the console does not stay signed in across page reloads — credentials are kept in memory only.
+            The console stays signed in across page reloads for 8 hours — your session lives in an httpOnly cookie no script can read.
           </p>
-          <button type="button" onClick={onExit} className="mt-3 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
+          <button type="button" onClick={exitConsole} className="mt-3 w-full text-center text-xs text-jade-muted hover:text-jade-ink">
             ← Back to site
           </button>
         </div>
@@ -813,7 +842,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
             <Button variant="ghost" onClick={refresh} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
-            <Button variant="ghost" onClick={onExit} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">Sign out</Button>
+            <Button variant="ghost" onClick={exitConsole} className="px-3 text-[13px] text-jade-muted hover:text-jade-ink">Sign out</Button>
           </div>
         </div>
       </header>

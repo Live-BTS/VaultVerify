@@ -42,6 +42,24 @@ const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const SESSION_HOURS = 8;
 
+// Refresh-persistence (owner report, 2026-10-19): the console bearer used to
+// live ONLY in React state (SEC-20), so every reload hit the gate again. The
+// token now ALSO rides an httpOnly cookie — still unreadable to any XSS
+// payload, but the browser re-sends it on reload and the console restores
+// itself with a single probe. The backup code is no longer held in client
+// state either: backup-code logins mint a real session (see case "auth").
+const SA_COOKIE = "vv_sa";
+
+function saCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    maxAge: SESSION_HOURS * 3600,
+    path: "/",
+  };
+}
+
 type AdminRole = "OWNER" | "ADMIN" | "SUPPORT";
 
 interface AdminIdentity {
@@ -63,8 +81,13 @@ function forbidden(msg = "Your console role does not allow this action") {
 // The authoritative role lives on the SuperadminAccount row and is re-read on
 // every call, so role changes and suspensions apply to live sessions
 // instantly.
-async function resolveIdentity(body: Record<string, unknown>): Promise<AdminIdentity | null> {
-  const token = typeof body.token === "string" ? body.token : "";
+async function resolveIdentity(req: NextRequest, body: Record<string, unknown>): Promise<AdminIdentity | null> {
+  // Bearer precedence: explicit body token (existing clients/tests) first,
+  // then the httpOnly console cookie. The cookie carries the same sas_ token
+  // issued at login, so session lookup and revocation are unchanged.
+  const token = typeof body.token === "string" && body.token
+    ? body.token
+    : req.cookies.get(SA_COOKIE)?.value ?? "";
   if (token.startsWith("sas_")) {
     // Session tokens are hashed at rest (Phase D) — the presented raw token is
     // digested for lookup; the DB never stores a usable bearer value.
@@ -357,11 +380,24 @@ export async function POST(req: NextRequest) {
         data: { token: sha256(token), accountId: account.id, email: account.email, role, expiresAt: new Date(Date.now() + SESSION_HOURS * 3600 * 1000) },
       });
       await logAudit({ actorType: "SYSTEM", actorId: account.email, action: "ADMIN_OTP_LOGIN", entity: "superAdminSession", detail: { role } });
-      return NextResponse.json({ ok: true, token, identity: { email: account.email, role }, ...(await overview()) });
+      const res = NextResponse.json({ ok: true, token, identity: { email: account.email, role }, ...(await overview()) });
+      res.cookies.set(SA_COOKIE, token, saCookieOptions());
+      return res;
+    }
+
+    // ── logout (pre-identity, cookie-driven) ──────────────────────
+    // Clears the console session bound to the httpOnly cookie. Works even
+    // when the session is already expired — deleting nothing is still ok.
+    if (body.action === "logout") {
+      const raw = req.cookies.get(SA_COOKIE)?.value ?? "";
+      if (raw) await db.superAdminSession.deleteMany({ where: { token: sha256(raw) } });
+      const res = NextResponse.json({ ok: true });
+      res.cookies.set(SA_COOKIE, "", { ...saCookieOptions(), maxAge: 0 });
+      return res;
     }
 
     // Every other action requires a live session token or the env backup code.
-    const identity = await resolveIdentity(body);
+    const identity = await resolveIdentity(req, body);
     if (!identity) {
       // Honest fail-closed copy when the owner has not set a backup code yet.
       const suppliedCode = typeof body.code === "string" ? body.code.trim() : "";
@@ -384,11 +420,20 @@ export async function POST(req: NextRequest) {
 
     switch (body.action) {
       case "auth": {
-        // Audit the backup-code entry point (OTP logins log ADMIN_OTP_LOGIN;
-        // token:null here marks the env-backup identity). Refresh calls with
-        // a live session token skip this.
+        // Backup-code entry point: mint a REAL session (OTP logins log
+        // ADMIN_OTP_LOGIN; token:null here marks the env-backup identity).
+        // The code is accepted exactly once — afterwards the session (token +
+        // httpOnly cookie) carries auth, so the code is never stored in
+        // client state and never re-sent with every API call.
         if (identity.token === null) {
           await logAudit({ actorType: "SYSTEM", actorId: identity.email, action: "ADMIN_BACKUP_LOGIN", entity: "superAdminSession", detail: { role: identity.role } });
+          const token = `sas_${randomBytes(24).toString("hex")}`;
+          await db.superAdminSession.create({
+            data: { token: sha256(token), email: identity.email, role: identity.role, expiresAt: new Date(Date.now() + SESSION_HOURS * 3600 * 1000) },
+          });
+          const res = NextResponse.json({ ok: true, token, identity: { email: identity.email, role: identity.role }, ...(await overview()) });
+          res.cookies.set(SA_COOKIE, token, saCookieOptions());
+          return res;
         }
         return NextResponse.json({ ok: true, identity: { email: identity.email, role: identity.role }, ...(await overview()) });
       }
