@@ -25,7 +25,10 @@ export function AuthPanel({
   footer?: React.ReactNode;
 }) {
   const { toast } = useToast();
-  const [mode, setMode] = useState<Mode>("signup");
+  // The index CTA is "Recruiter sign in" — arriving users overwhelmingly have
+  // an account and expect the sign-in form (the owner flagged landing on the
+  // signup screen). New recruiters toggle via the link below the form.
+  const [mode, setMode] = useState<Mode>("signin");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [pendingEmail, setPendingEmail] = useState("");
   const [sentTo, setSentTo] = useState("");

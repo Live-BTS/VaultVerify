@@ -10,6 +10,7 @@ import { validateRows, MAX_IMPORT_ROWS, type ImportRow, type ValidatedRow } from
 import { extractRowsFromWorkbook, WORKBOOK_HEADERS } from "@/lib/bts/workbookParse";
 import { specialtyLabel } from "@/lib/bts/checklistShared";
 import { professionLabel, disciplineLabel } from "@/lib/bts/catalog";
+import { clearLastRole } from "@/lib/lastRole";
 import { AgencyLogo, VaultMark, Spinner } from "./brand";
 import {
   ShieldCheck, Upload, FileDown, Database, Building2, Trash2, ChevronDown, RefreshCw, Hourglass,
@@ -167,6 +168,10 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   const [pending, setPending] = useState<{ rows: ImportRow[]; clean: ValidatedRow[]; errors: string[]; fileName: string; mode: "header" | "positional" } | null>(null);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // SESSION-RESTORE: the mount probe below re-opens the console from the vv_sa
+  // cookie. While it runs, show a neutral splash — never the OTP gate — so a
+  // refresh on /SuperAdmin reads as "loading", not "logged out".
+  const [booting, setBooting] = useState(true);
 
   const call = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: token || undefined, code: code || undefined, ...payload }) });
@@ -186,7 +191,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
   // session so the code itself is accepted once and never stored client-side.
 
   // Refresh-persistence probe: a live vv_sa cookie (OTP or backup login)
-  // re-opens the console without a second login. 401 → the gate stays up.
+  // re-opens the console without a second login. 401 → the gate goes up.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -198,7 +203,9 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
           if (typeof d.token === "string" && d.token) setToken(d.token);
           setData(d);
         }
-      } catch { /* gate stays up */ }
+      } catch { /* gate goes up */ } finally {
+        if (alive) setBooting(false);
+      }
     })();
     return () => { alive = false; };
   }, []);
@@ -257,6 +264,7 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
     // Best-effort server logout: kills the cookie-bound session row and
     // clears vv_sa so a reload after exit shows the gate, not the console.
     void fetch("/api/superadmin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) }).catch(() => undefined);
+    clearLastRole(); // signed out — the next homepage visit paints the landing instantly, no probe
     onExit();
   }, [onExit]);
 
@@ -709,6 +717,16 @@ export function SuperAdmin({ onExit }: { onExit: () => void }) {
         {row.failedLogins} fails · {row.liveSessions} live
       </span>
     );
+
+  // ── Boot splash: the cookie probe decides gate vs console — never flash
+  // the OTP gate on a refresh that is about to restore the console. ──
+  if (booting) {
+    return (
+      <div className="vv-page flex min-h-screen items-center justify-center">
+        <Spinner label="Checking your session…" />
+      </div>
+    );
+  }
 
   // ── Gate ──
   if (!data) {

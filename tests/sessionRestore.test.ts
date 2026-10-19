@@ -168,8 +168,9 @@ describe("session restore — /api/auth me with two live identities", () => {
 });
 
 // ── Client-half source gates ──────────────────────────────────────
-// The dashboard must not flash the login gate while its probe runs, must send
-// the role hint, and both portals must record the last-used role.
+// The dashboards must not flash the login gate while their probes run, must
+// send the role hint, signout must end the "returning user" treatment, and
+// the homepage must not paint the landing between "logged out" and the portal.
 import { readFileSync } from "node:fs";
 
 describe("session restore — client halves", () => {
@@ -180,7 +181,7 @@ describe("session restore — client halves", () => {
     expect(src).toContain("useState(true)"); // booting gate exists…
     expect(src).toMatch(/booting/);
     expect(src).toMatch(/if \(booting\)/);
-    expect(src).toMatch(/Opening your console/);
+    expect(src).toContain("Checking your session");
   });
 
   it("RecruiterDashboard probe sends the RECRUITER role hint", () => {
@@ -188,17 +189,47 @@ describe("session restore — client halves", () => {
     expect(src).toContain('JSON.stringify({ action: "me", role: "RECRUITER" })');
   });
 
+  it("SuperAdmin shows the boot splash before its gate (no OTP-gate flash on refresh)", () => {
+    const src = read("src/components/bts/SuperAdmin.tsx");
+    expect(src).toMatch(/const \[booting, setBooting\] = useState\(true\)/);
+    expect(src).toMatch(/if \(booting\)/);
+    expect(src).toContain("Checking your session");
+    // splash must render BEFORE the gate block
+    expect(src.indexOf("if (booting)")).toBeLessThan(src.indexOf("if (!data)"));
+  });
+
+  it("homepage boots marker-gated: no landing flash for returning users, instant landing for first visits", () => {
+    const home = read("src/app/page.tsx");
+    expect(home).toContain("readLastRole()");
+    // the probe only runs when the marker exists…
+    expect(home).toMatch(/if \(!last\) \{\s*\n\s*if \(!cancelled\) setBooted\(true\);/);
+    // …and the splash (not the landing) covers the probe for returning users
+    expect(home).toMatch(/clearLastRole\(\); \/\/ session gone/);
+    // verify deep link still paints immediately (no hang behind the splash)
+    expect(home).toMatch(/setBooted\(true\); \/\/ the interstitial renders below/);
+  });
+
+  it("every signout path ends the returning-user treatment (clearLastRole)", () => {
+    expect(read("src/components/bts/RecruiterDashboard.tsx")).toMatch(/clearLastRole\(\).*signed out|signed out[\s\S]{0,40}clearLastRole\(\)/);
+    expect(read("src/components/bts/RecruiterDashboard.tsx")).toContain("clearLastRole();");
+    expect(read("src/components/bts/checklist/ChecklistPortal.tsx")).toContain("clearLastRole();");
+    expect(read("src/components/bts/SuperAdmin.tsx")).toContain("clearLastRole();");
+  });
+
   it("both portals + homepage participate in the last-role marker", () => {
     expect(read("src/components/bts/RecruiterDashboard.tsx")).toContain('markLastRole("RECRUITER")');
     expect(read("src/components/bts/checklist/ChecklistPortal.tsx")).toContain('markLastRole("CANDIDATE")');
-    const home = read("src/app/page.tsx");
-    expect(home).toContain("readLastRole()");
-    expect(home).toContain("markLastRole(d.role)");
+    expect(read("src/app/page.tsx")).toContain("markLastRole(d.role)");
+  });
+
+  it("the recruiter auth gate opens on the SIGN-IN form, not signup", () => {
+    const src = read("src/components/bts/AuthPanel.tsx");
+    expect(src).toMatch(/useState<Mode>\("signin"\)/);
   });
 
   it("lastRole helper is storage-safe (private mode) by construction", () => {
     const src = read("src/lib/lastRole.ts");
     expect(src).toContain("try {");
-    expect(src).toContain("catch");
+    expect(src).toContain("clearLastRole");
   });
 });

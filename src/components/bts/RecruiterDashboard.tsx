@@ -10,7 +10,7 @@ import { AgencyLogo, StatusBadge, SkillBadge, FlagChip, RatingPips, Spinner } fr
 import { specialtyLabel } from "@/lib/bts/constants";
 import { QUESTIONS } from "@/lib/bts/questions";
 import { RecruiterChecklists } from "./checklist/RecruiterChecklists";
-import { markLastRole } from "@/lib/lastRole";
+import { markLastRole, clearLastRole } from "@/lib/lastRole";
 import { AuthPanel } from "./AuthPanel";
 import { RecruiterOnboarding } from "./RecruiterOnboarding";
 import { PortalShell } from "./shell/PortalShell";
@@ -191,14 +191,18 @@ export function RecruiterDashboard({ onSignOut, initialSection = "dashboard" }: 
 
   const signOut = async () => {
     try { await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "signout" }) }); } catch { /* session may already be gone */ }
+    clearLastRole(); // signed out — the next homepage visit paints the landing instantly, no probe
     setMe(null);
     setData(null);
     onSignOut();
   };
 
   if (booting) {
-    // Probe in flight — never flash the login gate on a plain refresh.
-    return <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]"><Spinner label="Opening your console…" /></div>;
+    // Probe in flight — never flash the login gate on a plain refresh, and
+    // never flash it as a "sign up page" when a live session is about to
+    // auto-restore. Label is session-neutral: signed-in users go straight
+    // through; signed-out users land on the sign-in form a beat later.
+    return <div className="flex min-h-screen items-center justify-center bg-[#f4f9f5]"><Spinner label="Checking your session…" /></div>;
   }
 
   if (data) {

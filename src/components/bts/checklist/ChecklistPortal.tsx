@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { SHARE_PRESETS, shareAccessLabel } from "@/lib/bts/constants";
-import { markLastRole } from "@/lib/lastRole";
+import { markLastRole, clearLastRole } from "@/lib/lastRole";
 import { RATING_META, specialtyLabel, summarizeAnswers, type SkillAnswer } from "@/lib/bts/checklistShared";
 import { VaultMark, Spinner } from "../brand";
 import { ReferencesPanel } from "./ReferencesPanel";
@@ -307,6 +307,7 @@ export function ChecklistPortal({ inviteToken, onExit, onLaunchReferences }: { i
 
   const signOut = async () => {
     await fetch("/api/checklist/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) });
+    clearLastRole(); // signed out — the next homepage visit paints the landing instantly, no probe
     setMe({ account: null });
     setCheckEmail(null);
   };

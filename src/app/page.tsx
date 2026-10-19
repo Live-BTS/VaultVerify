@@ -16,7 +16,7 @@ import { LandingView, type AgencyInfo, type Role } from "@/components/bts/Landin
 // client bundle on first load. Each boundary shows the branded splash while
 // its chunk streams in.
 import type { CreatedCandidate } from "@/components/bts/CandidateWizard";
-import { readLastRole, markLastRole } from "@/lib/lastRole";
+import { readLastRole, markLastRole, clearLastRole } from "@/lib/lastRole";
 import { Spinner, SplashLoader, VaultMark } from "@/components/bts/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -164,7 +164,6 @@ export default function Page() {
       if (view === "recruiter") setView("recruiter");
       if (s) setView("share");
       if (rs) setView("refshare");
-      setBooted(true);
       if ((r || s || rs) && window.history?.replaceState) {
         window.history.replaceState({}, "", "/");
       }
@@ -177,6 +176,7 @@ export default function Page() {
       let session: Promise<void> = Promise.resolve();
       if (verifyToken) {
         // ── Email-verification deep link (/?verify=<token>) ──
+        setBooted(true); // the interstitial renders below — never sit behind the boot splash
         setVerify({ status: "pending" });
         session = fetch("/api/auth", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -199,16 +199,32 @@ export default function Page() {
           .catch(() => { if (!cancelled) setVerify({ status: "error", message: "Could not reach the server — try the link again." }); });
         if (window.history?.replaceState) window.history.replaceState({}, "", "/");
       } else if (!r && !s && !rs && !invite && !view) {
-        // ── Signed-in users land directly in their portal (background swap) ──
-        // SESSION-RESTORE: bias the probe to the portal this browser last
-        // signed into. With both cookies live, the server's default order
-        // (candidate-first) used to yank recruiters into the candidate
-        // portal on every homepage refresh — reading as "it logged me out".
+        // ── Signed-in users land directly in their portal ──
+        // SESSION-RESTORE (owner bug: "refresh shows the index page, then
+        // logs me in again"): for a RETURNING user (vv_last_role marker
+        // present) the landing must NOT paint while the probe runs — a
+        // branded splash covers the round trip and the portal swap is the
+        // first thing they see. First-time visitors (no marker) skip the
+        // probe entirely and get the instant landing — nothing to restore,
+        // and signing out clears the marker so post-logout refreshes are
+        // instant too.
         const last = readLastRole();
-        session = fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me", ...(last ? { role: last } : {}) }) })
-          .then((res) => res.json())
-          .then((d) => { if (!cancelled && d.ok && d.account) { markLastRole(d.role); setView(d.role === "RECRUITER" ? "recruiter" : "checklist"); } })
-          .catch(() => { /* landing stays */ });
+        if (!last) {
+          if (!cancelled) setBooted(true);
+        } else {
+          session = fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "me", role: last }) })
+            .then((res) => res.json())
+            .then((d) => {
+              if (cancelled) return;
+              if (d.ok && d.account) { markLastRole(d.role); setView(d.role === "RECRUITER" ? "recruiter" : "checklist"); }
+              else clearLastRole(); // session gone — stop treating this browser as returning
+            })
+            .catch(() => { /* landing stays */ })
+            .finally(() => { if (!cancelled) setBooted(true); });
+        }
+      } else {
+        // Deep links / shared views never wait on the session probe.
+        if (!cancelled) setBooted(true);
       }
       void Promise.allSettled([brand, session]);
     };

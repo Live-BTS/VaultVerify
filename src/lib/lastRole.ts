@@ -28,3 +28,14 @@ export function readLastRole(): LastRole | null {
     return null;
   }
 }
+
+// Signing out must end the "returning user" treatment: the homepage boot
+// probe only runs when this marker exists, so a signed-out browser paints
+// the landing instantly instead of probing for a session that is gone.
+export function clearLastRole(): void {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* storage unavailable — nothing to clear */
+  }
+}
